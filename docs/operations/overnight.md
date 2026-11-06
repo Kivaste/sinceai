@@ -1,6 +1,6 @@
 # Overnight run: keeping the orchestrator from stalling
 
-An unattended OpenCode orchestrator (`claude-agent/opus`) runs `/implement-spec`. It launches background implementer subagents (one worktree and one `ticket/*` branch per ticket), merges them into an integration branch, and repeats while there are ready tickets. A scheduled **watchdog** checks liveness every 10 minutes and wakes up, or replaces, the orchestrator when it stalls.
+An unattended OpenCode orchestrator (`claude-agent/opus`) runs `/implement-spec`. It launches background implementer subagents (one worktree and one `ticket/*` branch per ticket), merges them into an integration branch, and repeats while there are ready tickets. A scheduled **watchdog** checks liveness every 3 minutes and wakes up, or replaces, the orchestrator when it stalls. The thresholds below are wall-clock minutes, independent of that cadence, and the 20-minute cooldown caps interventions at one per 20 minutes.
 
 Files live in `scripts/overnight/`. State is in `.scratch/local-overnight/`, which is gitignored.
 
@@ -8,9 +8,10 @@ Files live in `scripts/overnight/`. State is in `.scratch/local-overnight/`, whi
 |---|---|
 | `heartbeat.ps1` | The orchestrator runs it after every event. It writes `heartbeat.json`: timestamp, phase, running tickets, spec, ticket list, integration branch, last merged commit and orchestrator session id. The write is atomic. |
 | `watchdog.ps1` | The liveness check and its recovery actions. `-DryRun` reports what it would do without doing it. Every check is logged to `watchdog.log`. |
-| `resume-prompt.md` | The prompt given to a fresh orchestrator. It covers claiming the session, reconciling worktrees and branches, abandoning stale branches after 45 minutes, max concurrency (10), the D13 roster and fallbacks, heartbeats, the decision log and parking tickets. |
+| `resume-prompt.md` | The complete orchestrator brief, used for the **initial** start and for every resume. It covers claiming the session, reading the steering files and `.scratch/local-spec/issue-map.json`, following the implement-spec skill (`integration/pets-release`, one `ticket/NN-slug` worktree per ticket, `tdd`, the merger respecting Merge after, the final `code-review`), label routing (`model:opus` / `model:grok`) with fallbacks, two cross-family reviews, done-report evidence, at most 16 implementers with `pytest -n 8` (dropping to `-n 4` when CPU stays above 90% for 10 minutes), the D16 checkpoints (★ #22 by Sat 09:00 via 04→16/17→21→22, the 08:30 status, the 12:00 and 14:00 go/no-go), heartbeats, parking and push rules. |
+| `start-orchestrator.ps1` | Creates a fresh OpenCode session through the API (`claude-agent/opus`, directory set to the repo root), queues `resume-prompt.md` as its first prompt, and records the id in `heartbeat.json` and `watchdog-state.json`. It refuses if a tracked orchestrator is running, was updated within 25 minutes, or holds a live lock; `-Force` interrupts and replaces it. `-DryRun` runs only read-only probes. |
 | `install-watchdog.ps1` / `uninstall-watchdog.ps1` | Register or unregister the scheduled task `sinceai-overnight-watchdog`. |
-| `test-watchdog.ps1` | A self-test with no Pester: 13 dry-run scenarios in `%TEMP%`. |
+| `test-watchdog.ps1` | A self-test with no Pester: 16 cases in `%TEMP%`. They include the 3-minute cadence cooldown and the parameter defaults. |
 
 ## OpenCode facts (verified on v2.2.5, 2026-11-07)
 
@@ -55,13 +56,18 @@ Thresholds are parameters: `-StaleMinutes 25 -IdleMinutes 10 -HungMinutes 90 -Co
 ## Install, uninstall and test
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/overnight/test-watchdog.ps1      # expect "13 cases, 0 failed"
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/overnight/test-watchdog.ps1      # expect "16 cases, 0 failed"
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/overnight/start-orchestrator.ps1 -DryRun
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/overnight/start-orchestrator.ps1 # prints the session id
+opencode --session <id>                                                                       # attach the TUI (run in the repo root)
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/overnight/watchdog.ps1 -DryRun   # real signals, no action
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/overnight/install-watchdog.ps1   # every 10 min for 16 h, hidden
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/overnight/install-watchdog.ps1   # every 3 min for 16 h, hidden
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/overnight/uninstall-watchdog.ps1
 ```
 
-The task runs as the current user, **only while that user is logged on**, so it stores no password. A locked screen is fine. Instances do not overlap, and each run has a 9-minute limit.
+Start the orchestrator first, then install the watchdog. The session runs on the background service, so closing the TUI does not stop it.
+
+The task runs as the current user, **only while that user is logged on**, so it stores no password. A locked screen is fine. Instances do not overlap: the task uses IgnoreNew and the watchdog holds a mutex. Each run has a 2-minute limit at the 3-minute cadence (cadence minus 1, at least 2 and at most 9).
 
 **Keep the machine awake.** The scripts never change power settings. Do this yourself, plugged in to AC:
 

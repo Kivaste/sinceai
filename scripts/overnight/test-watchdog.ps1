@@ -111,7 +111,27 @@ if (-not $hbOk) { $fail++ }
 Write-Output ('[{0}] heartbeat.ps1 merge/keep-session semantics' -f $(if ($hbOk) { 'PASS' } else { 'FAIL' }))
 Run-Case 'heartbeat.ps1 output is read as fresh' $d (Set-Fx $d @{ tickets = $open3; commit_min_ago = 40; opencode = @{ reachable = $true; exists = $true; active = $true; child_active = $false; updated_age = 40 } }) 'alive'
 
+# 13-14. 3-minute cadence: still stalled 18m after a nudge -> cooldown (no spam); 21m after -> next nudge
+$d = New-Case 'cadence18'; Set-Hb $d 45
+@{ step = 1; last_action_utc = (Get-Date).ToUniversalTime().AddMinutes(-18).ToString('o') } | ConvertTo-Json | Set-Content -Encoding ascii (Join-Path $d 'watchdog-state.json')
+Run-Case '3-min cadence: stalled, nudged 18m ago' $d (Set-Fx $d @{ tickets = $open3; commit_min_ago = 45; opencode = (& $ocIdle 45) }) 'cooldown'
+$d = New-Case 'cadence21'; Set-Hb $d 45
+@{ step = 1; last_action_utc = (Get-Date).ToUniversalTime().AddMinutes(-21).ToString('o') } | ConvertTo-Json | Set-Content -Encoding ascii (Join-Path $d 'watchdog-state.json')
+Run-Case '3-min cadence: stalled, nudged 21m ago' $d (Set-Fx $d @{ tickets = $open3; commit_min_ago = 45; opencode = (& $ocIdle 45) }) 'nudge'
+
+# 15. Parameter defaults (parsed, not executed): install every 3 min; watchdog keeps 25/90/20; launcher model.
+function Get-Default([string]$file, [string]$name) {
+  $ast = [System.Management.Automation.Language.Parser]::ParseFile($file, [ref]$null, [ref]$null)
+  $p = $ast.ParamBlock.Parameters | Where-Object { $_.Name.VariablePath.UserPath -eq $name }
+  if ($p -and $p.DefaultValue) { return $p.DefaultValue.SafeGetValue() } return $null
+}
+$inst = Join-Path $PSScriptRoot 'install-watchdog.ps1'; $start = Join-Path $PSScriptRoot 'start-orchestrator.ps1'
+$defOk = (Get-Default $inst 'EveryMinutes') -eq 3 -and (Get-Default $wd 'StaleMinutes') -eq 25 -and (Get-Default $wd 'HungMinutes') -eq 90 -and `
+  (Get-Default $wd 'CooldownMinutes') -ge 20 -and (Get-Default $start 'Model') -eq 'claude-agent/opus'
+if (-not $defOk) { $fail++ }
+Write-Output ('[{0}] defaults: install 3 min, stale 25, hung 90, cooldown >= 20, launcher claude-agent/opus' -f $(if ($defOk) { 'PASS' } else { 'FAIL' }))
+
 Remove-Item -Recurse -Force $root -ErrorAction SilentlyContinue
 Write-Output ''
-Write-Output ('{0} cases, {1} failed' -f ($results.Count + 1), $fail)
+Write-Output ('{0} cases, {1} failed' -f ($results.Count + 2), $fail)
 if ($fail -gt 0) { exit 1 } else { exit 0 }

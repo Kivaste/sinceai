@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-  Register the overnight watchdog as a Scheduled Task for the current user: every 10 minutes,
+  Register the overnight watchdog as a Scheduled Task for the current user: every 3 minutes,
   only while the user is logged on (no stored password, no credential prompt), hidden window.
 .EXAMPLE
   powershell -NoProfile -ExecutionPolicy Bypass -File scripts/overnight/install-watchdog.ps1
@@ -8,10 +8,13 @@
 [CmdletBinding()]
 param(
   [string]$TaskName = 'sinceai-overnight-watchdog',
-  [int]$EveryMinutes = 10,
+  [int]$EveryMinutes = 3,
   [int]$Hours = 16
 )
 $ErrorActionPreference = 'Stop'
+if ($EveryMinutes -lt 1) { throw 'EveryMinutes must be >= 1' }
+# A run must finish before the next one is due; IgnoreNew + the watchdog mutex prevent overlap anyway.
+$limitMinutes = [Math]::Max(2, [Math]::Min(9, $EveryMinutes - 1))
 $watchdog = (Resolve-Path (Join-Path $PSScriptRoot 'watchdog.ps1')).Path
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $ps = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
@@ -22,7 +25,7 @@ $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) `
   -RepetitionInterval (New-TimeSpan -Minutes $EveryMinutes) -RepetitionDuration (New-TimeSpan -Hours $Hours)
 $principal = New-ScheduledTaskPrincipal -UserId ([System.Security.Principal.WindowsIdentity]::GetCurrent().Name) -LogonType Interactive -RunLevel Limited
 $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable `
-  -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 9)
+  -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes $limitMinutes)
 Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings `
   -Description 'sinceai: wake/resume the OpenCode /implement-spec orchestrator if it stalls' -Force | Out-Null
 

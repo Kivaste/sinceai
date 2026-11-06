@@ -1,7 +1,9 @@
 <#
 .SYNOPSIS
-  Overnight watchdog for the OpenCode /implement-spec orchestrator. Run every 10 minutes
+  Overnight watchdog for the OpenCode /implement-spec orchestrator. Run every 3 minutes
   by the scheduled task (install-watchdog.ps1). Safe to run by hand and concurrently.
+  Thresholds are wall-clock and independent of the cadence; CooldownMinutes (20) keeps a
+  3-minute cadence from sending more than one intervention per 20 minutes.
 
 .DESCRIPTION
   Liveness signals:
