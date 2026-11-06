@@ -27,6 +27,12 @@ The planning map lives on GitHub Issues (D17). The append-only execution log is 
 | D15 | **Row maps** | `pets_submission/` (incl. row maps) lives only in a separate private repo `Suhtetark-Kool/trusted-since-ai` with organisers invited; the public repo never contains row maps. Confirm delivery method with TrustED on Discord Sat morning. See ADR 0003. |
 | D16 | **Checkpoints (EET)** | Spec+tickets Sat 01:30; first e2e HEALTH-S1 release + manifest + dashboard Sat 09:00 (story kit for business teammate: dashboard HTML, pitch-beat script, before/after numbers CSV); search/NER go-no-go + show TrustED Sat 12:00; LLM go/no-go Sat 14:00; `pets_submission` Sat 16:00; feature freeze Sat 20:00; submit Sun 08:00. Replaces P4. |
 | D17 | **Tracker** | GitHub Issues on `Kivaste/sinceai`, default triage labels; [AGENTS.md](../AGENTS.md) is the steering file. |
+| D18 | **Two-tier verify** | `verify <release>` (recipient): re-runs release-derivable checks, reports "VERIFIED (limited)", never full success. `verify --full --kit` (controller, key in env): re-runs every check; unavailable = fail. Evidence scope `release` or `producer`. From spec review (Sonnet, GPT-6.1 Sol). |
+| D19 | **Per-label export assertions** | One assertion per validated identifier label, each with its own check and denominator. PERSON/ADDRESS/LOCATION/ORG/DATE/AGE in text are residual risks with measured recall. No universal "no identifiers" claim. |
+| D20 | **Manifest integrity** | Per-file SHA-256, bound input digests, revision and check versions; HMAC signature with the key. Recipient verify is tamper-evident only; `--full` checks the signature. Limitation stated as a residual risk. |
+| D21 | **CS-S1 turn_id** | Kept as-is only if a named check confirms it is a synthetic record key with no person/conversation info (official CS-U5 runs unmodified); otherwise row-map lineage adapter, both scores reported. |
+| D22 | **HEALTH-S1 age** | Release `age_band`; our per-person k over every released QI is authoritative; the scorecard's blind spot for renamed columns is disclosed. |
+| D23 | **Scope trims** | Hand-picked HEALTH-S1 plan is the walking skeleton; search replaces it. LLM front end only after both releases pass gate + verify. Zero-shot redaction: clinical_notes only. Search deterministic and bounded (≤~100 candidates/scenario, cached evaluations; scikit-learn allowed for evaluation). Both attacker personas stay; recipient keys stay (first cut). |
 
 ### Options considered for D3
 
