@@ -24,6 +24,14 @@ _Avoid_: requirements, schema, field list
 The ordered levels of detail a field can be released at, from exact down to withheld (e.g. timestamp → hour → day → week → withheld).
 _Avoid_: hierarchy, granularity levels
 
+**Ladder floor**:
+The most detailed level of a field's detail ladder that a sharing scenario allows to be released at all; the search may only go coarser. A direct identifier's floor is a keyed pseudonym or withheld, never raw.
+_Avoid_: minimum level, default level, starting point
+
+**Privacy target**:
+A measurable privacy condition a sharing scenario sets for its releases, such as k ≥ 5 per person over the quasi-identifiers, a text recall target, or no health remarks in text.
+_Avoid_: privacy requirement, privacy goal, constraint
+
 ## Source data
 
 **Column role**:
@@ -43,6 +51,10 @@ _Avoid_: entity, match, hit
 **Release**:
 What the tool hands to the recipient for one sharing scenario: the protected tables or views plus their privacy manifest.
 _Avoid_: output, export, anonymised dataset
+
+**Protected table**:
+One table inside a release, as the challenge kit names it: a source table after withholding, transformation and redaction.
+_Avoid_: anonymised table, output table, sanitised table
 
 **Candidate release**:
 A release that has been built but has not yet passed the gate; it is never visible to the recipient.
@@ -78,6 +90,14 @@ _Avoid_: schema, allowlist, policy
 The independent check a candidate release must pass before it becomes a release; any high-severity violation refuses the whole release.
 _Avoid_: validator, filter, linter
 
+**Gate check**:
+One named, versioned check the gate runs, which reports what it scanned and how many hits it found; verification re-runs the same gate checks.
+_Avoid_: rule, test, scan
+
+**Verification scope**:
+Whether a gate check can be re-run from the release alone (release scope) or also needs the source data or the key (producer scope). A recipient can re-prove only release-scope checks; producer-scope ones are attestations until the controller or an auditor re-runs them.
+_Avoid_: check level, trust level, side
+
 **Refusal**:
 The outcome when a candidate release fails the gate: nothing is published, and a refusal report gives counts and locations but no values.
 _Avoid_: error, failure, rejection
@@ -91,8 +111,8 @@ The recipient-readable reason, inside the privacy manifest, why a field is in a 
 _Avoid_: rationale, explanation
 
 **Export assertion**:
-A privacy-manifest statement that a category of content (direct identifiers, secrets, key material, row maps…) is absent from a release; it can only state absence, and only after a named check has found zero occurrences in the release.
-_Avoid_: flag, claim, guarantee
+A privacy-manifest statement that one narrowly named kind of content (national IDs, payment cards, IBANs, secrets, key material, row maps…) is absent from a release; it can only state absence, only after its own named gate check has found zero occurrences, and never covers "identifiers" as a whole.
+_Avoid_: flag, claim, guarantee, "no identifiers"
 
 **Residual risk**:
 A risk that remains in a published release and cannot be proven absent, stated with its measured rate.
