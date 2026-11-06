@@ -14,7 +14,12 @@ Team project for the **TrustED PETs Transformer** challenge at Since AI Hackatho
 | [docs/tool-spec.md](docs/tool-spec.md) | The tool: pipeline, components, inputs and outputs |
 | [docs/evaluation-strategy.md](docs/evaluation-strategy.md) | How we measure ourselves without overfitting: scoreboard, own attacker, hidden checks |
 | [docs/build-plan.md](docs/build-plan.md) | Sequencing, checkpoints, workstreams, risks |
-| [docs/decisions.md](docs/decisions.md) | What's decided, what's proposed, what's still open |
+| [docs/decisions.md](docs/decisions.md) | Current snapshot of what's decided and what's still open |
+| [HACKATHON_PLAN.md](HACKATHON_PLAN.md) | Engine and proof: scenario compiler (S1), free-text redactor (S2), timeline |
+| [PRIVACY_PATTERNS_PLAN.md](PRIVACY_PATTERNS_PLAN.md) | Engine and patterns: keyed pseudonyms, fail-closed gate, privacy manifest, offline |
+| [docs/adr/](docs/adr/) | Architecture decision records |
+| [docs/decision-log.md](docs/decision-log.md) | Append-only execution log kept by the orchestrator |
+| [AGENTS.md](AGENTS.md) | Steering file for agents: hard rules, tracker, domain docs |
 | [docs/setup.md](docs/setup.md) | Local environment, `pets-eval` toolkit, repo hygiene |
 | [GLOSSARY.md](GLOSSARY.md) | Shared vocabulary. Use these terms in code, docs and the demo. |
 

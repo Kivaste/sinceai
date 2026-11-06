@@ -1,47 +1,67 @@
 # Decisions and open questions
 
-Updated as decisions are made. The planning map (wayfinder) will live on the issue tracker once Q3 is answered; this file is the snapshot.
+Current snapshot of what's decided and what's still open. Updated as decisions are made.
+
+The planning map lives on GitHub Issues (D17). The append-only execution log is [decision-log.md](decision-log.md). Hard-to-reverse trade-offs also have an ADR in [adr/](adr/).
 
 ## Decided
 
 | # | Decision | Detail |
 |---|---|---|
-| D1 | **GitHub repo** | Private, `Kivaste/sinceai`, `origin` set, branch `main`. Nothing committed yet. |
+| D1 | **GitHub repo** | Private repo `Kivaste/sinceai`, branch `main`. History rewritten Fri 23:53 to remove the challenge kit. Goes public at submission. |
 | D2 | **Purpose-first angle** | Start from the data request (business need), release only what's needed, at the coarsest detail that serves it. See [concept.md](concept.md). |
-| D3 | **Tool architecture: option D (hybrid)** | LLM turns the request into a needs spec + purpose checks → measured search tightens each field to the minimum → verification. Build the search on the official tasks first (C), then put the LLM step in front (B). See [tool-spec.md](tool-spec.md). |
+| D3 | **Tool architecture: option D (hybrid)** | LLM turns the request into a needs spec + purpose checks → measured search tightens each field to the minimum → verification. Build the search on the official tasks first (C), then put the LLM step in front (B). The LLM step is now a later stretch, not v1; see D9. See [tool-spec.md](tool-spec.md). |
 | D4 | **Scope** | One tool; one lead dataset and scenario demonstrated in depth; nothing mandates using all datasets. |
 | D5 | **Vocabulary** | [GLOSSARY.md](../GLOSSARY.md) is the source of the project's terms. |
+| P1 | **Skeleton-first** | Accepted. Build order is skeleton-first; the loop lives inside the product, not as a dev-time process. See [build-plan.md](build-plan.md). |
+| P2 | **Train / validation / test** | Accepted. Checks split into training (`pets-eval`), validation (our attacker), test (hidden organiser attackers). See [evaluation-strategy.md](evaluation-strategy.md). |
+| D6 | **Team** | 3 people. Kivaste = main dev, drives orchestrator agents. Business teammate = video, deck, visuals, tagline, description. SuhtetarkKool (non-developer) = redaction spot-check (~200 turns), lexicon curation (fi/sv/en health terms + names), fresh-machine README test, demo rehearsal + jury Q&A. |
+| D7 | **Plan merge** | [HACKATHON_PLAN.md](../HACKATHON_PLAN.md) + [PRIVACY_PATTERNS_PLAN.md](../PRIVACY_PATTERNS_PLAN.md) are the engine and proof (S1 compiler, S2 free-text redactor, P1 keyed pseudonyms, P2 fail-closed gate, P3 privacy manifest, P4 offline). Purpose-first ([concept.md](concept.md)) is the framing: the scenario's required tasks decide what is released and at which detail, everything else withheld, every field justified. See ADR 0001. |
+| D8 | **Scenarios** | HEALTH-S1 lead (withhold `clinical_notes`; 20/29 `ed_visits` columns not needed). CS-S1 second (free-text redactor; withhold `agent_note` + `customers`; keep `split`). Live detection on `unseen` as the opener. |
+| D9 | **LLM** | None in v1. Later stretch (go/no-go Sat 14:00): request → needs spec, seeing only request text + data dictionary, never data values. Provider is user-configurable via API key / endpoint; suggested default local/self-hosted (OpenAI-compatible endpoint), Mistral as second suggestion. See ADR 0002. |
+| D10 | **Detail choice** | Small measured search over detail ladders (~3 levels/field, joint QI moves, local suppression last), inner loop on our own fast k/utility, `pets-eval` confirms; fallback to hand-picked levels if no valid release by Sat 12:00. |
+| D11 | **Tech stack** | Python 3.14 existing `.venv`, pandas, stdlib `hmac`/`hashlib`, pytest + pytest-xdist, argparse CLI `pets-release run\|verify`, jinja2 static HTML dashboard rendered from the manifest, ruff. No ML deps in v1; stretch NER/LLM as optional extras. |
+| D12 | **Process** | Matt Pocock skills. `/grill-with-docs` (done) → `/to-spec` → `/to-tickets` (GitHub Issues with blocking edges) → `/implement-spec` (parallel implementers in worktrees, `/tdd`, merger, `/code-review`) → `/retro`. Plus two rules borrowed from pstack: each ticket shows real-artefact evidence (an actual release folder / `pets-eval` run), and the orchestrator keeps [decision-log.md](decision-log.md). |
+| D13 | **Model roster** | Orchestrator `claude-agent/opus`; core/hard tickets `claude-agent/opus`; routine tickets `xai/grok-4.7` (high); grunt `xai/grok-4.7` (medium); reviewers `claude-agent/sonnet` + `openai/gpt-6.1-sol` + `opencode-go/deepseek-v4.1-flash`, independent, reconciled by the orchestrator. |
+| D14 | **Agent autonomy** | Fully automatic (no permission prompts). Project config: [opencode.json](../opencode.json). |
+| D15 | **Row maps** | `pets_submission/` (incl. row maps) lives only in a separate private repo `Suhtetark-Kool/trusted-since-ai` with organisers invited; the public repo never contains row maps. Confirm delivery method with TrustED on Discord Sat morning. See ADR 0003. |
+| D16 | **Checkpoints (EET)** | Spec+tickets Sat 01:30; first e2e HEALTH-S1 release + manifest + dashboard Sat 09:00 (story kit for business teammate: dashboard HTML, pitch-beat script, before/after numbers CSV); search/NER go-no-go + show TrustED Sat 12:00; LLM go/no-go Sat 14:00; `pets_submission` Sat 16:00; feature freeze Sat 20:00; submit Sun 08:00. Replaces P4. |
+| D17 | **Tracker** | GitHub Issues on `Kivaste/sinceai`, default triage labels; [AGENTS.md](../AGENTS.md) is the steering file. |
 
 ### Options considered for D3
 
 | Option | Verdict |
 |---|---|
 | A. Fixed lookup of needs per scenario | Rejected: a config, not a tool |
-| B. LLM reads the request | Kept as the front end; can't be checked on its own |
-| C. Measured search over detail ladders | Kept as the engine and the fallback demo |
-| **D. B → C hybrid** | **Chosen** |
+| B. LLM reads the request | Kept as the front end of the hybrid; deferred out of v1 (D9) |
+| C. Measured search over detail ladders | Kept as the engine and the fallback demo; this is v1 |
+| **D. B → C hybrid** | **Chosen** as the end shape; v1 ships C, B is the Sat 14:00 stretch |
+
+P4 (checkpoints: skeleton Fri 23:00, show TrustED Sat 12:00, freeze Sat 20:00, submit Sun 08:00) was accepted, then replaced by D16. Do not use the Fri 23:00 skeleton checkpoint.
 
 ## Proposed (awaiting confirmation)
 
 | # | Proposal | Where |
 |---|---|---|
-| P1 | Skeleton-first build order; the loop lives inside the product, not as a dev-time process | [build-plan.md](build-plan.md) |
-| P2 | Checks split into training (`pets-eval`), validation (our attacker), test (hidden organiser attackers) | [evaluation-strategy.md](evaluation-strategy.md) |
 | P3 | Scoreboard instead of "judge tooling"; mock judge as a 1-hour task | [evaluation-strategy.md](evaluation-strategy.md) |
-| P4 | Checkpoints: skeleton Fri 23:00, show TrustED Sat 12:00, freeze Sat 20:00, submit Sun 08:00 | [build-plan.md](build-plan.md) |
+
+## Answered
+
+| # | Question | Answer |
+|---|---|---|
+| Q1 | **Destination of the planning map**: does it end at a build spec, with building outside the map? | Yes. The map ends at the spec and the tickets; building is `/implement-spec`, outside the map (D12). |
+| Q3 | **Where the planning map lives**: GitHub Issues on `Kivaste/sinceai`? | Yes. Default triage labels; [AGENTS.md](../AGENTS.md) steers agents (D17). |
+| Q4 | **Team**: how many people, which skills, everyone using an AI coding agent? | 3 people, roles in D6. Not everyone codes: CLI + static HTML dashboard (D11), not a web UI. |
+| Q5 | **Lead dataset and scenario** | HEALTH-S1 lead, CS-S1 second, live detection on `unseen` as the opener (D8). |
+| Q6 | **LLM**: which model and hosting; cost; offline fallback | None in v1. Later stretch only; user-configurable provider; suggested default local/self-hosted, Mistral second. Never sees data values (D9, ADR 0002). |
+| Q9 | **Report/UI format** | argparse CLI `pets-release run\|verify` plus a jinja2 static HTML dashboard rendered from the manifest (D11). Business teammate owns video, deck and visuals (D6). |
+| Q10 | **`unseen` dataset**: do we submit labels for the organiser check? | Yes. Live detection on `unseen` is the demo opener (D8), not deferred until after the skeleton. |
 
 ## Open questions
 
 | # | Question | Recommendation |
 |---|---|---|
-| Q1 | **Destination of the planning map**: does it end at a build spec, with building outside the map? | Yes |
 | Q2 | **Attacker time budget**: about 25% of build time, one person, 2–3 attacker types fitted to the lead dataset? | Yes |
-| Q3 | **Where the planning map lives**: GitHub Issues on `Kivaste/sinceai`? | Yes |
-| Q4 | **Team**: how many people, which skills, everyone using an AI coding agent? | Needed to assign workstreams and decide CLI + HTML vs web UI |
-| Q5 | **Lead dataset and scenario** | Not yet discussed. Weigh: room above the baselines, how well purpose-first shows, data size, free-text opportunity. |
-| Q6 | **LLM**: which model and hosting; cost; offline fallback | Not yet discussed |
 | Q7 | **Purpose-check representation**: generated code vs a fixed vocabulary of analysis types | Leaning towards the vocabulary (safer, easier to validate) |
 | Q8 | **Acceptance threshold** for purpose checks (e.g. ≥ 0.9) | Not yet discussed |
-| Q9 | **Report/UI format** | Depends on Q4 |
-| Q10 | **`unseen` dataset**: do we submit labels for the organiser check? | Cheap if our detector is general; decide after the skeleton |
-| Q11 | **Questions for TrustED on Discord** (criteria and weighting, the hidden-check process) | Draft once the plan is confirmed |
+| Q11 | **Questions for TrustED on Discord** (criteria and weighting, the hidden-check process) | Draft once the plan is confirmed. Delivery method for row maps is a Sat-morning question (D15); it does not close this item. |
