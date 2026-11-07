@@ -12,7 +12,7 @@ from .person import _cue_re
 from .textutil import StemIndex, sentence_start, tokens
 
 _STOP = frozenset(
-    ["ja", "and", "och", "mutta", "but", "koska", "because", "ett?", "that", "kun", "when", "jos", "if", "ei", "en", "et", "haluan", "haluaisin", "tarvitsen", "voitteko", "voisitko", "sitten", "niin", "m?", "min?", "me", "i", "we", "my", "so", "please", "kiitos", "nyt", "kanssa", "with", "eli", "tai", "or", "vai", "sill?", "jotta", "enk?", "kyll?", "joo", "mutta", "olen", "on", "oli", "ovat", "kuin", "the", "a", "an", "is", "was"]
+    ["ja", "and", "och", "mutta", "but", "koska", "because", "että", "that", "kun", "when", "jos", "if", "ei", "en", "et", "haluan", "haluaisin", "tarvitsen", "voitteko", "voisitko", "sitten", "niin", "mä", "minä", "me", "i", "we", "my", "so", "please", "kiitos", "nyt", "kanssa", "with", "eli", "tai", "or", "vai", "sillä", "jotta", "enkä", "kyllä", "joo", "mutta", "olen", "on", "oli", "ovat", "kuin", "the", "a", "an", "is", "was"]
 )
 
 

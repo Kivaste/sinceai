@@ -140,9 +140,9 @@ def test_html_escapes_manifest_text(manifest):
 def test_csv_has_aggregates_only_with_before_after(manifest):
     rows = list(csv.reader(io.StringIO(render_csv(manifest))))
     assert rows[0] == ["kind", "name", "before", "after"]
-    assert ["utility", "H-U8", "1.0", "0.91"] in rows
-    assert ["privacy", "k_below_5_share", "0.9", "0.0"] in rows
-    assert ["baseline", "B2-k/utility_mean", "", "0.5"] in rows
+    assert ["utility", "H-U8", "1.0000", "0.9100"] in rows
+    assert ["privacy", "k_below_5_share", "0.9000", "0.0000"] in rows
+    assert ["baseline", "B2-k/utility_mean", "", "0.5000"] in rows
     for r in rows[1:]:
         assert len(r) == 4
 

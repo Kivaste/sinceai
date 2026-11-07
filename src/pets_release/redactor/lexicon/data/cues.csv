@@ -7,9 +7,9 @@ name is,fi,PERSON,cue-strong,word,cue before a name; the cue itself is not part 
 mun nimi on,fi,PERSON,cue-strong,word,cue before a name; the cue itself is not part of the span
 minun nimeni on,fi,PERSON,cue-strong,word,cue before a name; the cue itself is not part of the span
 jag heter,fi,PERSON,cue-strong,word,cue before a name; the cue itself is not part of the span
-mitt namn ?r,fi,PERSON,cue-strong,word,cue before a name; the cue itself is not part of the span
+mitt namn är,fi,PERSON,cue-strong,word,cue before a name; the cue itself is not part of the span
 kutsutaan,fi,PERSON,cue-strong,word,cue before a name; the cue itself is not part of the span
-nimell?,fi,PERSON,cue-strong,word,cue before a name; the cue itself is not part of the span
+nimellä,fi,PERSON,cue-strong,word,cue before a name; the cue itself is not part of the span
 under the name,fi,PERSON,cue-strong,word,cue before a name; the cue itself is not part of the span
 customer name,fi,PERSON,cue-strong,word,cue before a name; the cue itself is not part of the span
 asiakkaan nimi,fi,PERSON,cue-strong,word,cue before a name; the cue itself is not part of the span
@@ -18,11 +18,11 @@ koko nimi,fi,PERSON,cue-strong,word,cue before a name; the cue itself is not par
 nimi:,fi,PERSON,cue-strong,word,cue before a name; the cue itself is not part of the span
 name:,fi,PERSON,cue-strong,word,cue before a name; the cue itself is not part of the span
 namn:,fi,PERSON,cue-strong,word,cue before a name; the cue itself is not part of the span
-yhteyshenkil?,fi,PERSON,cue-strong,word,cue before a name; the cue itself is not part of the span
+yhteyshenkilö,fi,PERSON,cue-strong,word,cue before a name; the cue itself is not part of the span
 contact person,fi,PERSON,cue-strong,word,cue before a name; the cue itself is not part of the span
 kontaktperson,fi,PERSON,cue-strong,word,cue before a name; the cue itself is not part of the span
-h?nen nimens? on,fi,PERSON,cue-strong,word,cue before a name; the cue itself is not part of the span
-h?nen nimens?,fi,PERSON,cue-strong,word,cue before a name; the cue itself is not part of the span
+hänen nimensä on,fi,PERSON,cue-strong,word,cue before a name; the cue itself is not part of the span
+hänen nimensä,fi,PERSON,cue-strong,word,cue before a name; the cue itself is not part of the span
 hei,fi,PERSON,cue-weak,word,cue before a name; only known names after it
 moi,fi,PERSON,cue-weak,word,cue before a name; only known names after it
 moikka,fi,PERSON,cue-weak,word,cue before a name; only known names after it
@@ -56,7 +56,7 @@ asiakas,fi,PERSON,cue-weak,word,cue before a name; only known names after it
 agentti,fi,PERSON,cue-weak,word,cue before a name; only known names after it
 agent,fi,PERSON,cue-weak,word,cue before a name; only known names after it
 doctor,fi,PERSON,cue-weak,word,cue before a name; only known names after it
-l??k?ri,fi,PERSON,cue-weak,word,cue before a name; only known names after it
+lääkäri,fi,PERSON,cue-weak,word,cue before a name; only known names after it
 this is,fi,PERSON,cue-weak,word,cue before a name; only known names after it
 puhuu,fi,PERSON,cue-weak,word,cue before a name; only known names after it
 puhun,fi,PERSON,cue-weak,word,cue before a name; only known names after it
