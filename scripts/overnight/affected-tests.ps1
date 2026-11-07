@@ -51,7 +51,8 @@ if ($coreHit) { AddIf 'tests/run'; AddIf 'tests/verify'; AddIf 'tests/e2e' }
 if ($sel.Count -eq 0 -and -not $whole) { AddIf 'tests/scaffold' }   # nothing mapped: cheap smoke test
 # Drop entries already covered by a selected ancestor directory (no double collection).
 $dirs = @($sel | Where-Object { $_ -notmatch '\.py$' })
-$paths = if ($whole) { @('tests') } else { @($sel | Where-Object { $p = $_; -not ($dirs | Where-Object { $_ -ne $p -and $p.StartsWith("$_/") }) } | Sort-Object) }
+# [string[]] so a one-element selection stays an array (an if-expression unrolls it to a scalar, which then splats wrongly).
+[string[]]$paths = if ($whole) { @('tests') } else { @($sel | Where-Object { $p = $_; -not ($dirs | Where-Object { $_ -ne $p -and $p.StartsWith("$_/") }) } | Sort-Object) }
 "changed files: $($changed.Count); selection: $($paths -join ' ')"
 if ($Run) {
   # D30: bytecode cache OUTSIDE the repo instead of no cache (tree stays clean; modules aren't recompiled every run).
