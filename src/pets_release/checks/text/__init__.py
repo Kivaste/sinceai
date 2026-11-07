@@ -8,7 +8,8 @@ transforms. Helper modules are private (``_*.py``) so registry discovery skips t
 registration lives here.
 
 ``text.health`` reads ``contract["healthInTextRequired"]``: ``true`` makes lexicon hits high
-severity (refuse); ``false`` or absent keeps them low severity (counted residual risk, so the
+severity (refuse), and so does an absent key (fail closed, #56; the contract generator states
+it explicitly); ``false`` keeps them low severity (counted residual risk, so the
 ``healthInText`` assertion may only be emitted when the contract sets it ``true``); any other
 value is an error. In the verify phase (default) the manifest must bind
 ``bindings.lexiconDigests["gate-health"]`` to this lexicon's digest; missing or different is
@@ -139,7 +140,7 @@ def _check_lexicon_binding(release, context):
 def check_text_health(release, contract, context):
     if _not_applicable(release, contract):
         return Outcome.not_applicable()
-    required = contract.get(HEALTH_REQUIRED_KEY, False) if isinstance(contract, dict) else None
+    required = contract.get(HEALTH_REQUIRED_KEY, True) if isinstance(contract, dict) else None  # absent: fail closed
     if not isinstance(required, bool):
         raise _scan.TextCheckError("contract does not state whether health in text is forbidden")
     _check_lexicon_binding(release, context)
@@ -148,9 +149,14 @@ def check_text_health(release, contract, context):
     for f in fields:
         hits = []
         for conv in f.conversations:
-            for t, text in enumerate(conv.src):
-                masked = _normalise.mask_placeholders(text)
-                hits.extend((conv.rows[t],) for _ in _lexicon.health_terms(masked))
+            masked = [_normalise.mask_placeholders(text) for text in conv.src]
+            for t, text in enumerate(masked):
+                hits.extend((conv.rows[t],) for _ in _lexicon.health_terms(text))
+            for t in range(len(masked) - 1):  # a term split across a conversation join (#56)
+                joined, bounds = _normalise.join(masked, (t, t + 1))
+                cut = bounds[0][1]
+                hits.extend((conv.rows[t], conv.rows[t + 1]) for s, e in _lexicon.health_terms(joined)
+                            if s < cut and e > cut + 1)
         per_field.append((f, hits))
     severity = "high" if required else "low"
     return Outcome(n=sum(f.n_turns for f in fields),

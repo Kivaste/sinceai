@@ -261,6 +261,7 @@ MANIFEST_SCHEMA: dict = {
         "fieldJustifications": _arr(_FIELD_JUSTIFICATION, 1),
         "contract": _obj({
             "k": {"type": "integer", "minimum": 2},  # k-anonymity target; required/forbidden per scenario
+            "healthInTextRequired": {"type": "boolean"},  # text.health severity; absent = required (#56)
             "files": _map("fileName", _obj({
                 "required": _arr(_ref("name")),
                 "columns": _map("name", _obj({"form": {"type": "string", "minLength": 1, "maxLength": 300},

@@ -9,6 +9,7 @@ scanned row by row. Naming only one of the two is an error.
 from __future__ import annotations
 
 import json
+import re
 import weakref
 
 from . import _normalise as normalise
@@ -24,6 +25,21 @@ UNDECLARED_TEXT_CELLS = 3
 
 class TextCheckError(Exception):
     """The text checks cannot run on this release/contract; the runner records `error`."""
+
+
+# Short multi-token phrases; a regex form accepting any of them can carry free text in short cells.
+_FREE_TEXT_PROBES = ("ab cd", "ab 12", "a1 b2 c3", "call me on")
+
+
+def _free_text_form(form) -> bool:
+    """True for an anchored regex form (not a validator ID) that accepts a short multi-token phrase."""
+    if not isinstance(form, str) or not form.startswith("^"):
+        return False
+    try:
+        rx = re.compile(form)
+    except re.error:
+        return True  # unreadable form: fail closed
+    return any(rx.fullmatch(p) for p in _FREE_TEXT_PROBES)
 
 
 def text_fields(contract):
@@ -112,10 +128,14 @@ def load(release, contract):
         if fname not in release.csv_files:
             raise TextCheckError("contract file missing from release")
         table = release.table(fname)
+        cols_spec = (files[fname] or {}).get("columns", {})
         for col in table.header:
             if (fname, col) in declared:
                 continue
             vals = [v for v in _column(table, col) if v.strip()]
+            if vals and _free_text_form((cols_spec.get(col) or {}).get("form")):
+                # short cells too (#56): text split across rows under a permissive form is still free text
+                raise TextCheckError("undeclared free-text column in release")
             if vals:
                 wordy = sum(1 for v in vals if len(v.split()) >= UNDECLARED_TEXT_TOKENS)
                 if wordy / len(vals) >= UNDECLARED_TEXT_SHARE or wordy >= UNDECLARED_TEXT_CELLS:

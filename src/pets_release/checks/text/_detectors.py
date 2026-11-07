@@ -116,8 +116,9 @@ def payment_cards(text):
 
 # ---------------------------------------------------------------- PHONE
 
+# separators between digit groups: spaces/tabs, one dash, and one comma or line break (#56: spoken phones)
 _PHONE_RE = re.compile(
-    r"(?<![\w+.,/])(\+[ \t]*)?\(?\d+\)?(?:[ \t]*-?[ \t]*\(?\d+\)?)*(?![\w/])"
+    r"(?<![\w+.,/])(\+[ \t]*)?\(?\d+\)?(?:[ \t]*(?:[,\n][ \t\n]*)?-?[ \t]*\(?\d+\)?)*(?![\w/])"
 )
 _DATE_LIKE = re.compile(r"^\d{1,2}[-./ ]\d{1,2}[-./ ]\d{2,4}$")
 
@@ -541,9 +542,13 @@ def urls_with_tokens(text):
             hits.append(m.span())
             continue
         keys = {k.lower() for k, _ in parse_qsl(parts.query, keep_blank_values=True)}
+        # the fragment too (#56): "#token=...", "#/cb?code=...", "#/reset/<token>"
+        frag_path, _, frag_query = parts.fragment.partition("?")
+        for q in (frag_query, frag_path if "=" in frag_path else ""):
+            keys |= {k.lower().lstrip("/") for k, _ in parse_qsl(q, keep_blank_values=True)}
         seg_hit = any(
             _RANDOM_SEG.fullmatch(seg) and any(c.isdigit() for c in seg) and any(c.isalpha() for c in seg)
-            for seg in parts.path.split("/")
+            for seg in parts.path.split("/") + re.split(r"[/=&]", parts.fragment)
         )
         if keys & _TOKEN_KEYS or seg_hit:
             hits.append((m.start(), m.start() + len(url)))

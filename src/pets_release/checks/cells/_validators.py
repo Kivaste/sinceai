@@ -120,10 +120,11 @@ def emails(s):
 
 
 # --- phones (international with +/00, Finnish mobile, Finnish landline with separators) -------
+_PSEP = r"(?:,[ \t]?|[\s-])"  # one separator: whitespace, a dash, or a comma (#56: spoken phones)
 _PHONE = re.compile(
-    r"(?<![\w+])(?:(?:\+|00)[1-9]\d{0,2}[\s-]?(?:\(0\)[\s-]?)?(?:\d[\s-]?){5,12}\d"
-    r"|0(?:4\d|50)(?:[\s-]?\d){5,8}"
-    r"|0[1-9]\d?[\s-]\d{3,4}[\s-]?\d{2,4})(?![\w.,]\d|\w)")
+    r"(?<![\w+])(?:(?:\+|00)[1-9]\d{0,2}" + _PSEP + r"?(?:\(0\)" + _PSEP + r"?)?(?:\d" + _PSEP + r"?){5,12}\d"
+    r"|0(?:4\d|50)(?:" + _PSEP + r"?\d){5,8}"
+    r"|0[1-9]\d?" + _PSEP + r"\d{3,4}" + _PSEP + r"?\d{2,4})(?![\w.,]\d|\w)")
 
 
 def phones(s):
@@ -339,23 +340,27 @@ def secrets(s):
 
 
 # --- URLs carrying tokens ---------------------------------------------------------------------
-_URL = re.compile(r"(?i)\bhttps?://[^\s<>\"'\]]+")
+_URL = re.compile(r"(?i)\b(?:https?://|www\.)[^\s<>\"'\]]+")  # scheme-less www. too (#56)
 _TOKEN_KEYS = {"token", "access_token", "auth", "key", "apikey", "api_key", "sig", "signature", "session", "sid",
                "code", "otp", "reset", "password", "pwd", "email", "user", "uid", "jwt", "secret"}
 _OPAQUE = re.compile(r"^[A-Za-z0-9_-]{24,}$")
 
 
 def _url_has_token(u: str) -> bool:
+    u = u.rstrip(".,;:)")
     try:
-        parts = urlsplit(u.rstrip(".,;:)"))
+        parts = urlsplit(u if "://" in u else "http://" + u)
     except ValueError:
         return True  # unparseable URL: treat as suspicious
-    for k, v in parse_qsl(parts.query, keep_blank_values=True):
-        if k.lower() in _TOKEN_KEYS or "@" in v or (_OPAQUE.match(v) and any(c.isdigit() for c in v)):
+    # the fragment is parsed like the query and path (#56): "#token=...", "#/cb?code=...", "#/reset/<token>"
+    frag_path, _, frag_query = parts.fragment.partition("?")
+    queries = (parts.query, frag_query, frag_path if "=" in frag_path else "")
+    for k, v in (kv for q in queries for kv in parse_qsl(q, keep_blank_values=True)):
+        if k.lower().lstrip("/") in _TOKEN_KEYS or "@" in v or (_OPAQUE.match(v) and any(c.isdigit() for c in v)):
             return True
     if parts.username or parts.password:
         return True
-    for seg in parts.path.split("/"):
+    for seg in parts.path.split("/") + re.split(r"[/=&]", parts.fragment):
         if _OPAQUE.match(seg) and any(c.isdigit() for c in seg) and any(c.isalpha() for c in seg):
             return True
     return bool(parts.fragment and ("token" in parts.fragment.lower() or "@" in parts.fragment))
