@@ -55,6 +55,32 @@ and that every canonical slow-list ID exists and is actually marked slow.
 
 ## Refreshing the list
 
+### D62 heavy CLI overrides
+
+`tests/slow_nodeids.txt` adds exact node IDs measured at approximately 10 seconds
+or more which spawn the CLI. Unlike the legacy timing list, these explicit
+overrides also apply to synthetic gate/verify modules. The existing small set of
+fast fail-closed collection pins stays fast. The default suite still collects
+every test; only `-m "not slow"` changes selection.
+
+Collection rejects malformed IDs and stale IDs within the requested paths/nodes,
+before executing tests. Full collection validates the entire list, including
+deleted modules; a targeted file/node run does not pretend to validate other
+modules. Marker/keyword deselection does not hide stale IDs. A list committed in
+the tested revision may not be deleted to disable the policy. Older isolated
+conftest-copy harnesses without that committed list remain compatible.
+
+Run the hook regressions (real nested pytest collection, synthetic tests only):
+
+```powershell
+python scripts/overnight/test-slow-nodeids.py -v
+```
+
+Refresh these overrides from the merger's duration report (or an explicitly
+approved `-n 8 -m "not slow" --durations=60` profile). Inspect CLI calls, keep exact
+parametrized IDs, sort the list, then compare `pytest --collect-only -q` counts
+with the base revision. Raw duration reports stay local, outside tracked files.
+
 Refreshing is a merger/test-infrastructure maintenance operation, not an agent
 iteration step. Profile once with low parallelism (this change's one profiling
 run is the approved exception to D27); keep the raw log outside git:
