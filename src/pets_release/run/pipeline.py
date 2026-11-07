@@ -323,7 +323,7 @@ def run_release(*, kit, scenario: dict, created: str, key_text: str, out, plan_n
     if found is not None:
         try:
             search_info = {"justifications": justify(plan, found.log, policy),
-                           "summary": search_summary(found.log, found.stats), "sacrifices": found.sacrifices}
+                           "summary": search_summary(found.log, found.stats, policy), "sacrifices": found.sacrifices}
         except JustificationError as e:
             raise RunError(str(e)) from None
         extra = {SEARCH_LOG: search_log_bytes(found.log)}
