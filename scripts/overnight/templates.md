@@ -104,6 +104,9 @@ Merge them in order; then on the EXACT merged sha run: fast tier `pytest -n 16 -
 `pytest -n 16 -m slow` (docs-only batch: tests/docs + tests/story_kit only). Env: PYTHONUTF8=1, TZ=UTC,
 PYTHONPYCACHEPREFIX=%LOCALAPPDATA%\sinceai-pycache. Red → bisect (reset to the last green tip, test halves), return the
 culprit, merge the rest. Green → push. Report: merged sha, per-tier exit code + counts, the tickets merged, any culprit.
+Background runs: never wait on a marker file without a timeout. Record the PID and poll it (each wait at most 2 minutes).
+If the PID is gone and there is no exit file, the run was lost (for example, killed by a server restart): rerun that tier.
+An unbounded wait stalled merge train 16 for 25 minutes after the Sat 13:45 server restart.
 ```
 
 ## 6. Closing a ticket (orchestrator)
