@@ -151,15 +151,7 @@ def _closure(start: Path) -> set[str]:
 
 @pytest.mark.parametrize(
     "rel",
-    [
-        "kiteval/scorecard.py",
-        # Deferred half of #85 (4.1): importing redaction_eval/frame.py runs redaction_eval/__init__.py, which
-        # imports predictors -> pets_release.redactor. strict xfail: it turns red the day the isolation lands.
-        pytest.param(
-            "redaction_eval/frame.py",
-            marks=pytest.mark.xfail(strict=True, reason="deferred #85 4.1: package __init__ reaches pipeline modules"),
-        ),
-    ],
+    ["kiteval/scorecard.py", "redaction_eval/frame.py"],
 )
 def test_scorer_modules_do_not_reach_pipeline_modules(rel):
     mods = _closure(SRC / rel)
