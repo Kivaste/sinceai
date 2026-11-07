@@ -29,6 +29,7 @@ Context:
 from __future__ import annotations
 
 import base64
+import binascii
 import hashlib
 import json
 import re
@@ -289,12 +290,19 @@ def run_unkeyed_hashes(release, contract, context) -> Outcome:
 
 def _key_forms(key) -> tuple[set, set]:
     """Return (case-sensitive forms, case-insensitive lowercase forms)."""
-    from pets_release.pseudonym.keys import encoded_forms
-
     raw = key.encode("utf-8") if isinstance(key, str) else bytes(key)
-    exact, lower = encoded_forms(raw)
+    exact = set()
     if isinstance(key, str):
         exact.add(key)
+    for b in {raw, raw.strip()}:
+        std = base64.b64encode(b).decode()
+        url = base64.urlsafe_b64encode(b).decode()
+        exact |= {std, std.rstrip("="), url, url.rstrip("=")}
+        try:
+            exact.add(b.decode("utf-8"))
+        except UnicodeDecodeError:
+            pass
+    lower = {raw.hex(), binascii.hexlify(raw.strip()).decode()}
     # a key given as hex text: also look for its decoded bytes in base64
     if isinstance(key, str) and re.fullmatch(r"(?:[0-9a-fA-F]{2})+", key):
         b = bytes.fromhex(key)
