@@ -46,3 +46,23 @@ def test_cli_prints_both_contracts(tmp_path) -> None:
     assert done.returncode == 0, done.stderr
     assert "scenario HEALTH-S1" in done.stdout and "scenario CS-S1" in done.stdout
     assert (tmp_path / "HEALTH-S1.contract.json").is_file() and (tmp_path / "contracts.txt").is_file()
+
+
+def test_released_join_derived_qi_without_join_via_is_rejected() -> None:
+    """Real 09 policy, sampled_ts released: the QI must carry join metadata, else reject."""
+    import pytest
+
+    from pets_release.contract import ContractError
+
+    policy, plan = get_policy("HEALTH-S1"), hand_plan("HEALTH-S1")
+    for entry in plan:
+        if (entry["table"], entry["column"]) == ("lab_results", "sampled_ts"):
+            entry["rung"], entry["params"] = "ts.month_hour", {}
+    row = next(r for r in policy.qi if r["column"] == "sampled_ts")
+    if row.get("join_via") is None:
+        with pytest.raises(ContractError, match="sampled_ts: join-derived qi needs join_via"):
+            generate(policy, plan)
+    else:
+        contract = generate(policy, plan)
+        derived = [r for r in contract["qi"] if r["column"] == "sampled_ts"]
+        assert derived[0]["derived_from"].startswith("join_")

@@ -87,6 +87,8 @@ def generate(policy: Any, plan: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
                 raise ContractError(f"{table}.{column}: token scope invalid")
             tokens.append({"table": table, "column": name, "scope": scope})
 
+    # Tables reaching the person only through a linked key (non-anchor tables of a linked group).
+    joined_tables = {t for group in policy.linked for t, _ in group[1:]} - {group[0][0] for group in policy.linked}
     qi: list[dict[str, str]] = []
     for row in policy.qi:
         key = (row["table"], row["column"])
@@ -95,6 +97,8 @@ def generate(policy: Any, plan: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
         if key not in released:
             continue
         join = row.get("join_via")
+        if join is None and key[0] in joined_tables:
+            raise ContractError(f"{key[0]}.{key[1]}: join-derived qi needs join_via")
         if join is not None:
             if not (isinstance(join, (list, tuple)) and len(join) == 2):
                 raise ContractError(f"{key[0]}.{key[1]}: join_via")
