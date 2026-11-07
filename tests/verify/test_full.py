@@ -1,4 +1,4 @@
-"""Controller/auditor verify (``pets-release verify --full --kit <path> <release>``, key from PETS_HMAC_KEY).
+﻿"""Controller/auditor verify (``pets-release verify --full --kit <path> <release>``, key from PETS_HMAC_KEY).
 
 Rule: exit 0 only if everything recipient mode checks holds AND every registered check (both scopes) and
 every manifest-claimed check re-runs to pass AND the HMAC signature (06 manifest_signing_key) matches AND
@@ -38,13 +38,21 @@ def _env(tb, kit=None, key=None):
 
 
 def _stubs(tb, release, outcome=lambda: Outcome(n=1)):
-    have = {c.name for c in all_checks()}
+    """Stubs for every producer-scope check the manifest claims (registered or not): ticket 11's real producer
+    checks need run context only ticket 21 builds, so in-process tests substitute them."""
     out = []
     for rec in tb.load(release)["gate"]["checks"]:
-        if rec["check"] not in have:
+        if rec["scope"] == "producer":
             out.append(Check(name=rec["check"], version=rec["version"], scope=rec["scope"],
                              unit=rec["denominator"]["unit"], run=lambda r, c, x, _o=outcome: _o()))
     return tuple(out)
+
+
+def _checkset(tb, release, outcome=lambda: Outcome(n=1), drop=0):
+    """The registry with its producer-scope checks replaced by stubs (``drop`` leaves out the first N stubs)."""
+    stubs = _stubs(tb, release, outcome)
+    names = {s.name for s in stubs}
+    return tuple(c for c in all_checks() if c.name not in names and c.scope != "producer") + stubs[drop:]
 
 
 def _full(tb, release, kit, checks=None, key=None):
@@ -96,7 +104,7 @@ def test_full_cli_bad_signature_fails(bed, kit, verify_cli, tb):
 # --- in-process rows (production verify_release, stub producer checks) ------------------------------------
 
 def test_full_pass_with_runnable_checks(bed, kit, tb):
-    rep = _full(tb, bed, kit, checks=(*all_checks(), *_stubs(tb, bed)))
+    rep = _full(tb, bed, kit, checks=_checkset(tb, bed))
     assert rep.ok, rep.lines
     assert rep.lines[-1].startswith("VERIFIED (full):")
 
@@ -105,13 +113,13 @@ def test_full_bad_signature(bed, kit, tb):
     m = tb.load(bed)
     m["signature"]["value"] = "0" * 64
     tb.save(bed, m)
-    rep = _full(tb, bed, kit, checks=(*all_checks(), *_stubs(tb, bed)))
+    rep = _full(tb, bed, kit, checks=_checkset(tb, bed))
     assert not rep.ok
     assert any("signature" in x for x in rep.lines)
 
 
 def test_full_wrong_key(bed, kit, tb):
-    rep = _full(tb, bed, kit, checks=(*all_checks(), *_stubs(tb, bed)), key="another-test-key-" + "1" * 32)
+    rep = _full(tb, bed, kit, checks=_checkset(tb, bed), key="another-test-key-" + "1" * 32)
     assert not rep.ok
     assert any("signature" in x for x in rep.lines)
 
@@ -121,7 +129,7 @@ def test_valid_edit_passes_recipient_but_fails_full(bed, kit, tb, verify_cli):
     m["notFitFor"][0]["reason"] = "edited after signing"
     tb.save(bed, m)
     assert verify_cli(bed).returncode == 0  # the stated tamper limitation of recipient mode
-    rep = _full(tb, bed, kit, checks=(*all_checks(), *_stubs(tb, bed)))
+    rep = _full(tb, bed, kit, checks=_checkset(tb, bed))
     assert not rep.ok
     assert any("signature" in x for x in rep.lines)
 
@@ -129,7 +137,7 @@ def test_valid_edit_passes_recipient_but_fails_full(bed, kit, tb, verify_cli):
 def test_full_input_digest_mismatch(bed, kit, tb):
     p = kit / "data" / "health" / "lab_results.csv"
     p.write_bytes(p.read_bytes() + b"L2\n")
-    rep = _full(tb, bed, kit, checks=(*all_checks(), *_stubs(tb, bed)))
+    rep = _full(tb, bed, kit, checks=_checkset(tb, bed))
     assert not rep.ok
     assert any("inputs" in x for x in rep.lines)
 
@@ -144,13 +152,13 @@ def test_full_tool_revision_mismatch(bed, kit, tb):
                                              inputs=m["bindings"]["inputs"], tool_revision="1" * 40)
     tb.sign(m)
     tb.save(bed, m)
-    rep = _full(tb, bed, kit, checks=(*all_checks(), *_stubs(tb, bed)))
+    rep = _full(tb, bed, kit, checks=_checkset(tb, bed))
     assert not rep.ok
     assert any("toolRevision" in x for x in rep.lines)
 
 
 def test_full_not_run_check_fails(bed, kit, tb):
-    rep = _full(tb, bed, kit, checks=(*all_checks(), *_stubs(tb, bed, outcome=Outcome.not_run)))
+    rep = _full(tb, bed, kit, checks=_checkset(tb, bed, outcome=Outcome.not_run))
     assert not rep.ok
     assert any("not_run" in x for x in rep.lines)
 
@@ -158,7 +166,7 @@ def test_full_not_run_check_fails(bed, kit, tb):
 def test_full_unavailable_claimed_check_fails(bed, kit, tb):
     stubs = _stubs(tb, bed)
     assert stubs, "fixture must claim producer checks"
-    rep = _full(tb, bed, kit, checks=(*all_checks(), *stubs[1:]))
+    rep = _full(tb, bed, kit, checks=_checkset(tb, bed, drop=1))
     assert not rep.ok
     assert any(stubs[0].name in x and "unavailable" in x for x in rep.lines)
 
@@ -167,7 +175,7 @@ def test_full_error_check_fails(bed, kit, tb):
     def boom():
         raise RuntimeError("x")
 
-    rep = _full(tb, bed, kit, checks=(*all_checks(), *_stubs(tb, bed, outcome=boom)))
+    rep = _full(tb, bed, kit, checks=_checkset(tb, bed, outcome=boom))
     assert not rep.ok
     assert any("error" in x for x in rep.lines)
 
@@ -220,20 +228,29 @@ def _rebind_inputs(tb, bed, fn):
 
 def test_full_missing_input_binding_fails(bed, kit, tb):
     _rebind_inputs(tb, bed, lambda inputs: inputs.pop("lab_results"))
-    rep = _full(tb, bed, kit, checks=(*all_checks(), *_stubs(tb, bed)))
+    rep = _full(tb, bed, kit, checks=_checkset(tb, bed))
     assert not rep.ok
     assert any("inputs" in x and "lab_results" in x and "not bound" in x for x in rep.lines), rep.lines
 
 
 def test_full_extra_input_binding_fails(bed, kit, tb):
     _rebind_inputs(tb, bed, lambda inputs: inputs.__setitem__("ghost_table", "a" * 64))
-    rep = _full(tb, bed, kit, checks=(*all_checks(), *_stubs(tb, bed)))
+    rep = _full(tb, bed, kit, checks=_checkset(tb, bed))
     assert not rep.ok
     assert any("inputs" in x and "ghost_table" in x and "missing from kit" in x for x in rep.lines), rep.lines
 
 
 def test_full_kit_table_added_after_release_fails(bed, kit, tb):
     (kit / "data" / "health" / "late_table.csv").write_bytes(b"c\n1\n")
-    rep = _full(tb, bed, kit, checks=(*all_checks(), *_stubs(tb, bed)))
+    rep = _full(tb, bed, kit, checks=_checkset(tb, bed))
     assert not rep.ok
     assert any("late_table" in x and "not bound" in x for x in rep.lines), rep.lines
+
+
+def test_full_real_registry_producer_checks_fail_closed(bed, kit, tb):
+    """Production registry, no 21 run context: every claimed producer check is not_run or unavailable -> fail."""
+    rep = _full(tb, bed, kit)
+    assert not rep.ok
+    claimed = {c["check"] for c in tb.load(bed)["gate"]["checks"] if c["scope"] == "producer"}
+    for name in claimed:
+        assert any(name in x and ("not_run" in x or "unavailable" in x) for x in rep.lines), (name, rep.lines)
