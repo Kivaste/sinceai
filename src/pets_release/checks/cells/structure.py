@@ -147,7 +147,12 @@ def manifest_values_check(release, contract, context):
         for label, n in identifier_shape_counts(contract, ("contract",)).items():
             counts[label] = counts.get(label, 0) + n
     if p.is_file():
-        for label, n in identifier_shape_counts(release.manifest()).items():
+        try:
+            manifest = release.manifest()
+        except ValueError:  # #114: duplicate key, NaN/Infinity, bad JSON or bytes: a high violation, never a pass
+            return Outcome(n=1, violations=(
+                Violation("release.manifest-values", "manifestUnparseable", "high", MANIFEST, None, 1),))
+        for label, n in identifier_shape_counts(manifest).items():
             counts[label] = counts.get(label, 0) + n
     out = tuple(Violation("release.manifest-values", label, "high", MANIFEST, None, n)
                 for label, n in sorted(counts.items()))

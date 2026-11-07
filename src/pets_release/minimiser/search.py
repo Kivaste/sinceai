@@ -84,6 +84,43 @@ def apply_suppression(tables: Mapping[str, pd.DataFrame], suppressed: Mapping[st
     return {t: (df.drop(index=list(suppressed.get(t, ()))) if suppressed.get(t) else df) for t, df in tables.items()}
 
 
+def rung_params(policy, params, key, rung):
+    """The search's params for ``rung`` on ``key`` (``params``: ``kit.params_from_plan`` of the hand plan), or
+    None if the rung cannot be parameterised. One function for the search and for ``rebuild_plan``."""
+    given = (params or {}).get(key, {}).get(rung)
+    if given is not None:
+        return dict(given)
+    if rung in ("age.band5", "age.band10"):
+        return None
+    if rung == "id.pseudonym":
+        return {"label": "RECORD_KEY"}
+    if rung == "geo.topn":
+        pm = policy.param_minimums.get(key)
+        return {"n": pm["min"] if pm and pm["rung"] == rung else 8}
+    if rung == "num.round":
+        return {"unit": 1}
+    if rung == "num.bin":
+        return {"width": 10}
+    return {}
+
+
+def rebuild_plan(policy, params, fields: Mapping) -> list:
+    """A search plan from ``{(table, column): (rung, floor)}`` with the search's own params (withheld: ``{}``),
+    in plan order, ``source: "search"``. Raises ValueError (content-free) for a field the policy does not name
+    or a rung the search could not parameterise."""
+    out = []
+    for key in sorted(fields):
+        if key not in policy.floors:
+            raise ValueError("rebuild: field not in the policy")
+        rung, floor = fields[key]
+        pr = {} if rung == WITHHELD else rung_params(policy, params, key, rung)
+        if pr is None:
+            raise ValueError("rebuild: rung has no search params")
+        out.append({"table": key[0], "column": key[1], "rung": rung, "params": json.loads(canonical(pr)),
+                    "floor": floor, "reason": policy.floors[key].reason, "source": "search"})
+    return out
+
+
 def _norm(res) -> dict:
     """Purpose result -> {score, status}; anything but a finite score with status ok is not a pass."""
     if not isinstance(res, Mapping):
@@ -202,21 +239,7 @@ class _Search:
 
     def rung_params(self, key, rung):
         """Params for ``rung`` on ``key``, or None if the rung cannot be parameterised (skipped)."""
-        given = self.params.get(key, {}).get(rung)
-        if given is not None:
-            return dict(given)
-        if rung in ("age.band5", "age.band10"):
-            return None
-        if rung == "id.pseudonym":
-            return {"label": "RECORD_KEY"}
-        if rung == "geo.topn":
-            pm = self.p.param_minimums.get(key)
-            return {"n": pm["min"] if pm and pm["rung"] == rung else 8}
-        if rung == "num.round":
-            return {"unit": 1}
-        if rung == "num.bin":
-            return {"width": 10}
-        return {}
+        return rung_params(self.p, self.params, key, rung)
 
     # ---------------------------------------------------------------- candidates
     def entry_state(self, cand, key):
@@ -321,6 +344,10 @@ class _Search:
                 self.stats["cache_misses"] += 1
         plan = self.plan_of(cand)
         rv, pk = R.risk_vector(self.p, plan, self.k_view(prot), self.src, self.kspec, self.k)
+        if self.k is not None and pk is None:  # #118: under a k target every candidate carries a measured PersonK
+            pk, _ = R.person_k(self.k_view(prot), plan, self.p, self.src, self.kspec, self.k)
+            if pk is None:
+                raise R.PersonKMissing("PersonK missing: per-person k not measured")
         if self.risk_extra is not None:
             extra = self.risk_extra(plan, prot)
             for c in self.p.risk_vector:
@@ -586,17 +613,13 @@ class _Search:
         return sh is not None and sh > budget
 
     def _shortfall_of(self, ev):
-        sh = ev["risk"].get("qi_k_shortfall")
-        if sh is None:
-            if self.k is None:
-                return None
-            sh = self._shortfall(ev)
-        return sh
-
-    def _shortfall(self, ev):
+        """Share of persons (plus unidentified records) below k, from the candidate's measured PersonK; None
+        only without a k target. A missing PersonK under a k target refuses (#118): never a 0.0 shortfall."""
+        if self.k is None:
+            return None
         pk = ev["pk"]
         if pk is None:
-            return 0.0
+            raise R.PersonKMissing("PersonK missing: per-person k not measured")
         n = len(pk.per_person) + pk.unidentified
         return (sum(1 for v in pk.per_person.values() if v < self.k) + pk.unidentified) / n if n else 1.0
 
@@ -653,6 +676,9 @@ class _Search:
             rv.update({c: float(ex[c]) for c in self.p.risk_vector if c not in rv and c in ex})
         rv = {c: rv.get(c) for c in self.p.risk_vector}
         problems = []
+        unmeasured = sorted(c for c, v in rv.items() if v is None)
+        if unmeasured:  # #118: an unmeasured component refuses; it is logged as null, never as 0.0
+            problems.append("re-check risk components not measured: " + ",".join(unmeasured))
         share = sup_persons / persons if persons else 0.0
         if self.k is not None and sup_persons and budget is None:
             problems.append("k not reached and the policy allows no suppression")
@@ -669,7 +695,7 @@ class _Search:
         problems += self._rung_step_problems(cur, results)
         ok = not problems
         ev = {"results": {c: results.get(c, {"score": None, "status": "missing"}) for c in self.checks},
-              "risk": {c: (0.0 if v is None else v) for c, v in rv.items()}, "cached": False}
+              "risk": dict(rv), "cached": False}
         reason = (f"final: local suppression of {sup_persons} of {persons} persons, then full uncached re-check of "
                   f"every purpose check and every privacy target (privacy {pstatus}): "
                   + ("passed" if ok else "; ".join(problems)) + bound)
@@ -778,9 +804,11 @@ class _Search:
         # Same rule as ticket 21 (run/suppress.py): unit persons, k from the policy, every below-k unit (and
         # every unidentified unit) dropped per round with its joined rows, to a fixpoint (<= 50 rounds); the
         # share is units suppressed / units in the unsuppressed candidate.
-        pt = self.kspec["person"]["table"] if self.kspec else None
-        if self.k is None or pt not in full:
+        if self.k is None:
             return {}, 0, 0
+        pt = self.kspec["person"]["table"]
+        if pt not in full:  # k_view always adds it; without it no person is measured, never "nobody below k"
+            raise R.PersonKMissing("PersonK missing: person table not in the candidate")
         sup_cfg = self.p.suppression
         if sup_cfg is not None:
             if sup_cfg["unit"] != "persons" or sup_cfg["method"] != "local_suppression":
@@ -794,8 +822,8 @@ class _Search:
         while True:
             cur = apply_suppression(full, self._expand(dropped_p))
             pk, _ = R.person_k(cur, plan, self.p, self.src, self.kspec, self.k)
-            if pk is None:
-                break
+            if pk is None:  # #118: never a success-shaped break (0 of 0 persons suppressed)
+                raise R.PersonKMissing("PersonK missing: per-person k not measured")
             if units_before is None:
                 units_before = len(pk.per_person) + pk.unidentified
             rows = sorted(set(pk.below_rows) | set(pk.unidentified_rows))
@@ -810,7 +838,7 @@ class _Search:
             idx = cur[pt].index
             dropped_p |= {idx[i] for i in rows}
         sup = self._expand(dropped_p)
-        return sup, _units(person_of, dropped_p), int(units_before or 0)
+        return sup, _units(person_of, dropped_p), int(units_before)  # set by the first measured round
 
     def _expand(self, person_rows: set) -> dict:
         """Suppressed person-table rows -> {table: sorted index labels}, incl. rows joined to them."""
@@ -841,4 +869,7 @@ def search(policy, tables: Mapping[str, pd.DataFrame], keys, *, purpose: Callabl
         raise ValueError("budget must be a positive integer")
     s = _Search(policy, tables, keys, purpose=purpose, purpose_all=purpose_all, kspec=kspec, budget=budget,
                 read_sets=dict(read_sets or {}), params=params, redactor=redactor, risk_extra=risk_extra)
-    return s.run()
+    try:
+        return s.run()
+    except R.PersonKMissing as e:  # fail closed (#112, #118): a missing PersonK refuses; it is never scored
+        raise MinimiserRefused(str(e), s.log, s.stats) from None

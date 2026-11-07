@@ -48,10 +48,14 @@ def _pet(entry) -> tuple[str, dict]:
     return "generalisation", {"rung": rung}
 
 
-def build_narrative(*, policy, plan, scenario_ids, suppression: dict, k: int, purpose=None, rung_steps=()) -> dict:
+def build_narrative(*, policy, plan, scenario_ids, suppression: dict, k: int, purpose=None, search=None,
+                    rung_steps=()) -> dict:
     """``purpose``: the accepted ``run.purpose.PurposeResult``; fills ``measured.utility`` and the sacrifices'
-    before/after scores (None leaves them not measured / null). ``rung_steps``: adopted enumerated rung
-    sacrifices (``run.pipeline.rung_step``), each recorded as ``rungStep`` on its check's sacrifice entry."""
+    before/after scores (None leaves them not measured / null).
+    ``search`` (ticket 25): {"justifications", "summary", "sacrifices"} from ``run.justify`` and the search
+    result; None for the hand plan. Its sacrifice scores are used only when no ``purpose`` result is given.
+    ``rung_steps``: adopted enumerated rung sacrifices (``run.pipeline.rung_step``), each recorded as
+    ``rungStep`` on its check's sacrifice entry."""
     by_key = sorted(plan, key=lambda e: (e["table"], e["column"]))
     inventory = [{"dataset": policy.dataset, "table": e["table"], "column": e["column"],
                   "role": _role(policy, e["table"], e["column"]),
@@ -75,9 +79,12 @@ def build_narrative(*, policy, plan, scenario_ids, suppression: dict, k: int, pu
                    "outputColumn": output_column(e) if released else None,
                    "decision": "released" if released else "withheld",
                    "rung": e["rung"], "floor": e["floor"], "reason": e["reason"][:500], "source": e["source"]})
+    if search is not None:
+        fj = list(search["justifications"])
     pending = "not measured yet: the measurer is wired in the story-kit ticket"
     measured = {"utility": not_measured(pending), "privacy": not_measured(pending),
-                "search": not_measured("hand-picked plan; no search run"),
+                "search": (dict(search["summary"]) if search is not None
+                           else not_measured("hand-picked plan; no search run")),
                 "baselines": not_measured(pending), "redaction": not_measured("no free text released")}
     scored = {}
     if purpose is not None:
@@ -104,6 +111,8 @@ def build_narrative(*, policy, plan, scenario_ids, suppression: dict, k: int, pu
          "rate": not_measured(pending), "description": "attribute inference from released quasi-identifiers"},
     ]
     risks.sort(key=lambda r: r["risk"])
+    if not scored:
+        scored = {s["check"]: (s["score_before"], s["score_after"]) for s in (search or {}).get("sacrifices", [])}
     sacrifices = sorted(({"check": s["check"], "floor": s["floor_score"],
                           "before": scored.get(s["check"], (None, None))[0],
                           "after": scored.get(s["check"], (None, None))[1],

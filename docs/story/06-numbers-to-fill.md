@@ -1,87 +1,272 @@
-# Numbers, real-run provenance and claims checklist
+# Final-SHA sources, targets met / not met, and claim gates
 
-HEALTH-S1 numbers in `02`–`05` are filled from the story kit's real, post-suppression release. Only CS-S1 recall remains in double braces. Never substitute a missing measurement with zero. Conditional CS-S1 blocks must be omitted from submitted material until measured.
+**PREP only (#103).** No final submission folder or final measurements yet. Every
+earlier story-kit release, including the old e846512 run, is historical: a new
+commit invalidates its evidence, even if it changes only docs. Do not reuse its
+numbers, gate totals or verify success lines. Finalisation waits for final review
+and fresh proof bound to the exact final SHA and inputs.
 
-## Source and reproduction
+## Source contract: actual manifest keys, not guessed paths
 
-- **R (fresh tip release, local-only):** `C:\Users\kivas\AI\sinceai-out\story-tip-e846512\health-s1\`; manifest `R/privacy_manifest.json`, scoring sidecar `...\story-tip-e846512\health-s1.scoring\`, scratch `...\health-s1.measure\`. Built by `python -m pets_release.measure.wire --scenario HEALTH-S1 --out R --created 2026-11-07T00:00:00Z --kit <K>` (exit 0, about 480 s) with the key from the local secret store (never recorded). These paths are outside the repo and are **local-only**: they cannot be reproduced from the repo alone (they need the kit and the key).
-- **Bound source revision:** `e84651205174226c03477deacb40afe6be37b351` (`bindings.toolRevision`, the story branch after merging `origin/integration/pets-release`); `release.created` is `2026-11-07T00:00:00Z`, scenario HEALTH-S1, recipient default. Docs-only commits after it do not change the release, but a code change invalidates it.
-- **Verify at that revision (real CLI, exit 0 both):** `pets-release verify R` printed `VERIFIED (limited): 36 release-checked, 4 producer-attested`; `pets-release verify --full --kit <K> R` printed `VERIFIED (full): 40 checks re-run (36 release, 4 producer); purpose checks re-run; signature, input digests and tool revision match`. Re-run both at recording time and quote only what they print.
-- **F (fresh fill):** `C:\Users\kivas\AI\sinceai-out\story-tip-e846512\story-kit\` plus dashboard `...\story-tip-e846512\health-s1.dashboard.html` and `.csv` (local-only). `python docs/story-kit/fill_numbers.py R F`: exit 0, "wrote 42 values, 3 empty". All 42 values equal the committed `docs/story-kit/numbers.csv` (no number changed from the earlier release at `c3749d7`). The two overall privacy scores (component `privacy`) were read from R's `measured.privacy.components` and equal the earlier ones (0.1716 before, 1.0000 after).
-- **Earlier provenance:** the prior release at `c3749d7` (`...\22\health-s1\`) and the story-kit merge `15b2a42` are superseded by R above; the earlier timed-out attempt at `936e583` supplied no numbers.
-- **Sacrifices at the tip:** `sacrifices` lists three policy-enumerated entries, each with floor 0.6000: H-U4 (0.7952 after), H-U6 (0.9462) and H-U8 (0.9505). Only H-U4 is a visible loss; none is a full pass claim.
-- Python runs use `PYTHONUTF8=1`, `PYTHONDONTWRITEBYTECODE=1`, `TZ=UTC`. CSVs are read as strings; no kit rows are displayed or sent to a service.
+All `{{manifest.<path>}}` expressions address a single scenario's
+`privacy_manifest.json`. The default in 01–05 is HEALTH-S1; **inside a #24 block
+the default is CS-S1**. Tables below name the scenario explicitly. This namespace
+is an editing convention, not a field named `manifest` in the JSON.
 
-## Filled numbers
+Use direct keys with explicit array selectors: `tasks[task=H-U2].after` means the
+unique `tasks` entry whose `task` equals `H-U2`; `components[component=person_k.min]`
+matches the entire component ID, including the dot. Multiple selectors, separated
+by commas, must all match one entry. Zero or multiple matches are unresolved, never
+zero. No implicit list index, guessed alias, list `.count` field, or interpolation
+from a different scenario. This is a manual finalisation contract, **not supported
+by the older `docs/story-kit/fill_numbers.py` resolver**.
 
-Paths use `docs/story-kit/README.md` grammar. For every F entry, find the row with the stated `manifest_key_path` in `F/numbers.csv`; all values resolve from R's manifest. Scores and shares are formatted to four decimals, not percentages. Count separators in prose do not change the value.
+Authoritative code inspected at the prep base `f98cf626e1b7edf104fecbee1602b2f91cef3a8c`:
 
-| Manifest key / resolver path | Value | Exact meaning | Output | Used in |
-|---|---|---|---|---|
-| `inventory.count` | 53 | length of inventory (columns) | F | 02, 04, 05 |
-| `fieldJustifications.released.count` | 16 | decisions = released | F | 02, 04, 05 |
-| `fieldJustifications.withheld.count` | 37 | decisions = withheld | F | 02, 03, 04, 05 |
-| `gate.checks.release.count` | 36 | gate records scoped release | F | 03, 04, 05 |
-| `gate.checks.producer.count` | 4 | gate records scoped producer; attested in limited verify | F | 03, 04, 05 |
-| `exportAssertions.paymentCards` | false | assertion backed by its named check | F | 03, 04, 05 |
-| `assertionEvidence.paymentCards.denominator.n` | 1106994 | cells scanned for payment cards, not persons | F | 03, 04, 05 |
-| `assertionEvidence.paymentCards.hits` | 0 | payment-card hits in that check | F | 03, 04, 05 |
-| `measured.utility.after.H-U2` | 0.9908 | post-suppression release task score | F | 02–05 |
-| `measured.utility.after.H-U4` | 0.7952 | post-suppression release task score, policy-enumerated sacrifice | F | 02–05 |
-| `measured.utility.after.H-U6` | 0.9462 | post-suppression release task score | F | 02–05 |
-| `measured.utility.after.H-U7` | 0.9933 | post-suppression release task score | F | 02–05 |
-| `measured.utility.after.H-U8` | 0.9505 | post-suppression release task score | F | 02–05 |
-| `measured.privacy.before.privacy` | 0.1716 | components[component=privacy].before, original scorecard | P | 02, 04, 05 |
-| `measured.privacy.after.privacy` | 1.0000 | components[component=privacy].after, suppressed-release scorecard | P | 02, 04, 05 |
-| `measured.privacy.after.person_k.min` | 5 | our independent minimum per-person k | F | 02–05 |
-| `measured.privacy.after.person_k.persons` | 24204 | persons counted by our per-person check | F | 02, 04, 05 |
-| `measured.privacy.after.person_k.below_k_share` | 0.0000 | share of PERSONS below k=5 | F | 02, 04, 05 |
-| `measured.privacy.before.k_below_5_share` | 0.9557 | scorecard share of ROWS below 5, row-weighted over tables scored for k | F | 04 Q&A |
-| `measured.privacy.after.k_below_5_share` | 0.0000 | same ROW-weighted scorecard share after suppression | F | 04 Q&A |
-| `measured.baselines.B0.worst_reid` | 0.0950 | published dataset-level worst re-identification, not scenario worst-table rate | F | 04, 05 |
-| `measured.baselines.B2-k.utility_mean` | 0.3990 | published mean scenario utility; corrects obsolete draft key `.utility` | F | 02, 04, 05 |
-| `measured.baselines.B2-k.task.H-U6` | null (—) | baseline cannot answer; not zero | F | 02, 04, 05 |
-| `measured.baselines.B2-k.task.H-U7` | null (—) | baseline cannot answer; not zero | F | 02, 04, 05 |
-| `measured.baselines.B2-k.task.H-U8` | null (—) | baseline cannot answer; not zero | F | 02, 04, 05 |
-| `sacrifices.H-U4.floor` | 0.6000 | policy-enumerated H-U4 sacrifice floor | F | 04 Q&A |
-
-The privacy score is **not proof of zero risk**. D22: the scorecard is blind to the renamed `age_band`; our per-person k check is authoritative. Before-k weights cover clinical_notes, ed_visits, lab_results and published_weekly_stats; after-k weights cover ed_visits only (the tables the scorecard scores for k), not all released rows. Person shares and row shares are never interchangeable. Linkage attackers and attribute-inference rates remain not measured; do not claim measured attack resistance from the overall privacy score. Every quoted utility score is the **suppressed release's**, never the pre-suppression hand plan's.
-
-## Unfilled placeholders
-
-| Placeholder | Why it remains | Where |
-|---|---|---|
-| `measured.redaction.labels.NATIONAL_ID.recall` | R is HEALTH-S1; `measured.redaction.status` is `not_measured`. No verified measured CS-S1 release is supplied by this story kit. | 02, 04; path reference in 05 |
-| `measured.redaction.labels.PAYMENT_CARD.recall` | same; exact-match recall unavailable | 02; path reference in 05 |
-| `measured.redaction.labels.IBAN.recall` | same; exact-match recall unavailable | 02 |
-| `measured.redaction.labels.SECRET.recall` | same; exact-match recall unavailable | 02 |
-
-Keep those placeholders in the working drafts, but omit their conditional sentences/slides from the submission. Neither baseline nulls nor missing attacker rates are zero measurements.
-
-## Claims checklist
-
-These drafts demonstrate R's hand plan. Other merged features are not implicitly demonstrated by that run. Enable a conditional block only after a suitable real run verifies it.
-
-| Claim | Status / verification needed |
+| Source | Actual keys / meaning |
 |---|---|
-| Hand plan, age in 10-year bands, arrival as hour of day | R uses `age.band10` and `ts.hour_of_day`; read actual `fieldJustifications.rung`, not floor. |
-| Required-task utility and privacy before/after | Filled above; story-kit release and outputs are the source. Keep H-U4 sacrifice and D22 caveat visible. |
-| Measured search (#26 / ticket 25) | Not shown by R: `measured.search.status` = `not_measured`. Keep search blocks conditional. Do not promise every original floor passes when a policy sacrifice is used. |
-| CS-S1 release and exact-match per-label recall (#24 / ticket 23) | Conditional; needs a real CS-S1 release and `measured.redaction.status` = `measured`. No transcript rows on screen. |
-| Recipient-scoped keys (#29 / ticket 28, merged) | R uses recipient default; a separate recipient-scoped run is needed before enabling the optional demo claim. |
-| Two-tier verification and signed manifest | Verified for this story: both tiers were run with the real CLI on the fresh tip release (exit 0, outputs recorded under Source). Re-run at recording time; if either fails, report the failure, not a success line. Limited verification catches accidents only. |
-| Planted card refusal / byte-identical offline rerun | Still requires the actual recording-time planted-copy test / same-input rerun. This documentation update does not certify either as a new check pass. |
+| `src/pets_release/manifest/schema.py`, `_MEASURED` | `measured.utility.tasks[].{task,status,before,after}`, `measured.privacy.components[].{component,before,after}`, `measured.redaction.labels[].{label,tp,fp,fn,support,precision,recall}` |
+| Same schema, top-level records | `inventory`, `pets[].{table,column,pet,params}`, `fieldJustifications[].{table,column,outputColumn,decision,rung,floor,reason,source}`, `contract.k`, `contract.files`, `bindings.files`, `bindings.toolRevision` |
+| Same schema, evidence and risks | `assertionEvidence.<name>.{check,version,scope,status,denominator,hits}`, `gate.{status,checks}`, `residualRisks[].{risk,kind,label,rate,description}`, `sacrifices[].{check,floor,before,after,reason}` |
+| `src/pets_release/writer/assemble.py` | `assemble_manifest` copies the narrative, derives assertions only from their required checks, copies gate records and binds `bindings.toolRevision` and inputs; it does not invent measurement fields |
+| `src/pets_release/run/narrative.py` | Writes local suppression under `pets[pet=local_suppression].params.{k,maxShare,unitsSuppressed,share}`; sacrifice floors; risk IDs `free-text-recall`, `linkage-attackers`, `attribute-inference` |
+| `src/pets_release/measure/ids.py`, `core.py`, `k.py` | Actual component IDs `privacy`, `k_below_5_share`, `linkage_reid`, `person_k.min`, `person_k.persons`, `person_k.below_k_share`; utility/composite overall scores are deliberately not privacy components |
+| `src/pets_release/run/purpose.py`, `policy/health_s1.py`, `policy/cs_s1.py` | Normal utility threshold 0.90; enumerated sacrifice floors 0.60 (H-U4/H-U6/H-U8), 0.80 (CS-U5); k=5, suppression cap 0.10; CS label recall 0.98 and timestamp floor `ts.hour` |
 
-## Limits and presentation
+<!-- IF #24 -->Pending producer source inspected read-only on `ticket/23-cs-s1`
+at `fbd72a0bbf4bc4908ea471d81afc51c8cc97521f`:
+`src/pets_release/cs_s1/measure.py`, `_target_risks`, writes
+`residualRisks[risk=target-recall-national-id]`, `target-recall-payment-card`,
+`target-recall-iban`, `target-recall-secret` and `target-precision-secret`.
+These use the existing schema's `rate` and `description`, not a new `targetNotes`
+object. Recheck that producer on the final SHA before resolving any CS claim.<!-- END IF -->
 
-- Taglines must remain <= 140 characters; description body <= 5,000 including conditional text and remaining placeholders. Count the body after the separator, not the editing notes.
-- Video timeline is 1:50; optional CS-S1 aggregate insert adds at most 5 seconds (1:55). Narration word-count estimates are not a timed recording: rehearse and confirm the exported video is < 2:00.
-- Tagline character counts (including spaces): T1 118, T2 124, T3 127, T4 117, T5 122. Name counts: N1 58, N2 56, N3 52. Video narration: 160 words (about 80 seconds at 120 words/minute, within the 110-second screen schedule).
-- Description body: 4,731 characters including conditional markup and remaining placeholders; 4,554 with comment markers stripped. Its four CS-S1 placeholders stay in the editing draft only, never an unmeasured submission claim.
-- Names, age-band width and timing markers are presentation/schema choices, not measured performance claims. No data values belong in screenshots, narration, manifests, logs or commits.
+No absent/null/errored/`not_measured` measurement becomes a number, `false`, or a
+pass. Render **“not measured”** and its reason. Distinguish `not_applicable` with
+the actual reason; do not count it as a passed target. A table verdict below says
+“not measured (prep)” until final proof is available; this does not assert the
+current product never measures the field. Compare only after `status=measured`
+(utility tasks also require `status=ok`).
 
-## Gate severity behaviour (source: integration code)
+## 1. Data types and privacy risks
 
-- A high-severity hit fails its check and refuses the release.
-- A hit of any severity in a check bound to an export assertion prevents that assertion from being written false, so the writer refuses.
-- A low-severity hit in another check does not refuse. It stays in `gate.checks[].hits` AND is written to `residualRisks` as kind `gate_low_severity` (`writer/assemble.py`), which `verify` re-derives (`verify/core.py`). Tip release: `text.health` (release scope) has 83 low-severity HEALTH hits over 512,166 turns scanned. Errors, missing checks and unknown outcomes never count as passes.
+Show detector column roles and evidence through the detector seam when actually
+demonstrated. The release's `inventory` may be policy-derived; do not call it a
+detector accuracy result. Use schema names and aggregate metrics only.
+
+| HEALTH-S1 baseline / before | Measured value | Prep verdict |
+|---|---|---|
+| Scorecard privacy | {{manifest.measured.privacy.components[component=privacy].before}} | not measured (prep) |
+| Scorecard share of ROWS below k=5 | {{manifest.measured.privacy.components[component=k_below_5_share].before}} | not measured (prep) |
+| Scorecard linkage component (not the two attacker personas) | {{manifest.measured.privacy.components[component=linkage_reid].before}} | not measured (prep) |
+| Full k distribution / histogram | not measured: no histogram field in this manifest | not measured |
+| Both attacker-persona linkage and attribute inference before protection | not measured: no bound before/after persona pair supplied | not measured |
+
+## 2. PETs and why
+
+For each presented field read `pets`, `fieldJustifications` and `contract` together.
+The ladder floor is the most detailed permitted rung; the actual `rung` is what
+was released. Tie `reason` to the purpose check. No old band widths, timestamp
+detail or column counts are carried forward. Search is bounded; it does not prove
+global optimality or excuse utility failures without an enumerated sacrifice.
+
+<!-- IF #106 -->D33: show the exact `lab_results.test_name` rung and H-U7 effect.
+If the adopted rung is the CRP-versus-other distinction, say so as a schema-level
+choice. If the release instead uses a justified non-QI exception, show its threat
+model and residual risk. Do not silently describe either as a full-detail k pass.<!-- END IF -->
+
+## 3. Protected output
+
+Field-level before-to-after, never raw input rows: full birth date → chosen age
+band; raw join key → keyed pseudonym; unneeded field → withheld. Present all shown
+fields' actual final justifications. Keep protected table schemas visible even
+without the optional web app.
+
+<!-- IF #117 -->D41's web row view is human-only for real-kit material. Show the
+first approximately ten protected rows per table only after display-time limited
+verify and matching manifest-file digests; only manifest-listed files. No raw
+input, row maps or truth/. Mandatory label: “Synthetic kit data © Since AI ry,
+CC BY 4.0. In a real deployment only the recipient sees this view.” Agents never
+read or screenshot this real-kit view. Agent tests/screenshots use hand-made
+synthetic fixtures.<!-- END IF -->
+
+## 4. Measured privacy and utility: targets met / not met
+
+### HEALTH-S1 privacy floors
+
+| Privacy target / floor | Measured value from HEALTH-S1 | Targets met / not met |
+|---|---|---|
+| Person-k ≥ 5 over every released QI including joins | {{manifest.measured.privacy.components[component=person_k.min].after}} | not measured (prep) |
+| Share of retained PERSONS below k=5 = 0 | {{manifest.measured.privacy.components[component=person_k.below_k_share].after}} | not measured (prep) |
+| Last-step local suppression share ≤ 0.10 | {{manifest.pets[pet=local_suppression,table=ed_visits,column=patient_hetu].params.share}} | not measured (prep) |
+| PERSON text recall ≥ 0.95 | not measured; {{manifest.residualRisks[risk=free-text-recall].rate.status}} | not applicable only if final release withholds all free text; never assumed met |
+| PHONE text recall ≥ 0.95 | not measured; {{manifest.residualRisks[risk=free-text-recall].rate.status}} | same applicability rule, never assumed met |
+| ADDRESS text recall ≥ 0.95 | not measured; {{manifest.residualRisks[risk=free-text-recall].rate.status}} | same applicability rule, never assumed met |
+| NATIONAL_ID text recall ≥ 0.95 | not measured; {{manifest.residualRisks[risk=free-text-recall].rate.status}} | same applicability rule, never assumed met |
+
+Report number of persons alongside k:
+{{manifest.measured.privacy.components[component=person_k.persons].after}}.
+The scorecard's after ROW share is
+{{manifest.measured.privacy.components[component=k_below_5_share].after}}; it is
+not a PERSON share. Its privacy score
+{{manifest.measured.privacy.components[component=privacy].after}} is not a proof
+of zero risk: renamed `age_band` is a disclosed scorecard blind spot (D22).
+
+### Required zero-hit checks / export assertions (each demonstrated scenario)
+
+For HEALTH-S1 use its manifest. For CS-S1 these rows are eligible only inside the
+#24 claim gate. Each cell is hits/scanned denominator, **not a recall fraction**.
+Confirm `exportAssertions.<name>` is literal false AND that its own required
+`assertionEvidence` check ran with status pass, correct scope, zero hits and a
+positive denominator. Missing evidence is invalid, not “absence proven”.
+
+| Named assertion: zero-hit floor | Measured hits / denominator | Targets met / not met |
+|---|---|---|
+| nationalIds | {{manifest.assertionEvidence.nationalIds.hits}} / {{manifest.assertionEvidence.nationalIds.denominator.n}} cells | not measured (prep) |
+| paymentCards | {{manifest.assertionEvidence.paymentCards.hits}} / {{manifest.assertionEvidence.paymentCards.denominator.n}} cells | not measured (prep) |
+| ibans | {{manifest.assertionEvidence.ibans.hits}} / {{manifest.assertionEvidence.ibans.denominator.n}} cells | not measured (prep) |
+| accountNumbers | {{manifest.assertionEvidence.accountNumbers.hits}} / {{manifest.assertionEvidence.accountNumbers.denominator.n}} cells | not measured (prep) |
+| emails | {{manifest.assertionEvidence.emails.hits}} / {{manifest.assertionEvidence.emails.denominator.n}} cells | not measured (prep) |
+| phones | {{manifest.assertionEvidence.phones.hits}} / {{manifest.assertionEvidence.phones.denominator.n}} cells | not measured (prep) |
+| ipAddresses | {{manifest.assertionEvidence.ipAddresses.hits}} / {{manifest.assertionEvidence.ipAddresses.denominator.n}} cells | not measured (prep) |
+| deviceIds | {{manifest.assertionEvidence.deviceIds.hits}} / {{manifest.assertionEvidence.deviceIds.denominator.n}} cells | not measured (prep) |
+| usernames | {{manifest.assertionEvidence.usernames.hits}} / {{manifest.assertionEvidence.usernames.denominator.n}} cells | not measured (prep) |
+| propertyIds | {{manifest.assertionEvidence.propertyIds.hits}} / {{manifest.assertionEvidence.propertyIds.denominator.n}} cells | not measured (prep) |
+| plates | {{manifest.assertionEvidence.plates.hits}} / {{manifest.assertionEvidence.plates.denominator.n}} cells | not measured (prep) |
+| secrets | {{manifest.assertionEvidence.secrets.hits}} / {{manifest.assertionEvidence.secrets.denominator.n}} cells | not measured (prep) |
+| urlsWithTokens | {{manifest.assertionEvidence.urlsWithTokens.hits}} / {{manifest.assertionEvidence.urlsWithTokens.denominator.n}} cells | not measured (prep) |
+| rawTimestamps | {{manifest.assertionEvidence.rawTimestamps.hits}} / {{manifest.assertionEvidence.rawTimestamps.denominator.n}} cells | not measured (prep) |
+| reversibleHashes | {{manifest.assertionEvidence.reversibleHashes.hits}} / {{manifest.assertionEvidence.reversibleHashes.denominator.n}} cells | not measured (prep) |
+| keyMaterial | {{manifest.assertionEvidence.keyMaterial.hits}} / {{manifest.assertionEvidence.keyMaterial.denominator.n}} cells | not measured (prep) |
+| rowMaps | {{manifest.assertionEvidence.rowMaps.hits}} / {{manifest.assertionEvidence.rowMaps.denominator.n}} files | not measured (prep) |
+| quasiIdentifiersBelowK (HEALTH-S1 only) | {{manifest.assertionEvidence.quasiIdentifiersBelowK.hits}} / {{manifest.assertionEvidence.quasiIdentifiersBelowK.denominator.n}} persons | not measured (prep) |
+
+### HEALTH-S1 purpose-check thresholds
+
+The original threshold remains 0.90. An enumerated sacrifice can permit a lower
+score at its fixed floor; label it **accepted sacrifice**, not original target met.
+A score below either applicable floor, a null, or an errored task fails. Show both
+before and after the actual last-step suppression, not a pre-suppression candidate.
+
+| Purpose check | Original threshold | Enumerated sacrifice floor | Before | After | Targets met / not met |
+|---|---|---|---|---|---|
+| H-U2 | ≥ 0.90 | none | {{manifest.measured.utility.tasks[task=H-U2].before}} | {{manifest.measured.utility.tasks[task=H-U2].after}} | not measured (prep) |
+| H-U4 | ≥ 0.90 | {{manifest.sacrifices[check=H-U4].floor}} (policy 0.60) | {{manifest.measured.utility.tasks[task=H-U4].before}} | {{manifest.measured.utility.tasks[task=H-U4].after}} | not measured (prep) |
+| H-U6 | ≥ 0.90 | {{manifest.sacrifices[check=H-U6].floor}} (policy 0.60) | {{manifest.measured.utility.tasks[task=H-U6].before}} | {{manifest.measured.utility.tasks[task=H-U6].after}} | not measured (prep) |
+| H-U7 | ≥ 0.90 | none | {{manifest.measured.utility.tasks[task=H-U7].before}} | {{manifest.measured.utility.tasks[task=H-U7].after}} | not measured (prep) |
+| H-U8 | ≥ 0.90 | {{manifest.sacrifices[check=H-U8].floor}} (policy 0.60) | {{manifest.measured.utility.tasks[task=H-U8].before}} | {{manifest.measured.utility.tasks[task=H-U8].after}} | not measured (prep) |
+
+Overall pets-eval utility and composite before/after: **not measured in the current
+manifest**. The current measurer writes task scores and privacy components, not
+these summary fields. Do not invent `measured.privacy.components[component=utility]`
+or use `measured.baselines` as this release's result. If a final producer adds
+summary keys, document the real keys and bind them before quoting their numbers.
+
+<!-- IF #24 -->
+### CS-S1 privacy floors and purpose-check thresholds
+
+| Privacy target / floor | Measured value from CS-S1 | Targets met / not met |
+|---|---|---|
+| NATIONAL_ID exact-match recall ≥ 0.98 | {{manifest.residualRisks[risk=target-recall-national-id].rate.value}}; {{manifest.residualRisks[risk=target-recall-national-id].description}} | not measured (prep) |
+| PAYMENT_CARD exact-match recall ≥ 0.98 | {{manifest.residualRisks[risk=target-recall-payment-card].rate.value}}; {{manifest.residualRisks[risk=target-recall-payment-card].description}} | not measured (prep) |
+| IBAN exact-match recall ≥ 0.98 | {{manifest.residualRisks[risk=target-recall-iban].rate.value}}; {{manifest.residualRisks[risk=target-recall-iban].description}} | not measured (prep) |
+| SECRET exact-match recall ≥ 0.98 | {{manifest.residualRisks[risk=target-recall-secret].description}} | **not met (D45)**; later figure optimistic, not untouched holdout proof |
+| No HEALTH in released text; healthInText hits = 0 | {{manifest.assertionEvidence.healthInText.hits}} / {{manifest.assertionEvidence.healthInText.denominator.n}} turns | not measured (prep); bounded by the independent check's coverage |
+| conversations.started_ts at hour or coarser | {{manifest.fieldJustifications[table=conversations,column=started_ts].rung}} | not measured (prep); confirm contract form and fresh gate |
+| turns.ts at hour or coarser | {{manifest.fieldJustifications[table=turns,column=ts].rung}} | not measured (prep); confirm contract form and fresh gate |
+
+| Purpose check | Original threshold | Enumerated sacrifice floor | Before | After | Targets met / not met |
+|---|---|---|---|---|---|
+| CS-U1 | ≥ 0.90 | none | {{manifest.measured.utility.tasks[task=CS-U1].before}} | {{manifest.measured.utility.tasks[task=CS-U1].after}} | not measured (prep) |
+| CS-U3 | ≥ 0.90 | none | {{manifest.measured.utility.tasks[task=CS-U3].before}} | {{manifest.measured.utility.tasks[task=CS-U3].after}} | not measured (prep) |
+| CS-U4 | ≥ 0.90 | none | {{manifest.measured.utility.tasks[task=CS-U4].before}} | {{manifest.measured.utility.tasks[task=CS-U4].after}} | not measured (prep) |
+| CS-U5 | ≥ 0.90 | {{manifest.sacrifices[check=CS-U5].floor}} (policy 0.80) | {{manifest.measured.utility.tasks[task=CS-U5].before}} | {{manifest.measured.utility.tasks[task=CS-U5].after}} | not measured (prep) |
+
+**D45, do not shorten away the shortfall:**
+{{manifest.residualRisks[risk=target-recall-secret].description}}
+
+That complete manifest target note is the source for the historical **15/17 before
+the redactor change** (about 0.88) against **0.98**, the later count/denominator and
+the contamination warning. Keep the count and denominator inside this placeholder,
+not hand-typed into submitted text. The existing schema has no separate historical
+`tp`/`support` fields: do not invent them. Current `measured.redaction.labels` counts
+cannot replace the pre-change count. The note's `rate.denominator.n` is held-out
+**turns**, not SECRET spans; never use it as the SECRET recall denominator.
+
+The later result is **optimistic** because held-out misses informed the rule.
+The target is not lowered or described as met on untouched data. State exact match,
+evaluation frame and the accepted turn-level template-held-out split. Gate zero
+hits protects only within the independent check's coverage; it is not recall proof.
+If this target note is absent, keep “not measured” for its values and block final
+CS-S1 claim approval until the manifest carries D45; do not silently omit D45.
+
+D29 fallback: only claim strict/no-withholding or fallback after reading the final
+manifest and proof. If turns were withheld, quote the real sacrifice note/count,
+CS-U1/CS-U5 effects and reduced checker independence. No invented fallback count key.
+<!-- END IF -->
+
+## 5. Sharing scenario and limitations, then proof
+
+For each release show recipient, purpose and trust level; `fitFor`, `notFitFor`,
+`sacrifices`, `residualRisks`. Pseudonymised data is still personal data; the
+controller retains the key. Synthetic templated data does not establish general
+speech performance. Recipient digests catch accidental changes, not a determined
+editor; only full verify checks the HMAC signature.
+
+Attacker linkage after protection:
+{{manifest.residualRisks[risk=linkage-attackers].rate.status}}; attribute inference:
+{{manifest.residualRisks[risk=attribute-inference].rate.status}}. If either status
+is `not_measured`, write “not measured”, never zero. To claim both personas, require
+actual per-persona measured risk entries bound to the final inputs and document
+their IDs; a generic note or scorecard linkage number is insufficient.
+
+Gate status: {{manifest.gate.status}}. Read actual `gate.checks` entries; derive
+pass N / required applicable N and separately count declared not-applicable checks.
+Never count a missing/error/not-run result as a pass or invent `.count` JSON keys.
+Run the real CLI for limited verify and full verify on that same release and SHA;
+record the actual outputs, exits and check totals in SOURCES. No verify outcome
+field exists in the manifest. Demonstrate a refusal on hand-made synthetic input
+with the real CLI and report check/count only. These are pending proof actions,
+not claims that this prep ran the release, gate or verify successfully.
+
+## Claim gates and finalisation handoff
+
+Only retain text inside `<!-- IF #n -->...<!-- END IF -->` when issue #n's work is
+merged **and** the particular claim is verified on the final SHA. Otherwise drop
+the whole block; remove the markers in either outcome. A closed issue alone is
+not merge or measurement evidence. Markers are drafting instructions, not claims.
+
+| Enabling issue | Finalisation condition |
+|---|---|
+| #24 | CS-S1 producer + privacy must-fixes merged; real final-SHA release, both verify tiers, per-label notes, D45 and any D29 sacrifice disclosed |
+| #32 | D39 go decision after both releases pass; front end merged and verified; no-go/unmerged becomes future work only |
+| #117 | Web app merged; final-SHA evidence for display-time verification, manifest-listed file/digest binding and D41 label; real-kit row view never read by agents |
+| #127 | Parallel search merged; final-SHA determinism across worker counts, offline workers and fail-closed worker error; no timed speed claim without measurement |
+| #106 | D33 rung or disclosed threat-model exception actually merged and present in final release; H-U7 effect measured |
+
+Finaliser creates `docs/story/final/` only after review + fresh proof. Required:
+`name.txt` (≤80 characters), `tagline.txt` (≤140), `description.md` (≤5,000; no
+headings/editorial notes), `built-with.txt` (first five chips in 01),
+`pitch-4min.md`, `video-script.md`, `SOURCES.md`.
+
+SOURCES is a plain Markdown note, **no HTML comments**. Record exact final SHA,
+absolute HEALTH-S1 and eligible CS-S1 manifest paths, input digests, each retained
+claim/number's scenario + actual key/selector, and real gate/verify/refusal commands
+and exits. Fixed policy thresholds and presentation timings cite their spec/code,
+not a fabricated measurement. Resolve all placeholders; keep “not measured” with
+reason where unavailable. Have independent Spec review check claims against those
+exact manifests and Standards review check vocabulary and content freedom.
+
+Readiness CLI: `python docs/story/check_final.py` (defaults to this checkout's
+`docs/story/final/`; explicit folder argument is for synthetic fixtures). It fails
+on missing/empty deliverables, unresolved placeholders, comment/claim markers,
+common editorial notes, description headings and over-limit text. It does not
+certify claim truth, proof freshness or absence of all possible editorial wording.
+Count actual final text including whitespace/newlines, not just visible prose.
+
+`tests/story_kit/test_final_story.py` exercises that CLI on planted
+`docs/story/final/` fixtures. The real-folder readiness test has the named skip
+`story-finalisation-awaits-final-review-and-final-sha-proof` only while the folder
+is absent. That skip is **not a pass** and blocks closing #103; once any real
+final folder exists, missing files/markers/limits fail normally. No final content
+or release evidence is minted by this preparation.

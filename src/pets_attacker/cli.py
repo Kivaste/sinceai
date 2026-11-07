@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from pets_release.manifest.canonical import loads_strict
 from pets_release.offline import entry_point
 
 from .linkage import RungError, qis_from_spec
@@ -36,7 +37,8 @@ def run(kit: Path, release: Path, label: str, scoring_dir: Path | None = None, r
         rungs_path: Path | None = None) -> dict:
     if rungs_path is None:
         raise RungError("--rungs is required: rungs are never inferred from cell shape")
-    rungs = json.loads(Path(rungs_path).read_text(encoding="utf-8-sig")).get(TABLE)
+    # #114: strict (duplicate keys, NaN/Infinity refuse); the rung record is never partially parsed
+    rungs = loads_strict(Path(rungs_path).read_text(encoding="utf-8-sig")).get(TABLE)
     if not isinstance(rungs, dict):
         raise RungError("rung metadata has no entry for the table")
     rowmap_path = _rowmap_path(release, scoring_dir, rowmaps or {})
