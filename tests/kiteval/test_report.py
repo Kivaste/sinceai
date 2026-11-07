@@ -316,7 +316,7 @@ def test_export_rejects_odd_dataset_and_table_names():
 # ---- review round 2: sections and benign "not evaluated" ------------------
 
 NO_QI = "no overlapping quasi-identifiers between adversary and protected table"
-EXPECTED = {"ed_visits": {"free_text": ["chief_complaint"], "linkage": True}}
+EXPECTED = {"ed_visits": {"free_text": ["chief_complaint"], "linkage": {"attacks": ["news_clips_health"]}}}
 
 
 def _validate_expecting(report):
@@ -395,3 +395,92 @@ def test_complete_report_passes_with_expected_sections():
     assert _validate_expecting(_passing_report())["not_applicable"] == []
 
 
+
+
+
+# ---- review round 3: linkage coverage and trajectories ----------------------
+
+
+def _expecting(report, expected):
+    return validate_report(report, scenario="HEALTH-S1", required_tasks=REQUIRED, tables=TABLES,
+                           expected_sections={"ed_visits": expected})
+
+
+def _rejected(report, expected, reason):
+    with pytest.raises(ScorecardRejected) as caught:
+        _expecting(report, expected)
+    assert caught.value.reason == reason
+
+
+def test_empty_linkage_dict_is_a_fail_when_attacks_are_expected():
+    report = _passing_report()
+    _ed(report)["linkage"] = {}
+    _rejected(report, {"linkage": {"attacks": ["news_clips_health"]}}, "missing_section")
+
+
+def test_linkage_missing_an_expected_attack_is_a_fail():
+    _rejected(_passing_report(), {"linkage": {"attacks": ["news_clips_health", "public_directory"]}},
+              "missing_section")
+
+
+def test_linkage_with_no_expected_attacks_needs_the_kits_no_attack_spec_note():
+    report = _passing_report()
+    _ed(report)["linkage"] = {}
+    _rejected(report, {"linkage": {"attacks": []}}, "missing_section")
+    _ed(report)["linkage"] = {"note": "no attack spec targets this table (metadata/attack_specs.json)"}
+    summary = _expecting(report, {"linkage": {"attacks": []}})
+    assert summary["not_applicable"][0]["code"] == "no_attack_spec"
+
+
+TRAJ = {"trajectories": {"card_id": {"time": "ts", "location": ["stop_id"]}}}
+
+
+def _traj(report, result):
+    _ed(report)["trajectory_unicity"] = {"card_id": result}
+
+
+def test_trajectory_no_usable_points_is_a_fail_it_may_be_unparseable_timestamps():
+    report = _passing_report()
+    _traj(report, {"evaluated": False, "reason": "no usable points"})
+    _rejected(report, {**TRAJ, "columns": ["card_id", "ts", "stop_id"]}, "not_evaluated")
+
+
+def test_trajectory_time_missing_reason_needs_proof_the_column_is_absent():
+    report = _passing_report()
+    _traj(report, {"evaluated": False, "reason": "user or time column missing"})
+    _rejected(report, {**TRAJ, "columns": ["card_id", "ts", "stop_id"]}, "not_evaluated")
+    summary = _expecting(report, {**TRAJ, "columns": ["card_id", "stop_id"]})
+    assert summary["not_applicable"] == [
+        {"table": "ed_visits", "section": "trajectory_unicity", "key": "card_id", "code": "trajectory_time_removed"}]
+
+
+def test_trajectory_location_missing_reason_needs_every_location_column_absent():
+    report = _passing_report()
+    _traj(report, {"evaluated": False, "reason": "no location column"})
+    _rejected(report, {**TRAJ, "columns": ["card_id", "ts", "stop_id"]}, "not_evaluated")
+    summary = _expecting(report, {**TRAJ, "columns": ["card_id", "ts"]})
+    assert summary["not_applicable"][0]["code"] == "trajectory_location_removed"
+
+
+def test_trajectory_with_zero_users_tested_is_a_zero_denominator_fail():
+    report = _passing_report()
+    _traj(report, {"evaluated": True, "unicity": 0.0, "n_users_tested": 0, "note": "no user has points"})
+    _rejected(report, {**TRAJ, "columns": ["card_id", "ts", "stop_id"]}, "zero_denominator")
+
+
+def test_trajectory_with_users_tested_passes():
+    report = _passing_report()
+    _traj(report, {"evaluated": True, "unicity": 0.2, "n_users_tested": 50})
+    assert _expecting(report, {**TRAJ, "columns": ["card_id", "ts", "stop_id"]})["not_applicable"] == []
+
+
+def test_trajectory_user_removed_is_accepted_only_when_the_column_is_really_absent():
+    report = _passing_report()
+    _traj(report, {"evaluated": True, "unicity": 0.0, "note": "card_id removed: traces cannot be linked"})
+    _rejected(report, {**TRAJ, "columns": ["card_id", "ts", "stop_id"]}, "structure")
+    summary = _expecting(report, {**TRAJ, "columns": ["ts", "stop_id"]})
+    assert summary["not_applicable"][0]["code"] == "trajectory_user_removed"
+
+
+def test_missing_expected_trajectory_section_is_a_fail():
+    _rejected(_passing_report(), {**TRAJ, "columns": ["card_id", "ts", "stop_id"]}, "missing_section")

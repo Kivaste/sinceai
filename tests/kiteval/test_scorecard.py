@@ -175,3 +175,31 @@ def test_required_result_sections_come_from_the_kit_for_this_scenario(kit, relea
     assert summary["not_applicable"] == [
         {"table": "conversations", "section": "k_anonymity", "key": "", "code": "no_quasi_identifier"}]
 
+
+
+def test_planted_row_map_in_the_release_is_refused_even_if_not_passed(kit, release):
+    prot = release[0]
+    (prot / "rowmap_conversations.csv").write_text("protected_row,original_record_id\n0,c1\n", encoding="utf-8")
+    with pytest.raises(RowMapRejected) as caught:
+        _run(kit, release)
+    assert caught.value.reason == "rowmap_in_release"
+
+
+@pytest.mark.parametrize("name", ["notes.txt", "scorecard.json", "extra.csv"])
+def test_any_file_beyond_the_tables_and_manifest_is_refused(kit, release, name):
+    (release[0] / name).write_text("x", encoding="utf-8")
+    with pytest.raises(ScorecardRejected) as caught:
+        _run(kit, release)
+    assert caught.value.reason in {"release_extra_file", "unknown_table"}
+
+
+def test_subfolder_in_the_release_is_refused(kit, release):
+    (release[0] / "sub").mkdir()
+    with pytest.raises(ScorecardRejected) as caught:
+        _run(kit, release)
+    assert caught.value.reason == "release_extra_file"
+
+
+def test_manifest_alone_is_allowed_next_to_the_tables(kit, release):
+    (release[0] / "privacy_manifest.json").write_text("{}", encoding="utf-8")
+    assert _run(kit, release)["tasks"][0]["status"] == "ok"

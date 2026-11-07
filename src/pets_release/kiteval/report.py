@@ -47,13 +47,12 @@ def _scenario_id(report: dict):
 
 # `evaluated: False` reasons that mean "the attack/evaluation has nothing to act on", taken from the
 # pets-eval 1.0.0 source (attacks.py, privacy.py, scorecard.py). Anything else is a fail.
+# Trajectory outcomes are NOT here: they are benign only when the release provably lacks the input
+# columns (see _trajectory_unavailable).
 BENIGN_REASONS = {
     "no overlapping quasi-identifiers between adversary and protected table": "no_overlapping_qi",
     "no gold spans in package": "no_gold_spans",
     "no values": "no_values",
-    "user or time column missing": "trajectory_column_removed",
-    "no location column": "trajectory_column_removed",
-    "no usable points": "trajectory_no_usable_points",
 }
 BENIGN_NOTES = {
     "no catalogued quasi-identifier kept": "no_quasi_identifier",
@@ -73,7 +72,21 @@ def _walk(node, path=()):
             yield from _walk(v, (*path, str(i)))
 
 
-def _scan_nested(name: str, table: dict, required_text: set, found: list) -> None:
+def _trajectory_unavailable(path, reason, expected: dict):
+    """Code for an unavailable trajectory evaluation, only if the release lacks the input columns."""
+    spec = (expected.get("trajectories") or {}).get(path[1]) if len(path) == 2 else None
+    cols = set(expected.get("columns", ()))
+    if spec is None:
+        return None
+    if reason == "user or time column missing" and spec["time"] not in cols:
+        return "trajectory_time_removed"
+    if reason == "no location column" and not (set(spec["location"]) & cols):
+        return "trajectory_location_removed"
+    return None
+
+
+def _scan_nested(name: str, table: dict, expected: dict, found: list) -> None:
+    required_text = set(expected.get("free_text", ()))
     """Errored or unavailable sub-results anywhere in a table record are a fail, except the
     allowlisted benign ones, which are recorded as not_applicable."""
     for path, d in _walk(table):
@@ -90,6 +103,12 @@ def _scan_nested(name: str, table: dict, required_text: set, found: list) -> Non
             reason = d.get("reason")
             if isinstance(reason, str) and reason.lower().startswith("error"):
                 raise ScorecardRejected("error_status")
+            if path[:1] == ("trajectory_unicity",) and isinstance(reason, str):
+                code = _trajectory_unavailable(path, reason, expected)
+                if code is None:
+                    raise ScorecardRejected("not_evaluated")
+                found.append({"table": name, "section": "trajectory_unicity", "key": path[-1], "code": code})
+                continue
             if not isinstance(reason, str) or reason not in BENIGN_REASONS:
                 raise ScorecardRejected("not_evaluated")
             if path[:1] == ("free_text",) and len(path) > 1 and path[1] in required_text:
@@ -127,7 +146,23 @@ def _positive(v) -> bool:
     return _num(v) and v > 0
 
 
-def _check_released(tr: dict, expected: dict) -> None:
+def _check_expected_linkage(tr: dict, linkage_expectation) -> None:
+    """Every attack the kit should have run for this table has a result, or the kit says why none apply."""
+    if linkage_expectation is None:
+        return
+    linkage = tr.get("linkage")
+    if not isinstance(linkage, dict) or not linkage:
+        raise ScorecardRejected("missing_section")
+    attacks = list(linkage_expectation.get("attacks", ()))
+    if not attacks:
+        if linkage.get("note") not in BENIGN_NOTES:
+            raise ScorecardRejected("missing_section")
+        return
+    if any(not isinstance(linkage.get(a), dict) for a in attacks):
+        raise ScorecardRejected("missing_section")
+
+
+def _check_released(name: str, tr: dict, expected: dict, found: list) -> None:
     for section in BASELINE_SECTIONS:
         if section not in tr:
             raise ScorecardRejected("missing_section")
@@ -135,8 +170,23 @@ def _check_released(tr: dict, expected: dict) -> None:
     if expected.get("free_text") and (
             not isinstance(free_text, dict) or any(c not in free_text for c in expected["free_text"])):
         raise ScorecardRejected("missing_section")
-    if expected.get("linkage") and not isinstance(tr.get("linkage"), dict):
-        raise ScorecardRejected("missing_section")
+    _check_expected_linkage(tr, expected.get("linkage"))
+    trajectories = tr.get("trajectory_unicity") if isinstance(tr.get("trajectory_unicity"), dict) else {}
+    for user in expected.get("trajectories") or {}:
+        if not isinstance(trajectories.get(user), dict):
+            raise ScorecardRejected("missing_section")
+    cols = set(expected.get("columns", ()))
+    for user, res in trajectories.items():
+        if isinstance(res, dict) and res.get("evaluated") is True:
+            if "n_users_tested" in res:
+                if not _positive(res["n_users_tested"]):
+                    raise ScorecardRejected("zero_denominator")
+            elif (isinstance(res.get("note"), str) and res["note"] == f"{user} removed: traces cannot be linked"
+                    and user not in cols):
+                found.append({"table": name, "section": "trajectory_unicity", "key": user,
+                              "code": "trajectory_user_removed"})
+            else:
+                raise ScorecardRejected("structure")
     if not _int(tr.get("rows_original")) or not _int(tr.get("rows_protected")):
         raise ScorecardRejected("structure")
     if tr["rows_original"] <= 0 or tr["rows_protected"] <= 0:
@@ -174,7 +224,7 @@ def _check_released(tr: dict, expected: dict) -> None:
 def _check_table(name: str, tr: dict, expected: dict, found: list) -> dict:
     if not _name(name):
         raise ScorecardRejected("structure")
-    _scan_nested(name, tr, set(expected.get("free_text", ())), found)
+    _scan_nested(name, tr, expected, found)
     status = tr.get("status")
     if status == "error":
         raise ScorecardRejected("error_status")
@@ -183,7 +233,7 @@ def _check_table(name: str, tr: dict, expected: dict, found: list) -> dict:
     if not _int(tr.get("rows_original")) and status == "withheld":
         raise ScorecardRejected("structure")
     if status == "released":
-        _check_released(tr, expected)
+        _check_released(name, tr, expected, found)
     return {"table": name, "status": status, "rows_original": int(tr["rows_original"]),
             "rows_protected": int(tr["rows_protected"]) if status == "released" else None}
 
@@ -237,6 +287,7 @@ def validate_report(report: dict, *, scenario: str, required_tasks: Iterable[str
         "tables": exported_tables,
         "not_applicable": found,
     }
+
 
 
 

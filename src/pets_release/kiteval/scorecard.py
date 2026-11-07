@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pandas as pd
 from pets_eval import io as kit_io
+from pets_eval import scorecard as kit_scorecard
 
 from pets_release.kiteval.report import ScorecardRejected, validate_report
 from pets_release.kiteval.rowmap import Lineage, RowMapRejected, validate_row_map
@@ -25,19 +26,53 @@ def _inside(child: Path, parent: Path) -> bool:
     return child == parent or parent in child.parents
 
 
-def _expected_sections(root: Path, dataset: str, catalog, tables) -> dict:
-    """Result sections the kit can produce for each table: free-text leakage for catalogued free-text
-    columns that have gold spans, linkage when the kit ships identity truth for the table."""
+MANIFEST = "privacy_manifest.json"
+
+
+def _scan_release(protected_dir: Path) -> None:
+    """The release folder holds the protected tables and the manifest, nothing else: a planted row map
+    or scoring file is refused even when no caller passed it."""
+    for entry in sorted(protected_dir.iterdir()):
+        if entry.name.startswith("rowmap_"):
+            raise RowMapRejected("rowmap_in_release")
+        if entry.is_dir() or not (entry.name == MANIFEST or entry.suffix == ".csv"):
+            raise ScorecardRejected("release_extra_file")
+
+
+def _expected_sections(root: Path, dataset: str, scen: dict, catalog, tables: dict,
+                       release: dict) -> dict:
+    """Result sections the kit should produce for each table, from the kit's own metadata:
+    free-text leakage for catalogued free-text columns with gold spans; the linkage attacks its
+    spec/adversary selection runs when identity truth exists; trajectory unicity per spec; and
+    the release's columns, used to prove an input was really removed."""
+    all_specs = kit_io.load_attack_specs(root)
+    spec_file = root / "metadata" / "attack_specs.json"
+    trajectories = json.loads(spec_file.read_text(encoding="utf-8")).get("trajectories", []) if spec_file.exists() else []
     out = {}
     for name, path in tables.items():
         cols = set(pd.read_csv(path, dtype=str, nrows=0).columns)
         text = catalog[(catalog.table == name) & (catalog.privacy_role == "free_text")].column
+        specs = [s for s in all_specs if s["dataset"] == dataset and s["table"] == name]
+        linkage = None
+        if (root / "truth" / f"{dataset}__{name}.csv").exists():
+            adversaries = kit_scorecard._adversaries_for(root, dataset, scen)
+            if not specs and any(s["dataset"] == dataset for s in all_specs):
+                attacks = []
+            elif specs:
+                chosen = [s for s in specs if s["adversary"] in adversaries] or specs
+                attacks = sorted({s["adversary"] for s in chosen})
+            else:
+                attacks = sorted(adversaries)
+            linkage = {"attacks": attacks}
         out[name] = {
             "free_text": sorted(c for c in text if c in cols and kit_io.spans_path(root, dataset, name, c).exists()),
-            "linkage": (root / "truth" / f"{dataset}__{name}.csv").exists(),
+            "linkage": linkage,
+            "trajectories": {t["user"]: {"time": t["time"],
+                                         "location": [t[k] for k in ("lat", "lon", "place") if t.get(k)]}
+                             for t in trajectories if t["dataset"] == dataset and t["table"] == name},
+            "columns": sorted(release.get(name, ())),
         }
     return out
-
 
 def run_scorecard(original_dir, protected_dir, *, scenario: str, root, rowmaps: dict[str, str | Path],
                   lineage: dict[str, Lineage], out_dir) -> dict:
@@ -59,6 +94,7 @@ def run_scorecard(original_dir, protected_dir, *, scenario: str, root, rowmaps: 
     if not scen or scen.get("dataset") != original_dir.name:
         raise ScorecardRejected("scenario")
 
+    _scan_release(protected_dir)
     orig_files, prot_files = _tables(original_dir), _tables(protected_dir)
     catalog = kit_io.load_catalog(root)
     catalog = catalog[catalog.dataset == original_dir.name]
@@ -97,8 +133,11 @@ def run_scorecard(original_dir, protected_dir, *, scenario: str, root, rowmaps: 
     except (OSError, ValueError):
         raise ScorecardRejected("structure") from None
     return validate_report(report, scenario=scenario, required_tasks=scen.get("utility_requirements", []),
-                           tables=orig_files, expected_sections=_expected_sections(root, original_dir.name,
-                                                                                   catalog, orig_files))
+                           tables=orig_files, expected_sections=_expected_sections(
+                               root, original_dir.name, scen, catalog, orig_files,
+                               {n: pd.read_csv(p, dtype=str, nrows=0).columns for n, p in prot_files.items()}))
+
+
 
 
 
