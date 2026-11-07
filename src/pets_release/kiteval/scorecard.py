@@ -85,6 +85,9 @@ def _expected_sections(root: Path, dataset: str, scen: dict, catalog, tables: di
     for name, path in tables.items():
         cols = set(_read_str(path, nrows=0).columns)
         text = catalog[(catalog.table == name) & (catalog.privacy_role == "free_text")].column
+        # the kit's k step runs on exactly these (scorecard.evaluate_table: catalogued QIs in the release)
+        qis = catalog[(catalog.table == name) & (catalog.privacy_role == "quasi_identifier")].column
+        kept = set(release.get(name, ()))
         specs = [s for s in all_specs if s["dataset"] == dataset and s["table"] == name]
         linkage = None
         identity = _load_identity_truth(root, dataset, name)
@@ -110,6 +113,7 @@ def _expected_sections(root: Path, dataset: str, scen: dict, catalog, tables: di
                                          "location": [t[k] for k in ("lat", "lon", "place") if t.get(k)]}
                              for t in trajectories if t["dataset"] == dataset and t["table"] == name},
             "columns": sorted(release.get(name, ())),
+            "quasi_identifiers": sorted({c for c in qis if c in kept}),
         }
     return out
 
