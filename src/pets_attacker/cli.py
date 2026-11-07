@@ -1,4 +1,4 @@
-﻿"""Run both personas on a HEALTH-S1 release folder and print aggregate rates.
+"""Run both personas on a HEALTH-S1 release folder and print aggregate rates.
 
 python -m pets_attacker --kit <kit root> --release <folder with ed_visits.csv + rowmap_ed_visits.csv> --label b2k --out out.json
 """
@@ -78,7 +78,7 @@ def main(argv=None) -> int:
         rowmaps[table] = Path(path)
     try:
         res = run(a.kit, a.release, a.label, a.scoring_dir, rowmaps, a.rungs)
-    except (FileNotFoundError, KeyError, ValueError) as e:
+    except (FileNotFoundError, KeyError, IndexError, ValueError) as e:
         print(f"attacker: refused: {type(e).__name__}", file=sys.stderr)
         return 2
     a.out.parent.mkdir(parents=True, exist_ok=True)
