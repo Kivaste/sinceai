@@ -21,7 +21,8 @@ You are the **Opus orchestrator** for `Kivaste/sinceai`. You dispatch implemente
 - **#117 fast track:** only high findings against D35/D41 block it. It merges alone, ahead of the queue.
 - **Merge after the recording:** #106 and #128. The video doesn't quote k. #127 comes after #106 and #118, merging by 20:00 or deferred. Verda testing is a planning-session side lane, off the critical path.
 - **#32 LLM: GO via the Mistral API (D47).** The key file is `C:\Users\kivas\AI\sinceai-out\llm\llm.env`, created by the human's wizard; load it into env vars only and never print it. #32 merges before the pin only if it doesn't delay #117; otherwise after.
-- **Latest measured release evidence: `f98cf62`** (`C:\Users\kivas\AI\sinceai-out\proof-f98cf62\`): plain and measured HEALTH-S1 RELEASED, both verify tiers exit 0. k stays provisional until #106. The planning session reruns the proof on the pin.
+- **DEMO PIN `5b260ec` is pushed and proven** (`C:\Users\kivas\AI\sinceai-out\proof-5b260ec\`, also on #137). Plain and measured HEALTH-S1 RELEASED, the gate passed 41 of 41, both verify tiers exit 0. k stays provisional until #106. The D53 window closed at 16:58, and the lanes have resumed.
+- **Merge only AFTER the human confirms the recording is done:** #106, #128, #138. Until then they may be approved, but not merged. Everything else merges normally: #30, #32, #132, #116, #80, #110/#113/#131, #136, #121, #130.
 - **Steers come only from the planning session.** Decisions live in docs/decisions.md (D33-D48); read them after every hand-over.
 
 ### 2.1 Schedule the dependency graph, not a worker quota [D24, D29]
