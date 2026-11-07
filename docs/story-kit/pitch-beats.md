@@ -10,7 +10,7 @@ Do not type a number that has no placeholder. Each beat names the CLI command th
 - A hospital privacy officer must share ED visit data with a university research group studying crowding and revisits.
 - "Remove the names" is not anonymisation: under the B0 baseline, people can still be singled out. (Qualitative here; the HEALTH-S1 singling-out figure appears in Beat 6. Do not quote a kit percentage from any other scenario.)
 - Blanket k-anonymity (B2-k) keeps a scenario utility of only `{{measured.baselines.B2-k.utility_mean}}`, and it cannot answer H-U6 (`{{measured.baselines.B2-k.task.H-U6}}`), H-U7 (`{{measured.baselines.B2-k.task.H-U7}}`) or H-U8 (`{{measured.baselines.B2-k.task.H-U8}}`) at all (the kit publishes those as null; `—` below means null).
-- The published B0 baseline (names removed only) has a worst-case re-identification figure of `{{measured.baselines.B0.worst_reid}}`.
+- The published B0 baseline (names removed only) has a dataset-level worst-case re-identification figure (maximum across tables) of `{{measured.baselines.B0.worst_reid}}`.
 - Nobody can re-check an "anonymised" claim.
 - Live: `pets-release detect unseen --format unseen` (opener: it labels an unlabelled export without hints).
 
@@ -59,12 +59,12 @@ Utility, per purpose check, before and after (a score of 1 = same answer as the 
 Risk, before and after. Mind the denominators: they differ.
 
 - Our per-person k (authoritative, D22), over every released quasi-identifier: `{{measured.privacy.after.person_k.persons}}` persons counted, minimum k `{{measured.privacy.after.person_k.min}}`, share of PERSONS with k below 5: `{{measured.privacy.after.person_k.below_k_share}}`. There is no "before" for this: the original has no released form to take a k of.
-- Kit scorecard, share of ROWS in `ed_visits` with k below 5: `{{measured.privacy.before.k_below_5_share}}` before, `{{measured.privacy.after.k_below_5_share}}` after. Rows, not persons, and see the disclosure below.
-- Kit scorecard, linkage re-identification in `ed_visits`: `{{measured.privacy.before.linkage_reid}}` before, `{{measured.privacy.after.linkage_reid}}` after.
+- Kit scorecard, share of ROWS with k below 5, row-weighted across all tables: `{{measured.privacy.before.k_below_5_share}}` before, `{{measured.privacy.after.k_below_5_share}}` after. Rows, not persons, and see the disclosure below.
+- Kit scorecard, linkage re-identification, worst table: `{{measured.privacy.before.linkage_reid}}` before, `{{measured.privacy.after.linkage_reid}}` after.
 
-Against the published baselines (same scenario; scenario utility and worst-case re-identification):
+Against the published baselines (scenario utility, and the published dataset-level worst re-identification, the maximum across tables; not the HEALTH-S1 scenario figure):
 
-| Baseline | Scenario utility | worst_reid |
+| Baseline | Scenario utility | Worst re-identification (dataset level, max across tables) |
 |---|---|---|
 | B0 | `{{measured.baselines.B0.utility_mean}}` | `{{measured.baselines.B0.worst_reid}}` |
 | B2 | `{{measured.baselines.B2.utility_mean}}` | `{{measured.baselines.B2.worst_reid}}` |

@@ -78,4 +78,4 @@ def test_measurer_output_uses_the_same_ids_and_the_template_aggregates(args):
 
 def test_id_sets_are_disjoint_and_stable():
     assert not set(PRIVACY_IDS) & set(PERSON_K_IDS)
-    assert PRIVACY_IDS == ("privacy", "k_below_5_share", "linkage_reid")
+    assert PRIVACY_IDS == ("privacy", "k_below_5_share", "k_below_5_worst_table", "linkage_reid")

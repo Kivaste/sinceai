@@ -95,6 +95,14 @@ def test_no_digit_literals_outside_placeholders_in_numbers_sections():
     assert not re.search(BARE_DECIMAL, text), "a bare decimal is typed in the script instead of a placeholder"
 
 
+def test_no_mislabelled_scope_in_script_or_csv():
+    """Keys resolve across all tables (row-weighted / worst table / dataset level), never one table or HEALTH-S1."""
+    texts = [(KIT / "pitch-beats.md").read_text(encoding="utf-8"), (KIT / "numbers-template.csv").read_text(encoding="utf-8"),
+             (KIT / "numbers.csv").read_text(encoding="utf-8")]
+    assert all("ed_visits" not in t for t in texts)
+    assert "same scenario" not in texts[0]
+
+
 def test_bare_decimal_regex_catches_typed_numbers():
     for typed in ("utility 0.8", "kept .75 of it", "is 12.5 here"):
         assert re.search(BARE_DECIMAL, typed), typed

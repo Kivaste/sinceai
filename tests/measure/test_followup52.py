@@ -165,6 +165,70 @@ def test_out_of_range_risk_fails(args, monkeypatch):
     assert caught.value.reason == "score"
 
 
+# 6. k<5 aggregate: row-weighted share and worst table, both pinned ---------------------------------------
+def _two_tables(rates, rows, *, status="released"):
+    """Hand-made summary edit: tables a and b with k<5 rates and row counts, nothing else k-related."""
+    def edit(s):
+        for key in [k for k in s["risks"] if k.endswith(": records with k<5")]:
+            del s["risks"][key]
+        s["tables"] = [{"table": t, "status": status, "rows_original": n, "rows_protected": n}
+                       for t, n in rows.items()]
+        for t, r in rates.items():
+            s["risks"][f"{t}: records with k<5"] = r
+    return edit
+
+
+def _component(block, cid):
+    return next(c for c in block["privacy"]["components"] if c["component"] == cid)
+
+
+def test_k_below_5_share_is_row_weighted_and_the_worst_table_is_kept_apart(args, monkeypatch):
+    # a: 10 rows at 0.5 -> 5 rows below 5; b: 90 rows at 0.0. max = 0.5, row-weighted = 5/100
+    _patched(monkeypatch, _two_tables({"a": 0.5, "b": 0.0}, {"a": 10, "b": 90}))
+    block = measure(SCENARIO, **args)
+    assert _component(block, "k_below_5_share")["after"] == pytest.approx(0.05)
+    assert _component(block, "k_below_5_share")["before"] == pytest.approx(0.05)
+    assert _component(block, "k_below_5_worst_table")["after"] == 0.5
+    assert _component(block, "k_below_5_worst_table")["before"] == 0.5
+
+
+def test_k_below_5_weighted_share_uses_each_tables_row_count(args, monkeypatch):
+    _patched(monkeypatch, _two_tables({"a": 0.2, "b": 1.0}, {"a": 80, "b": 20}))  # (16 + 20) / 100
+    assert _component(measure(SCENARIO, **args), "k_below_5_share")["after"] == pytest.approx(0.36)
+
+
+@pytest.mark.parametrize("rows_protected", [None, 0, -3, 2.5, True, "10"])
+def test_k_below_5_share_fails_closed_on_a_bad_row_count(args, monkeypatch, rows_protected):
+    edit = _two_tables({"a": 0.5, "b": 0.0}, {"a": 10, "b": 90})
+
+    def bad(s):
+        edit(s)
+        s["tables"][0]["rows_protected"] = rows_protected
+    _patched(monkeypatch, bad)
+    with pytest.raises(MeasureRejected) as caught:
+        measure(SCENARIO, **args)
+    assert caught.value.reason == "risk_rows"
+
+
+def test_k_below_5_share_fails_closed_when_a_rate_has_no_table_row_count(args, monkeypatch):
+    def bad(s):
+        _two_tables({"a": 0.5}, {"a": 10})(s)
+        s["risks"]["ghost: records with k<5"] = 0.1  # no such table in the summary
+    _patched(monkeypatch, bad)
+    with pytest.raises(MeasureRejected) as caught:
+        measure(SCENARIO, **args)
+    assert caught.value.reason == "risk_rows"
+
+
+def test_k_below_5_share_fails_closed_when_a_released_table_has_no_rate(args, monkeypatch):
+    def bad(s):
+        _two_tables({"a": 0.5}, {"a": 10, "b": 90})(s)  # b is released but reports no k<5 rate
+    _patched(monkeypatch, bad)
+    with pytest.raises(MeasureRejected) as caught:
+        measure(SCENARIO, **args)
+    assert caught.value.reason == "risk_rows"
+
+
 def test_task_without_an_id_is_a_measure_rejection_not_a_keyerror(args, monkeypatch):
     _patched(monkeypatch, lambda s: s["tasks"][0].pop("id"))
     with pytest.raises(MeasureRejected) as caught:

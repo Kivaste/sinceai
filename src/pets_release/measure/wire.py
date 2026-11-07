@@ -65,8 +65,18 @@ def run_measured(*, kit, scenario: dict, created: str, key_text: str, out, plan_
     finally:
         pipeline.build_narrative = original
     if final.status == "released" and _digests(final.out) != _digests(scratch):
-        shutil.rmtree(final.out, ignore_errors=True)
-        shutil.rmtree(scoring_dir(final.out), ignore_errors=True)
+        left = []
+        for d in (final.out, scoring_dir(final.out)):
+            try:
+                shutil.rmtree(d)
+            except OSError:
+                left.append(d.name)
+            else:
+                if d.exists():
+                    left.append(d.name)
+        if left:
+            raise pipeline.RunError("measured release tables differ from the scored scratch release "
+                                    "AND cleanup failed: a mismatched release was left behind, delete it by hand")
         raise pipeline.RunError("measured release tables differ from the scored scratch release")
     return final
 
