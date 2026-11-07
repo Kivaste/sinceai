@@ -7,6 +7,7 @@ checks through 04's runner (final re-check) read them. Nothing here is logged ex
 
 from __future__ import annotations
 
+import functools
 import tempfile
 from collections.abc import Mapping
 from pathlib import Path
@@ -16,6 +17,7 @@ import pandas as pd
 from pets_release.checks import all_checks, run_checks
 from pets_release.checks.producer.kanon import PERSON_K, ROW_K, person_k_values
 from pets_release.ladders import WITHHELD, output_column
+from pets_release.pseudonym import RECORD_KEY, normalise
 
 BUILTIN_COMPONENTS = frozenset(
     {"qi_k_shortfall", "qi_unique_rate", "join_derived_qi", "direct_identifier_leak", "attribute_inference"}
@@ -70,9 +72,20 @@ def _write(folder: Path, prot: Mapping[str, pd.DataFrame], contract: dict, sourc
     return rowmaps
 
 
+def _person(kspec) -> dict:
+    """kspec person plus the pseudonymiser's own normalisation for its label (must-fix #57: person-k keys
+    persons by it, exactly as the producer context does); a normaliser already given is kept."""
+    p = dict(kspec["person"])
+    if "normalise" not in p:
+        label = p.get("label", RECORD_KEY)
+        normalise("", label)  # validates the label (content-free ValueError)
+        p["normalise"] = functools.partial(normalise, label=label)
+    return p
+
+
 def _context(source, rowmaps, kspec, k):
     return {"k": k, "source": source, "rowmaps": rowmaps, "record_keys": dict(kspec["record_keys"]),
-            "person": dict(kspec["person"]), "joins": [dict(j) for j in kspec.get("joins", [])]}
+            "person": _person(kspec), "joins": [dict(j) for j in kspec.get("joins", [])]}
 
 
 def person_k(prot, plan, policy, source, kspec, k):
