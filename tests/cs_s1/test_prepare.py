@@ -121,6 +121,14 @@ def test_controller_values_pass_matches_multi_token_values_anywhere():
     assert got == [("aino  mäki-ojala", "PERSON"), ("Rantatie 12 B", "ADDRESS")]
 
 
+def test_ip_literals_cover_private_and_spaced_but_not_times_or_bad_octets():
+    from pets_release.cs_s1.prepare import ip_literals
+
+    text = "a 10.0.0.1 b 192 . 168 . 1 . 2 c 12:30:45 d 300.1.1.1 e fe80::1 f 1.2.3.4.5"
+    got = [text[s:e] for s, e in ip_literals(text)]
+    assert got == ["10.0.0.1", "192 . 168 . 1 . 2", "fe80::1"]
+
+
 def test_controller_values_cover_names_and_addresses(prepared, minikit):
     for col in ("full_name", "street_address"):
         values = {v for v in minikit["customers"][col] if v}
