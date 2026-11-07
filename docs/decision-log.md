@@ -13,13 +13,14 @@ Each entry records:
 
 ## Entries
 
-### Sat 08:20 - STATUS SUMMARY (D16 08:30 checkpoint; only non-append exception)
+### Sat 09:55 - STATUS SUMMARY (replaces the 08:20 summary; only non-append exception)
 
-- **Done:** 50 issues closed. All spec tickets 01-22, 24, 26, 27, 28 and 30 are merged. **Story kit (22) merged `15b2a42` at ~07:50 and integration merged into `main` (`f8665e2`, full suite 2230 passed).** The HEALTH-S1 real-kit release passes the gate (40/40), both verify tiers and pets-eval (composite 0.9695, privacy 1.0, utility 0.9352). Must-fixes merged since 06:00: #52, #55, #57, #58, #59, #60, #64, #70, #75, #76, #82, plus #48.
-- **In flight:** 23 CS-S1 (fixture release green; real-kit gate still refuses on the secret/username checks, owned by #53 r3 and #54 r3, and on #92 split secrets); 25 search (HEALTH-S1 search release passes; re-merging 24's final head); 29 packager (approved; Merge after 23/25); 31 LLM (side lane, 14:00 gate); must-fix wave #61/#62/#84/#71 (in review), #63 (approved; merges after 23), #56 (after #53), #92 (after #54); follow-ups #67/#68 (review), #72-#74, #77/#79.
-- **Parked / human:** #33-#39 (human tasks).
-- **Critical path:** CS-S1 (23) is now the critical path, with 25 and 29 merging after it. Search go/no-go is at 12:00: 25 is green for HEALTH-S1 and its CS-S1 part depends on 23.
-- **Risks:** (1) Reviewer capacity: `opencode-go` (Gemini, Luna) and the opencode free tier (DeepSeek, GLM) are over quota; Sol is back since 08:06 after an auth expiry; only Grok + Sol remain. (2) CS-S1 gate secrets/usernames: the gate and redactor rules are converging, but both are in their 3rd and final review round. (3) The open rule-audit follow-ups (#65, #66, #69, #78, #80, #81, #83, #85, #87-#91, #93, #94) run only on spare capacity unless they touch fail-closed or leak behaviour.
+- **Done:** 58 issues closed. Spec tickets 01-22, 24, 26, 27, 28 and 30 are merged. Since 08:20: #67, #68, #72, #73, #74, #77, #79 and #91 merged, and the story drafts are merging now. Integration head `8cec414`, full suite 2357 passed, 5 skipped. The HEALTH-S1 release at the tip (`e846512`) passes the gate (40/40), both verify tiers and pets-eval (privacy 0.1716 -> 1.0, per-person k min 5). Draft PR #95 (`integration/pets-release` -> `main`) is open (D25).
+- **In flight:** 23 CS-S1 (round-2 fixes: recipient threading, manifest self-scan); 25 search (round-1 review, Grok + Sol); 29 packager (approved; Merge after 23/25); 31 LLM (round-4 fix; the pipeline part of AC3 is deferred to the 14:00 go/no-go); follow-ups #49 (review), #78 (round 2), #81/#83/#94, #85, #89 (round 2).
+- **Must-fix left:** #53 and #54 (fail-open highs found in round 3, being fixed), #92 (split secrets, built on #54), #56 (after #53), #63 (approved, after 23), and the #61/#62/#71/#84 wave (round-2 fix).
+- **Parked / human:** #33-#39 (human tasks); #87 (detector default lowers detection macro-F1 0.7286 -> 0.6146).
+- **ETA (EET):** search 25 merged by ~11:30 (before the 12:00 go/no-go). CS-S1 release passing gate + verify on the real kit by ~13:00 (needs #53, #54, #92 and then 23 + #63). Packager 29 by ~13:30, after 23/25. PR #95 ready after the final whole-branch review and fixes, ~16:00.
+- **Risks:** (1) CPU/memory saturation from parallel full suites: new test policy (affected tests at `-n 2` while iterating, one full `-n 4` before the done-report, the merger at `-n 8` one merge at a time). (2) The CS-S1 secret/username gate and redactor are past their 3-round cap; only highs block, and highs keep appearing. (3) D13g: Sol implements routine work from 09:55; AGENTS.md:64 is updated to match.
 
 ### Sat 00:15 — planning interview complete; see docs/decisions.md D6–D17
 
@@ -181,3 +182,24 @@ Each entry records:
 - **Why:** Single orchestrator; AGENTS.md is binding over the brief; judge-visible score trade-offs are a human call; machine stability.
 - **Evidence:** #87 comment; Sol refusals (sessions ses_e4b44d07..., ses_e4b44ea1...); merges `5966fb8`, `a48ef2e`.
 
+
+### Sat 09:55 - utilization nudge: 2 dispatched, the rest sequenced
+
+- **When:** Sat 09:55 EET
+- **Decision:** For the 09:23 utilization nudge (19 items): dispatched #92 (Opus, branched from #54's head, Merge after #54) and #85 (Sonnet, skipping items in files owned by in-flight tickets). Not dispatched, with the blocker recorded on each issue: #77, #79, #91 were already merged; #54, #62, #71, #84 and 23 have live fixers; 29 and #63 are approved but Merge after 23/25; #56 waits on #53, and #88 on #54 (same files); #65, #66, #69 wait on 23 and #63 (contract/CS files); #80 waits on 23 and the #61 wave (writer/core.py); #90 waits on 25 (run/cli.py), and its L2 changes judge-facing numbers; #93 waits on 23 (run/purpose.py).
+- **Why:** Each ticket owns its files, so parallel edits to the same file would conflict on merge.
+- **Evidence:** "Orchestrator 09:55 EET" comments on each issue.
+
+### Sat 10:05 - D27 affected tests only; ticket 25 split for CS-S1
+
+- **When:** Sat 09:58-10:05 EET
+- **Decision:** (1) Applied D27 (user): implementers, fixers and reviewers run only the affected tests through `scripts/overnight/affected-tests.ps1 -Run` (`pytest -n 2 -m "not slow"`), never the whole suite. Only the merger runs the full suite (`-n 8`), one merge at a time. The note was queued to all 14 reachable child sessions. It replaces the 09:55 policy (one full `-n 4` run before the done-report). Prompts call the helper with `-ExecutionPolicy Bypass`, because script execution is disabled on this machine. (2) Draft PR #95 opened (D25). (3) Ticket 25: Sol's round 1 found that #26's CS-S1 acceptance needs ticket 23. Split into #96 (Merge after 23, 25), so 25 ships the HEALTH-S1 search before the 12:00 go/no-go, with CS-S1 refusing fail-closed. Round-2 fixer dispatched: the measured entry point defaulted to the hand plan, and no CLI test covered the privacy-guard call.
+- **Why:** CPU pinned at 100% with ~155 python processes; the 12:00 search go/no-go.
+- **Evidence:** docs/decisions.md D27; PR #95; issue #96; Sol review session ses_e4b0536aeffeL6KsDdz9kXG8X0.
+
+### Sat 10:08 - D28 merge train; D27 enforced; quiet-branch audit
+
+- **When:** Sat 10:08 EET
+- **Decision:** (1) Applied D28 (user): one merger takes up to 4 ready tickets in Merge-after order, runs the full suite once on the combined result with `pytest -n 16` (Normal priority), bisects on red, and only one merger runs at a time. (2) D27 enforced: a stop-full-suite note went to the sessions for fu61, fu78, fu81, fu85, 31 and 25. (3) Quiet-branch audit, no re-dispatch needed: `fu63-cs-contract` is approved, Merge after 23 (it is branched from 23); `29-packager` is approved, Merge after 23 and 25; `fu61-producer-wave` has a live round-2 continuation (updated 09:59); `23-cs-s1` has a live round-2 fixer (10:00); `fu53-secrets` has a live round-4 fixer (09:59); `fu89-ladder` has a live round-2 fixer (10:02); `fu87-detector` is parked `ready-for-human` (detection F1 trade-off). The next merge train is 23 + #63 + 25 + 29 once 23 and 25 pass review.
+- **Why:** Fewer full-suite runs and faster merges.
+- **Evidence:** docs/decisions.md D28; session update times; issue comments of 09:55.
