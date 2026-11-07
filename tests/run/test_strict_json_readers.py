@@ -8,6 +8,8 @@ Rows (trigger -> result), all through a production CLI with hand-made synthetic 
   [same] duplicate "risks" inside a table, first value NaN                          -> exit 2 ScorecardRejected
   [measure CLI] kit attack_specs.json with a duplicate "trajectories" key           -> exit 2 ScorecardRejected
   [measure CLI] kit results/benchmark.json with a duplicate "baselines" key          -> exit 2 MeasureRejected
+  [measure CLI] gold-span JSONL handed to the child (it reads it raw) with a duplicate "spans", first NaN
+      -> exit 2 ScorecardRejected before the child runs, nothing released (control: strict spans release)
   [run CLI] kit scenarios.json entry with a duplicate key                            -> exit 2, nothing released
   [attacker CLI] kit attack_specs.json with a duplicate "attacks" key                -> refused, no output
 Guard (defect class found twice, AGENTS.md): no ``json.load``/``json.loads`` call in ``src/`` outside the strict
@@ -92,6 +94,39 @@ def test_duplicate_key_benchmark_is_refused_by_the_measure_cli(measured_kit, cap
     assert not out.exists()
 
 
+FREE_TEXT = "health,ed_visits,chief_complaint,free_text,text,narrative\n"
+SPAN = '[{"start": 0, "end": 4, "label": "PERSON", "text": "Zqxw"}]'  # one testable synthetic gold span
+
+
+def _gold_spans(kit, line_for):
+    """Catalog chief_complaint as free text and write its gold-span JSONL (the pets-eval child reads it)."""
+    import pandas as pd
+
+    (kit / "metadata" / "field_catalog.csv").write_text(CATALOG + FREE_TEXT, encoding="utf-8")
+    vid = pd.read_csv(kit / "data" / "health" / "ed_visits.csv", dtype=str, nrows=1)["visit_id"].iloc[0]
+    d = kit / "metadata" / "pii_spans"
+    d.mkdir()
+    (d / "health__ed_visits__chief_complaint.jsonl").write_text(line_for(json.dumps(vid)) + "\n", encoding="utf-8")
+
+
+def test_strict_gold_spans_release_through_the_measure_cli(measured_kit):
+    kit, out = measured_kit
+    _gold_spans(kit, lambda vid: '{"record_id": ' + vid + ', "spans": ' + SPAN + '}')
+    assert wire.main(run_args(kit, out)[1:]) == 0  # control: the free-text path itself runs
+    assert any(out.glob("*.csv"))
+
+
+def test_duplicate_key_gold_spans_handed_to_the_child_are_refused_by_the_measure_cli(measured_kit, capsys):
+    """Review r1 (Sol, Standards) probe on #131: the child reads gold spans with a raw reader, so the wrapper must
+    validate them strictly before the child runs."""
+    kit, out = measured_kit
+    _gold_spans(kit, lambda vid: '{"record_id": ' + vid + ', "spans": [{"start": NaN, "end": 1, "label": "NAME"}], '
+                                 '"spans": ' + SPAN + '}')
+    assert wire.main(run_args(kit, out)[1:]) == 2
+    assert "ScorecardRejected" in capsys.readouterr().err
+    assert not out.exists()
+
+
 def test_duplicate_key_scenarios_is_refused_by_the_run_cli(tmp_path):
     kit, out = build_kit(tmp_path / "kit", edit=coarse_qis), tmp_path / "rel"
     entries = [json.dumps(s) for s in SCENARIOS]
@@ -113,22 +148,27 @@ def test_duplicate_key_attack_specs_is_refused_by_the_attacker_cli(tmp_path):
     assert not out.exists()
 
 
-# Raw json.load(s) calls allowed in src/, with the reason each is not an external record reader.
+# Exact number of raw json.load(s) calls allowed per file in src/, with the reason each is not an external
+# record reader. A count, not a whole-file exemption: a new raw reader in one of these files also fails.
 RAW_JSON_ALLOWED = {
-    "pets_release/manifest/canonical.py",      # the strict loader itself
-    "pets_release/minimiser/search.py",        # re-parses its own canonical() bytes (no duplicates, no NaN)
-    "pets_release/redaction_eval/frame.py",    # offline redaction metric harness; not a release/verify/measure path
+    "pets_release/manifest/canonical.py": 1,    # the strict loader itself
+    "pets_release/minimiser/search.py": 3,      # re-parses its own canonical() bytes (no duplicates, no NaN)
+    "pets_release/redaction_eval/frame.py": 1,  # offline redaction metric harness; not a release/verify/measure path
 }
 
 
 def test_no_raw_json_reader_outside_the_strict_loader():
     src = ROOT / "src"
-    found = []
+    counts, imported = {}, []
     for path in sorted(src.rglob("*.py")):
         rel = path.relative_to(src).as_posix()
         for node in ast.walk(ast.parse(path.read_text(encoding="utf-8-sig"))):
             if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
                     and node.func.attr in ("load", "loads") and isinstance(node.func.value, ast.Name)
-                    and node.func.value.id == "json" and rel not in RAW_JSON_ALLOWED):
-                found.append(f"{rel}:{node.lineno}")
-    assert found == []
+                    and node.func.value.id == "json"):
+                counts[rel] = counts.get(rel, 0) + 1
+            if isinstance(node, ast.ImportFrom) and node.module == "json" \
+                    and any(a.name in ("load", "loads", "*") for a in node.names):
+                imported.append(f"{rel}:{node.lineno}")  # `from json import loads [as x]` would dodge the call scan
+    assert imported == []
+    assert counts == RAW_JSON_ALLOWED

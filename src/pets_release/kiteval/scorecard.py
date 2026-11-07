@@ -24,6 +24,26 @@ def _read_str(path, **kw) -> pd.DataFrame:
     return pd.read_csv(path, dtype=str, keep_default_na=False, na_filter=False, **kw)
 
 
+def _strict_child_inputs(root: Path, *dirs: Path) -> None:
+    """#131: the pets-eval child (and its io helpers used in-process here) read the kit's JSON / JSONL with a raw
+    last-wins parser we may not edit. So, before any of them runs, every ``*.json`` and every non-blank line of
+    every ``*.jsonl`` under the kit's ``metadata/`` and the given dataset folders must parse through
+    ``loads_strict`` (duplicate keys and NaN/Infinity refuse). Content-free refusal; nothing is released."""
+    files = sorted(p for d in (Path(root) / "metadata", *dirs) if d.is_dir() for p in d.rglob("*")
+                   if p.is_file() and p.suffix.lower() in (".json", ".jsonl"))
+    for p in files:
+        try:
+            raw = p.read_bytes()
+            if p.suffix.lower() == ".json":
+                loads_strict(raw)
+            else:
+                for line in raw.decode("utf-8").splitlines():
+                    if line.strip():
+                        loads_strict(line)
+        except (OSError, ValueError):
+            raise ScorecardRejected("input_not_strict") from None
+
+
 def _load_catalog(root: Path) -> pd.DataFrame:
     """The field catalog as strings (same shape as pets_eval.io.load_catalog, without type or NA parsing)."""
     df = _read_str(Path(root) / "metadata" / "field_catalog.csv")
@@ -140,6 +160,7 @@ def run_scorecard(original_dir, protected_dir, *, scenario: str, root, rowmaps: 
         raise ScorecardRejected("out_dir_inside_release")
     if any(_inside(p, protected_dir) for p in rowmaps.values()):
         raise RowMapRejected("rowmap_in_release")  # row maps are private scoring aids
+    _strict_child_inputs(root, original_dir)  # the release folder is tables + the strictly loaded manifest only
     scen = kit_io.get_scenario(scenario, root)
     if not scen or scen.get("dataset") != original_dir.name:
         raise ScorecardRejected("scenario")
