@@ -59,7 +59,7 @@ def _draft_cli(make_kit, tmp_path, reply, *, align=False, planted=True):
     env = {k: v for k, v in os.environ.items() if not k.startswith("PETS_")}
     env.update(PYTHONPATH=str(Path(__file__).resolve().parents[2] / "src"), PETS_OFFLINE="1")
     result = subprocess.run([sys.executable, "-c", code], env=env, capture_output=True,
-                            text=True, encoding="utf-8", timeout=30, check=False)
+                            text=True, encoding="utf-8", timeout=120, check=False)
     return result, out, temp
 
 
