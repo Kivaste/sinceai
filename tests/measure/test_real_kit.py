@@ -1,4 +1,4 @@
-"""Measurer against the real kit. Skipped when the kit is absent (PETS_KIT, else the conventions path).
+﻿"""Measurer against the real kit. Skipped when the kit is absent (PETS_KIT, else the conventions path).
 
 The baseline literals are the 2-decimal HEALTH-S1 / CS-S1 rows of docs/BENCHMARK.md (utility per sharing
 scenario: B0, B2, B2-k). The measure() test runs the kit's own B2 protector (baselines/protect.py) and
@@ -69,7 +69,7 @@ def test_measure_on_the_kits_b2_outputs_validates(scenario, tmp_path):
             table = f.stem[len("rowmap_"):]
             f.replace(maps / f.name)
             rowmaps[table] = maps / f.name
-            ids = pd.read_csv(maps / f.name, dtype=str, keep_default_na=False)["original_record_id"]
+            ids = pd.read_csv(maps / f.name, dtype=str, keep_default_na=False, na_filter=False)["original_record_id"]
             lineage[table] = Lineage(tuple(ids), frozenset())
         else:
             f.replace(release / f.name)

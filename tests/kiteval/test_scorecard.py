@@ -1,4 +1,4 @@
-"""The out-of-process scorecard, through the real pets-eval CLI, on a tiny synthetic kit."""
+﻿"""The out-of-process scorecard, through the real pets-eval CLI, on a tiny synthetic kit."""
 
 import json
 from pathlib import Path
@@ -219,7 +219,7 @@ def test_linkage_is_expected_exactly_when_the_kit_has_identity_data_for_the_tabl
     from pets_release.kiteval.scorecard import _expected_sections
 
     scen = {"id": "TEST-S1", "dataset": "customer_service"}
-    catalog = pd.read_csv(kit / "metadata" / "field_catalog.csv", dtype=str, keep_default_na=False)
+    catalog = pd.read_csv(kit / "metadata" / "field_catalog.csv", dtype=str, keep_default_na=False, na_filter=False)
     tables = {"conversations": kit / "data" / "customer_service" / "conversations.csv"}
 
     def linkage():
@@ -232,6 +232,10 @@ def test_linkage_is_expected_exactly_when_the_kit_has_identity_data_for_the_tabl
     assert linkage() is None  # the kit itself skips linkage when no record maps to a person
     identity.write_text("record_id,person_id\nc1,p1\nc2,\n", encoding="utf-8")
     assert linkage() == {"attacks": [], "no_attack_columns": []}
+    # NA-like identifiers are ids, not missing values (AGENTS.md: read every CSV as str, no NA parsing)
+    for token in ("NA", "null", "None", "nan"):
+        identity.write_text(f"record_id,person_id\nc1,{token}\nc2,\n", encoding="utf-8")
+        assert linkage() == {"attacks": [], "no_attack_columns": []}, token
 
 
 

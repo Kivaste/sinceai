@@ -1,4 +1,4 @@
-"""Out-of-process scorecard: explicit scenario, explicit row maps, external output folder."""
+﻿"""Out-of-process scorecard: explicit scenario, explicit row maps, external output folder."""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ import json
 import os
 import subprocess
 import sys
+import types
 from pathlib import Path
 
 import pandas as pd
@@ -31,9 +32,20 @@ def _load_catalog(root: Path) -> pd.DataFrame:
     return df
 
 
+class _StrPandas:
+    """`pd` as the kit's identity loader sees it: every CSV read is str with NA parsing off."""
+
+    @staticmethod
+    def read_csv(path, **kw):
+        return _read_str(path, **{k: v for k, v in kw.items() if k not in ("dtype", "keep_default_na", "na_filter")})
+
+
 def _load_identity_truth(root: Path, dataset: str, table: str):
-    """pets-eval locates the identity file, not us; only 'any person id present' is used here."""
-    return kit_io.load_identity_truth(root, dataset, table)
+    """pets-eval's own loader locates the identity file (this package never builds that path; scoped
+    exception, decision log 05:30: in memory, yes/no only, never exported). The loader's code runs
+    unchanged except that its pandas reads are string-preserving, so NA-like ids stay ids."""
+    loader = types.FunctionType(kit_io.load_identity_truth.__code__, {**vars(kit_io), "pd": _StrPandas})
+    return loader(root, dataset, table)
 
 
 def _tables(folder: Path) -> dict[str, Path]:
@@ -130,7 +142,7 @@ def run_scorecard(original_dir, protected_dir, *, scenario: str, root, rowmaps: 
     prot_files = _tables(protected_dir)
     catalog = _load_catalog(root)
     catalog = catalog[catalog.dataset == original_dir.name]
-    orig_rows = {name: len(pd.read_csv(f, dtype=str, keep_default_na=False)) for name, f in orig_files.items()}
+    orig_rows = {name: len(pd.read_csv(f, dtype=str, keep_default_na=False, na_filter=False)) for name, f in orig_files.items()}
     prot_rows_by_table: dict[str, int] = {}
     for name, pfile in prot_files.items():
         if name not in orig_files:
@@ -139,11 +151,11 @@ def run_scorecard(original_dir, protected_dir, *, scenario: str, root, rowmaps: 
             raise RowMapRejected("missing_map")
         if name not in lineage:
             raise RowMapRejected("missing_lineage")
-        orig = pd.read_csv(orig_files[name], dtype=str, keep_default_na=False)
+        orig = pd.read_csv(orig_files[name], dtype=str, keep_default_na=False, na_filter=False)
         key = kit_io.record_key(catalog, original_dir.name, name, orig)
         if key is None:
             raise RowMapRejected("no_source_key")
-        prot_rows = len(pd.read_csv(pfile, dtype=str, keep_default_na=False))
+        prot_rows = len(pd.read_csv(pfile, dtype=str, keep_default_na=False, na_filter=False))
         prot_rows_by_table[name] = prot_rows
         validate_row_map(rowmaps[name], protected_rows=prot_rows, source_keys=orig[key], expected_lineage=lineage[name])
     if set(rowmaps) - set(prot_files):

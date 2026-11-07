@@ -40,10 +40,10 @@ def _tokens(out):
     assert ("ed_visits", "visit_id") in cols and len(cols) >= 3
     allt = set()
     for table, col in sorted(cols):
-        df = pd.read_csv(out / f"{table}.csv", dtype=str, keep_default_na=False)
+        df = pd.read_csv(out / f"{table}.csv", dtype=str, keep_default_na=False, na_filter=False)
         allt |= set(df[col])
-    ed = pd.read_csv(out / "ed_visits.csv", dtype=str, keep_default_na=False)
-    lab = pd.read_csv(out / "lab_results.csv", dtype=str, keep_default_na=False)
+    ed = pd.read_csv(out / "ed_visits.csv", dtype=str, keep_default_na=False, na_filter=False)
+    lab = pd.read_csv(out / "lab_results.csv", dtype=str, keep_default_na=False, na_filter=False)
     return set(ed["visit_id"]), set(lab["visit_id"]), allt
 
 
@@ -114,7 +114,7 @@ def test_release_tokens_are_keyed_by_the_recipient_key(releases):
 
     kit, outs, _ = releases
     master = MasterKey.from_text(TEST_KEY)
-    src = pd.read_csv(kit / "data" / "health" / "ed_visits.csv", dtype=str, keep_default_na=False)["visit_id"]
+    src = pd.read_csv(kit / "data" / "health" / "ed_visits.csv", dtype=str, keep_default_na=False, na_filter=False)["visit_id"]
     for name, rid in (("a", "recipient-a"), ("b", "recipient-b")):
         rsid = json.loads((outs[name] / "privacy_manifest.json").read_text(encoding="utf-8"))["release"][
             "releaseScopeId"]

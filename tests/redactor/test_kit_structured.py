@@ -1,4 +1,4 @@
-"""Real-kit regression floor for the structured labels (marked ``kit``; skipped = not run).
+﻿"""Real-kit regression floor for the structured labels (marked ``kit``; skipped = not run).
 
 Frame: all customer_service train turns; gold-absent turns count as empty; exact match via
 ``pets_eval.text.span_scores(mode="exact")``. Asserts aggregates only and never prints values.
@@ -56,8 +56,8 @@ def _load(kit):
     sys.path.insert(0, str(root / "toolkit"))
     from pets_eval.text import span_scores
 
-    turns = pd.read_csv(root / "data/customer_service/turns.csv", dtype=str, keep_default_na=False)
-    conv = pd.read_csv(root / "data/customer_service/conversations.csv", dtype=str, keep_default_na=False)
+    turns = pd.read_csv(root / "data/customer_service/turns.csv", dtype=str, keep_default_na=False, na_filter=False)
+    conv = pd.read_csv(root / "data/customer_service/conversations.csv", dtype=str, keep_default_na=False, na_filter=False)
     train = set(conv.loc[conv["split"] == "train", "conversation_id"])
     tt = turns[turns["conversation_id"].isin(train)].copy()
     tt["_seq"] = tt["seq"].astype(int)
