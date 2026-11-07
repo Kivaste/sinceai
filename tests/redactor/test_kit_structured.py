@@ -23,10 +23,32 @@ from pets_release.redactor import (
 KIT = os.environ.get("PETS_KIT")
 pytestmark = [pytest.mark.kit, pytest.mark.skipif(not KIT, reason="PETS_KIT not set: kit test NOT RUN")]
 
-# Floors set from the first full measurement (micro P 0.9986, R 0.9932), with headroom.
-MICRO_RECALL_FLOOR = 0.985
-MICRO_PRECISION_FLOOR = 0.995
-CS_S1_TARGETS_RECALL_FLOOR = {"NATIONAL_ID": 0.99, "PAYMENT_CARD": 0.99, "IBAN": 0.99, "SECRET": 0.90}
+# REGRESSION GUARD, not the policy target. The CS-S1 privacy targets (recall 0.98 on NATIONAL_ID,
+# PAYMENT_CARD, IBAN, SECRET) are evaluated on the held-out split in ticket 23 and handled by policy.
+# Floors = value measured at the review-r2 head on the full train frame, minus a margin: 0.005 for
+# labels with >= 100 gold spans, 0.04 for smaller ones (one miss moves those by 0.016-0.037).
+# Measured (precision, recall): see the ticket 12 done-report.
+MEASURED = {  # label: (precision, recall, gold support)
+    "ACCOUNT_NUMBER": (0.9995, 0.9967, 3967),
+    "DEVICE_ID": (0.9983, 1.0000, 572),
+    "EMAIL": (0.9995, 1.0000, 1999),
+    "IBAN": (1.0000, 1.0000, 1473),
+    "IP_ADDRESS": (1.0000, 1.0000, 356),
+    "LICENSE_PLATE": (1.0000, 1.0000, 27),
+    "NATIONAL_ID": (1.0000, 1.0000, 5120),
+    "PAYMENT_CARD": (0.9965, 0.9988, 856),
+    "PHONE": (0.9988, 0.9825, 4217),
+    "PROPERTY_ID": (1.0000, 1.0000, 103),
+    "SECRET": (0.9807, 0.9807, 466),
+    "URL": (1.0000, 1.0000, 440),
+    "USERNAME": (1.0000, 0.9839, 62),
+}
+MICRO_MEASURED = (0.9989, 0.9950)
+MICRO_MARGIN = 0.003
+
+
+def _margin(support: int) -> float:
+    return 0.005 if support >= 100 else 0.04
 
 
 def _load():
@@ -62,7 +84,11 @@ def test_structured_labels_exact_match_floor():
             pred[s["record_id"]].append({"start": s["start"], "end": s["end"], "label": s["label"]})
     sc = span_scores(gold, pred, mode="exact", labels=STRUCTURED_LABELS)
     assert sc["mode"] == "exact"
-    assert sc["micro"]["recall"] >= MICRO_RECALL_FLOOR
-    assert sc["micro"]["precision"] >= MICRO_PRECISION_FLOOR
-    for label, floor in CS_S1_TARGETS_RECALL_FLOOR.items():
-        assert sc["per_label"][label]["recall"] >= floor, label
+    assert set(MEASURED) == set(STRUCTURED_LABELS)
+    assert sc["micro"]["precision"] >= MICRO_MEASURED[0] - MICRO_MARGIN
+    assert sc["micro"]["recall"] >= MICRO_MEASURED[1] - MICRO_MARGIN
+    for label, (p, r, support) in MEASURED.items():
+        got = sc["per_label"][label]
+        assert got["tp"] + got["fn"] == support, label  # same frame as the measurement
+        assert got["precision"] >= p - _margin(support), f"{label} precision"
+        assert got["recall"] >= r - _margin(support), f"{label} recall"

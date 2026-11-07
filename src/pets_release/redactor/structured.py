@@ -34,7 +34,8 @@ CARD_CUES = ("kortti", "kortil", "kortin", "korttia", "card", "kort", "päättyy
              "slutar", "visa", "mastercard", "luottokort", "pankkikort")
 ACCOUNT_CUES = ("asiakas", "lasku", "sopimus", "tilaus", "viite", "customer", "invoice", "contract", "order",
                 "kundnum", "kundnr", "faktur", "avtal", "referen", "account", "konto", "asiakkuu", "tilin")
-SECRET_CUES = ("pin", "puk", "salasan", "password", "passw", "lösenord", "koodi", "tunnusluku", "wifi", "wlan",
+SECRET_CUES = ("tunnussana", "lösen", "passkod", "api", "apikey", "api-key", "token", "access", "secret",
+               "salainen", "avain", "key", "pin", "puk", "salasan", "password", "passw", "lösenord", "koodi", "tunnusluku", "wifi", "wlan",
                "verkkoavain", "passcode", "kod", "nyckel")
 DEVICE_CUES = ("imei", "iccid", "sim", "sarjanumer", "serial", "serienummer", "laitetunnus", "laitteen")
 USERNAME_CUES = ("käyttäjätunnu", "käyttäjänim", "username", "användarnamn", "login", "kirjautumistunnu")
@@ -202,6 +203,11 @@ class StructuredPass:
             if status:
                 out.append(_Hit(i, m.start(), m.end(), "IP_ADDRESS", PRIORITY_VALIDATED,
                                 "ip6\x00" + status))
+        for m in _APIKEY_RE.finditer(text):
+            if any(m.start() < b and a < m.end() for a, b in masks):
+                continue
+            claim(m.start(), m.end())
+            out.append(_Hit(i, m.start(), m.end(), "SECRET", PRIORITY_VALIDATED, None))
         for m in _PROPERTY_RE.finditer(text):
             claim(m.start(), m.end())
             out.append(_Hit(i, m.start(), m.end(), "PROPERTY_ID", PRIORITY_VALIDATED, None))
@@ -275,8 +281,10 @@ class StructuredPass:
                 label = "USERNAME"
             if label is None or text[s:e][-1] in _SENTENCE_END:
                 continue
-            # skip filler words and further cue words, take the next value token
-            for j in range(idx + 1, min(idx + 5, len(spans))):
+            # skip filler words and further cue words, take the next value token; ordinary words may sit
+            # between cue and value ('salasana taitaa olla X'), then only a credential-shaped token counts
+            intervening = 0
+            for j in range(idx + 1, min(idx + 1 + CUE_SCAN_TOKENS, len(spans))):
                 vs, ve = spans[j]
                 raw = text[vs:ve]
                 low = raw.lower().strip(_TRAIL_PUNCT)
@@ -291,22 +299,29 @@ class StructuredPass:
                 val = text[vs:ve]
                 if any(vs < b and a < ve for a, b in masks):
                     break
-                ok = any(c.isdigit() for c in val) or (label == "USERNAME" and "@" in val)
-                if not ok and _alpha_credential(val):
-                    # alphabetic values only in the shape "<password-type cue> <copula> [hedge] VALUE<end of clause>"
-                    prev = [text[a:b].lower().strip(_TRAIL_PUNCT) for a, b in spans[idx + 1:j]]
-                    strong = label == "USERNAME" or _has_cue([w], STRONG_SECRET_CUES)
-                    copula = (not prev and text[s:e].endswith(":")) or bool(prev) and (prev[-1] in COPULAS or (len(prev) >= 2 and prev[-1] in HEDGES
-                                                                     and prev[-2] in COPULAS))
-                    rest = text[ve:]
-                    clause_end = rest.strip() == "" or rest.lstrip()[:1] in ".,;!?)\"'"
-                    ok = strong and copula and clause_end
-                if label == "SECRET" and val.isdigit() and not (4 <= len(val) <= 8):
-                    ok = False
+                if intervening:
+                    ok = len(val) >= 5 and _credential_shaped(val)
+                else:
+                    ok = any(c.isdigit() for c in val) or (label == "USERNAME" and "@" in val)
+                    if not ok and _alpha_credential(val):
+                        # alphabetic values only as "<password-type cue> <copula> [hedge] VALUE<end of clause>"
+                        prev = [text[a:b].lower().strip(_TRAIL_PUNCT) for a, b in spans[idx + 1:j]]
+                        strong = label == "USERNAME" or _has_cue([w], STRONG_SECRET_CUES)
+                        copula = (not prev and text[s:e].endswith(":")) or bool(prev) and (
+                            prev[-1] in COPULAS or (len(prev) >= 2 and prev[-1] in HEDGES and prev[-2] in COPULAS))
+                        rest = text[ve:]
+                        clause_end = rest.strip() == "" or rest.lstrip()[:1] in ".,;!?)\"'"
+                        ok = strong and copula and clause_end
+                    if label == "SECRET" and val.isdigit() and not (4 <= len(val) <= 8):
+                        ok = False
                 if ok and len(val) >= 3:
+                    # not masked: a validated identifier at the same place (HETU, phone) must still be found
+                    # and outranks this cue-only reading in the pipeline's overlap resolution
                     out.append(_Hit(i, vs, ve, label, PRIORITY_CUE, None))
-                    masks.append((vs, ve))
-                break
+                    break
+                if not wordlike or raw[-1] in _SENTENCE_END:
+                    break
+                intervening += 1
         return out
 
     # ------------------------------------------------------ run classifier
@@ -475,7 +490,8 @@ def _classify_digits(d: str, plus: bool, ctx: list[str]) -> tuple[str, int] | No
         return "PAYMENT_CARD", PRIORITY_CUE
     if n == 4 and _has_cue(ctx, CARD_CUES):
         return "PAYMENT_CARD", PRIORITY_CUE
-    if 4 <= n <= 8 and _has_cue(ctx, SECRET_CUES):
+    is_year = n == 4 and d[:2] in ("19", "20") and bool(ctx) and ctx[-1] in YEAR_WORDS
+    if 4 <= n <= 8 and _has_cue(ctx, SECRET_CUES) and not is_year:
         return "SECRET", PRIORITY_CUE
     return None
 
@@ -494,6 +510,23 @@ def is_backchannel(text: str) -> bool:
 
 
 _SENTENCE_END = ".?!"
+YEAR_WORDS = frozenset({"vuonna", "vuoden", "vuodesta", "vuoteen", "in", "since", "year", "år", "året", "sedan",
+                        "från", "until", "asti", "saakka"})
+CUE_SCAN_TOKENS = 6  # tokens after a SECRET/USERNAME cue searched for the value
+# Common vendor key/token shapes (general knowledge): emitted without a cue.
+_APIKEY_RE = re.compile(
+    r"(?<![\w-])(?:(?:sk|pk|rk)[-_](?:live|test)[-_][A-Za-z0-9]{16,}|sk-[A-Za-z0-9_-]{20,}|gh[pousr]_[A-Za-z0-9]{30,}"
+    r"|AKIA[0-9A-Z]{16}|xox[abprs]-[A-Za-z0-9-]{10,}|eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,})(?![\w-])")
+
+
+def _credential_shaped(val: str) -> bool:
+    """One token mixing letters with digits or symbols ('Kissa2024', 'x9!Lm', a hex key)."""
+    if re.search(r"\s", val):
+        return False
+    has_l = bool(re.search(r"[^\W\d_]", val))
+    has_d = any(c.isdigit() for c in val)
+    has_sym = bool(re.search(r"[!#$%&*+=?@_~^-]", val))
+    return (has_l and has_d) or (has_sym and (has_l or has_d))
 STRONG_SECRET_CUES = ("salasan", "password", "passw", "lösenord", "passphrase", "verkkoavain", "tunnuslause")
 COPULAS = frozenset({"on", "oli", "is", "was", "är", "var", ":", "="})
 HEDGES = frozenset({"varmaan", "kai", "luultavasti", "ehkä", "probably", "maybe", "still", "edelleen", "nog",

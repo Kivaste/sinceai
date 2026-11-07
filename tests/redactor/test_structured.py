@@ -308,3 +308,73 @@ def test_unrelated_other_speaker_turn_flushes_the_join():
     assert found(r) == []
     ok = conv(a, ("agent", "joo, jatkakaa"), b)
     assert [x[3] for x in found(ok)] == ["PHONE", "PHONE"]
+
+
+# ---- review r2 fixes -------------------------------------------------------------------------
+def test_split_phone_whose_first_part_already_looks_like_a_phone():
+    # '040 1234' alone is a 7-digit 0-leading number; the whole value spans two turns
+    a = "numero on 040 1234"
+    r = conv(a, ("agent", "mm"), "567")
+    assert found(r) == [("t0", 10, len(a), "PHONE"), ("t2", 0, 3, "PHONE")]
+    assert {s["placeholder"] for s in r.spans} == {"[PHONE_1]"}
+
+
+def test_split_iban_over_two_turns():
+    a = "tilinumero on FI21 1234 5600"
+    r = conv(a, ("agent", "joo"), "0007 85")
+    assert found(r) == [("t0", 14, len(a), "IBAN"), ("t2", 0, 7, "IBAN")]
+    assert {s["placeholder"] for s in r.spans} == {"[IBAN_1]"}
+
+
+def test_spelled_email_across_two_turns():
+    a = "osoite on maija piste m"
+    b = "at posti piste example"
+    r = conv(a, ("agent", "joo"), b)
+    assert found(r) == [("t0", 10, len(a), "EMAIL"), ("t2", 0, len(b), "EMAIL")]
+    assert {s["placeholder"] for s in r.spans} == {"[EMAIL_1]"}
+    c = "maija piste m at posti"
+    r2 = conv(c, ("agent", "mm"), "piste example")
+    assert found(r2) == [("t0", 0, len(c), "EMAIL"), ("t2", 0, 13, "EMAIL")]
+
+
+def test_spelled_email_does_not_join_across_unrelated_turn():
+    r = conv("osoite on maija piste m", ("agent", "mikä on teidän postinumeronne"), "at posti piste example")
+    assert [x[0] for x in found(r)] == []
+
+
+def test_credential_after_intervening_words():
+    t = "wifin salasana taitaa olla Kissa2024"
+    assert found(conv(t)) == [("t0", t.index("Kissa2024"), len(t), "SECRET")]
+    u = "the username for the portal is maijam85"
+    assert found(conv(u)) == [("t0", u.index("maijam85"), len(u), "USERNAME")]
+
+
+def test_general_credential_cue_words():
+    for cue in ("verkkoavain", "wlan-avain", "lösen", "tunnussana", "passcode", "access key"):
+        t = f"{cue} on Xr7kq2Lm"
+        assert found(conv(t)) == [("t0", t.index("Xr7kq2Lm"), len(t), "SECRET")], cue
+
+
+def test_prefixed_api_keys_and_tokens_without_cue():
+    for key in ("sk-live-4eC39HqLyjWDarjtT1zdp7dc", "ghp_" + "a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7R8",
+                "AKIAIOSFODNN7EXAMPLE", "xoxb-1234567890-abcdefghijkl"):
+        t = f"tässä {key} kiitos"
+        assert found(conv(t)) == [("t0", 6, 6 + len(key), "SECRET")], key
+
+
+def test_long_hex_after_cue_is_secret():
+    t = "api key: 9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"
+    assert found(conv(t)) == [("t0", 9, len(t), "SECRET")]
+
+
+def test_intervening_words_do_not_reach_prose_or_plain_numbers():
+    for t in ("salasana vaihdettiin eilen ja tunnus toimii nyt hyvin",
+              "salasana vaihdettiin vuonna 2024",
+              "the password was last changed in 2023",
+              "pin-koodi lähetetään kirjeellä osoitteeseen Testitie 5"):
+        assert [x[3] for x in found(conv(t))] == [], t
+
+
+def test_validated_identifier_after_a_credential_cue_keeps_its_label():
+    t = "tunnus avain on 131052-308T"
+    assert found(conv(t)) == [("t0", t.index("131052"), len(t), "NATIONAL_ID")]
