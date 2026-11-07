@@ -54,7 +54,7 @@ def _release(h, name):
     )
 
 
-CONTRACT = {"files": {}, "qi": [{"table": "ed_visits", "column": "sex", "derived_from": "ed_visits.sex"}], "tokens": []}
+CONTRACT = {"k": 5, "files": {}, "qi": [{"table": "ed_visits", "column": "sex", "derived_from": "ed_visits.sex"}], "tokens": []}
 
 
 def _records(rel, ctx):
@@ -110,7 +110,10 @@ def test_real_cli_never_passes_producer_checks_without_source_or_key(h, tmp_path
     assert summary["refused"] is True
     for name, (scope, _) in OURS.items():
         assert recs[name]["scope"] == scope
-        assert recs[name]["status"] == "not_run", name  # CLI supplies no source, key or k
+        if name == "producer.row-k":  # release scope: k from the contract, runs on the release alone
+            assert recs[name]["status"] == "fail"
+        else:
+            assert recs[name]["status"] == "not_run", name  # CLI supplies no source or key
     assert KEY not in proc.stdout and "P00000-000" not in proc.stdout
 
 

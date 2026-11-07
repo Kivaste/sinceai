@@ -25,8 +25,9 @@ def _rowmap(ids):
     )
 
 
-def _contract(qi, tokens=()):
-    return {
+def _contract(qi, tokens=(), k=5):
+    c = {} if k is None else {"k": k}
+    return c | {
         "files": {},
         "qi": [{"table": t, "column": c, "derived_from": f"{t}.{c}"} for t, c in qi],
         "tokens": [{"table": t, "column": c, "scope": "release"} for t, c in tokens],
