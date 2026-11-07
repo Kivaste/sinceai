@@ -33,6 +33,9 @@ verify needs only the release. No contract ``k`` -> both k checks return not_run
                 one person; missing -> not_run. If a person token is released, token <-> canonical
                 person must be one-to-one, else error (conflicting mapping).
   joins:        [{table, column, ref_table, ref_column}] source joins to the person table
+  detected_qi:  [{table, column}] every released column the detector classifies as a quasi-identifier (on its
+                released values or through its source column; built by the producer context, #106 / D33).
+                person-k only: one missing from contract.qi -> error (refuse); a malformed set -> error.
 """
 
 from __future__ import annotations
@@ -287,15 +290,28 @@ def person_k_values(release, contract, context) -> PersonK:
     return PersonK(per_person, sorted(below_rows), len(unidentified), unid_rows)
 
 
+def _require_detector_qis_listed(contract, context) -> None:
+    """Every released detector QI (context ``detected_qi``, #106 / D33) must be a contract QI, else person-k
+    refuses: k over the contract's QIs would not be k over what the recipient holds. A malformed set errors."""
+    det = context["detected_qi"]
+    if not isinstance(det, list) or not all(
+            isinstance(q, dict) and isinstance(q.get("table"), str) and isinstance(q.get("column"), str) for q in det):
+        raise CheckError("detected QI set malformed")
+    listed = {(q.get("table"), q.get("column")) for q in (contract or {}).get("qi", []) or [] if isinstance(q, dict)}
+    if {(q["table"], q["column"]) for q in det} - listed:
+        raise CheckError("released quasi-identifier missing from contract qi")
+
+
 @register(name=PERSON_K, version="1.0.0", scope="producer", unit="persons")
 def run_person_k(release, contract, context) -> Outcome:
     context = context or {}
     k = _k(contract, context)
-    needed = ("source", "rowmaps", "record_keys", "person")
+    needed = ("source", "rowmaps", "record_keys", "person", "detected_qi")
     if k is None or any(context.get(n) is None for n in needed):
         return Outcome.not_run()
     if context["person"].get("normalise") is None:  # identity canonicaliser not supplied
         return Outcome.not_run()
+    _require_detector_qis_listed(contract, context)
     res = person_k_values(release, contract, context)
     n = len(res.per_person) + res.unidentified
     if n == 0:
