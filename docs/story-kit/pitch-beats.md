@@ -72,7 +72,8 @@ Against the published baselines (same scenario; scenario utility, privacy summar
 | B2-k | `{{measured.baselines.B2-k.utility_mean}}` | `{{measured.baselines.B2-k.privacy}}` | `{{measured.baselines.B2-k.worst_reid}}` |
 
 - Disclosure (D22, residual risk `scorecard-renamed-qi`): we release age as `age_band`. The kit scorecard does not count a renamed column as a quasi-identifier, so its "rows with k below 5" figure is blind to `age_band`. Our per-person k over every released quasi-identifier is the authoritative figure; the scorecard figure is shown only for completeness. Do not present the scorecard figure as proof of k-anonymity.
-- Sacrifices the scenario policy allowed: `{{sacrifices.count}}`, each listed with the check it affects.
+- "After" is the score of the release the recipient actually gets, after local suppression of below-k persons, not the pre-suppression plan.
+- Sacrifices the scenario policy allowed: `{{sacrifices.count}}`, each listed with the check it affects. H-U4 is the visible one: it falls to `{{measured.utility.after.H-U4}}` because the plan coarsens geography to municipality and suppresses below-k persons, which the scenario policy enumerates as a sacrifice with a floor of `{{sacrifices.H-U4.floor}}` (H-U6: floor `{{sacrifices.H-U6.floor}}`, H-U8: floor `{{sacrifices.H-U8.floor}}`). Say so; do not hide it.
 - Close with the honest residual risks (linkage under two attacker personas, the tamper limitation) from `residualRisks`.
 - Live: open `<R>.dashboard.html` (sections 4-5 and the baseline comparison).
 

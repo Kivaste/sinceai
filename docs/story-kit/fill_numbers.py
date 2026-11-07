@@ -33,6 +33,9 @@ def resolve(m: dict, path: str):
     head = s[0]
     if head == "release":
         return m["release"].get(s[1])
+    if head == "sacrifices" and len(s) == 3:  # sacrifices.<check>.floor
+        e = _find(m["sacrifices"], check=s[1])
+        return None if e is None else e[s[2]]
     if head in ("inventory", "sacrifices"):
         return len(m[head])
     if head == "fieldJustifications":

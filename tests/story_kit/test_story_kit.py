@@ -37,7 +37,7 @@ def resolves(path: str) -> bool:
     if s[0] == "inventory":
         return s[1:] == ["count"]
     if s[0] == "sacrifices":
-        return s[1:] == ["count"]
+        return s[1:] == ["count"] or (len(s) == 3 and s[1] in TASKS and s[2] == "floor")
     if s[0] == "fieldJustifications":
         return len(s) == 3 and s[1] in ("released", "withheld") and s[2] == "count"
     if s[0] == "gate":

@@ -43,3 +43,6 @@ beat,label,manifest_key_path,unit,value
 6,Baseline B2-k - privacy,measured.baselines.B2-k.privacy,score_0_1,
 6,Baseline B2-k - worst_reid,measured.baselines.B2-k.worst_reid,score_0_1,
 6,sacrifices.count,sacrifices.count,count,
+6,Sacrifice floor H-U4,sacrifices.H-U4.floor,score_0_1,
+6,Sacrifice floor H-U6,sacrifices.H-U6.floor,score_0_1,
+6,Sacrifice floor H-U8,sacrifices.H-U8.floor,score_0_1,

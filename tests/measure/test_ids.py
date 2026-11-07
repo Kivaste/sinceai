@@ -35,9 +35,9 @@ def test_every_measured_path_in_the_story_kit_template_uses_a_measurer_id():
     for p in paths:
         section = p[1]
         if section == "privacy":  # measured.privacy.<before|after>.<component>
-            assert p[2] in ("before", "after") and ".".join(p[3:]) in PRIVACY_IDS, p
+            assert p[2] in ("before", "after") and ".".join(p[3:]) in (*PRIVACY_IDS, *PERSON_K_IDS), p
         elif section == "baselines":  # measured.baselines.<B0|B2|B2-k>.<metric>
-            assert p[2] in ("B0", "B2", "B2-k") and ".".join(p[3:]) in BASELINE_METRICS, p
+            assert p[2] in ("B0", "B2", "B2-k") and is_baseline_metric_id(".".join(p[3:])), p
         elif section == "utility":  # measured.utility.<before|after>.<kit task id>
             assert p[2] in ("before", "after") and len(p) == 4, p
         elif section == "search":
@@ -59,10 +59,11 @@ def test_template_privacy_ids_exist_in_the_fixture_manifest():
     comps = {c["component"] for c in measured["privacy"]["components"]}
     metrics = {r["metric"] for r in measured["baselines"]["rows"]}
     for p in _template_paths():
-        if p[1] == "privacy":
-            assert p[3] in comps, p
-        elif p[1] == "baselines":
-            assert p[3] in metrics, p
+        mid = ".".join(p[3:])
+        if p[1] == "privacy" and mid not in PERSON_K_IDS:  # person-k comes from the run, not the fixture
+            assert mid in comps, p
+        elif p[1] == "baselines" and not mid.startswith("task."):  # per-task rows depend on the scenario
+            assert mid in metrics, p
 
 
 def test_measurer_output_uses_the_same_ids_and_the_template_aggregates(args):
