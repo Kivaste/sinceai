@@ -43,8 +43,10 @@ Schema and validation
 
 Writer obligations the schema imposes
     Evidence records have ``status`` "pass", ``hits`` const 0 and ``denominator.n >= 1``; gate records have
-    ``status`` "pass". A failing, errored, not-run or zero-denominator check therefore cannot be recorded: the
-    writer must refuse the release instead. Scenario, PET, column-role, span-label and residual-risk-kind enums are
+    ``status`` "pass" (n >= 1) or "not_applicable" (ticket 04 runner; n == 0, hits 0). A not_applicable record
+    may sit in ``gate.checks`` but can never back an assertion (evidence must be "pass"). A failing, errored or
+    not-run check cannot be recorded at all, and a not_applicable or zero-denominator check cannot back an
+    assertion: in those cases the writer must refuse the release instead. Scenario, PET, column-role, span-label and residual-risk-kind enums are
     closed; extending them is a schema change (bump ``SCHEMA_VERSION``). ``exportAssertions`` and
     ``assertionEvidence`` are closed over ALL_ASSERTIONS and, per scenario, over exactly required_assertions().
     A CS-S1 manifest must bind at least one ``bindings.lexiconDigests`` entry (healthInText is lexicon-scoped).

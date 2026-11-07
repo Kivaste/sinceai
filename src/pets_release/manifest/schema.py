@@ -97,10 +97,24 @@ _DEFS = {
         "check": _ref("checkName"), "version": _ref("version"), "scope": _ref("scope"),
         "status": _status("pass"), "denominator": _ref("denominator"), "hits": {"const": 0},
     }),
-    "gateCheck": _obj({
-        "check": _ref("checkName"), "version": _ref("version"), "scope": _ref("scope"),
-        "status": _status("pass"), "denominator": _ref("denominator"), "hits": {"type": "integer", "minimum": 0},
-    }),
+    # Gate records: "pass" (n >= 1, low-severity hits allowed) or ticket 04's "not_applicable" (n == 0, hits 0).
+    # Only "pass" evidence can back an assertion (see "evidence"); cross-field rules require evidence == gate record.
+    "gateCheck": {
+        **_obj({
+            "check": _ref("checkName"), "version": _ref("version"), "scope": _ref("scope"),
+            "status": {"enum": ["not_applicable", "pass"]},
+            "denominator": _obj({
+                "unit": {"enum": ["cells", "files", "persons", "rows", "turns"]},
+                "n": {"type": "integer", "minimum": 0},
+            }),
+            "hits": {"type": "integer", "minimum": 0},
+        }),
+        "allOf": [
+            {"if": {"properties": {"status": {"const": "not_applicable"}}, "required": ["status"]},
+             "then": {"properties": {"denominator": {"properties": {"n": {"const": 0}}}, "hits": {"const": 0}}},
+             "else": {"properties": {"denominator": {"properties": {"n": {"minimum": 1}}}}}},
+        ],
+    },
     "params": _map("paramName", {"oneOf": [{"type": "string", "maxLength": 200}, {"type": "number"},
                                            {"type": "boolean"}]}),
     "notMeasured": _obj({"status": _status("not_measured"), "reason": _ref("text")}),
