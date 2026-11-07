@@ -4,13 +4,13 @@ HEALTH-S1 numbers in `02`–`05` are filled from the story kit's real, post-supp
 
 ## Source and reproduction
 
-- **R (real release):** `C:\Users\kivas\AI\sinceai-out\22\health-s1\`; manifest `R/privacy_manifest.json`, scoring sidecar `C:\Users\kivas\AI\sinceai-out\22\health-s1.scoring\`.
-- **Bound source revision:** `c3749d72020b381f5a6d1d08595961fb4aa6d5ae` (`bindings.toolRevision`); `release.created` is `2026-11-07T00:00:00Z`, scenario HEALTH-S1, recipient default. These are historical run measurements, not a verification pass for a later documentation commit.
-- **Original story-kit output:** `C:\Users\kivas\AI\sinceai-out\22\story-kit\numbers.csv`; dashboard `C:\Users\kivas\AI\sinceai-out\22\health-s1.dashboard.html` and `.csv`. Integration commit `15b2a42` and the Sat 08:05 decision-log entry record the story-kit merge and real-run verification.
-- **F (fresh fill in this task):** `C:\Users\kivas\AI\sinceai-out\story-drafts-936e583\story-kit\`. Ran `python docs/story-kit/fill_numbers.py <R> <F>`: exit 0, 42 template values, 3 null baseline tasks. `F/numbers.csv` agrees with committed `docs/story-kit/numbers.csv` as parsed string records (line endings differ); `F/pitch-beats.md` is also generated.
-- **P (draft-only privacy paths):** the template omits the two overall privacy scores. Resolve them directly from R with the same production `fill_numbers.resolve` and `fmt`: component id `privacy`, not the obsolete draft id `summary.privacy`. They are also written to `F/draft-privacy-numbers.csv` by that resolver.
-- Python runs use `PYTHONUTF8=1`, `PYTHONDONTWRITEBYTECODE=1`, `TZ=UTC`. CSV records use the standard-library string-only reader; no kit rows are displayed or sent to a service.
-- A new measured-release attempt at merged draft revision `936e583` timed out after 240 seconds without a published release. It is **not evidence** and supplies no numbers. Its local working files are outside the repo at `C:\Users\kivas\AI\sinceai-out\story-drafts-936e583\timed-out-run\`; key material is never committed or displayed. The completed historical R is the source below.
+- **R (fresh tip release, local-only):** `C:\Users\kivas\AI\sinceai-out\story-tip-e846512\health-s1\`; manifest `R/privacy_manifest.json`, scoring sidecar `...\story-tip-e846512\health-s1.scoring\`, scratch `...\health-s1.measure\`. Built by `python -m pets_release.measure.wire --scenario HEALTH-S1 --out R --created 2026-11-07T00:00:00Z --kit <K>` (exit 0, about 480 s) with the key from the local secret store (never recorded). These paths are outside the repo and are **local-only**: they cannot be reproduced from the repo alone (they need the kit and the key).
+- **Bound source revision:** `e84651205174226c03477deacb40afe6be37b351` (`bindings.toolRevision`, the story branch after merging `origin/integration/pets-release`); `release.created` is `2026-11-07T00:00:00Z`, scenario HEALTH-S1, recipient default. Docs-only commits after it do not change the release, but a code change invalidates it.
+- **Verify at that revision (real CLI, exit 0 both):** `pets-release verify R` printed `VERIFIED (limited): 36 release-checked, 4 producer-attested`; `pets-release verify --full --kit <K> R` printed `VERIFIED (full): 40 checks re-run (36 release, 4 producer); purpose checks re-run; signature, input digests and tool revision match`. Re-run both at recording time and quote only what they print.
+- **F (fresh fill):** `C:\Users\kivas\AI\sinceai-out\story-tip-e846512\story-kit\` plus dashboard `...\story-tip-e846512\health-s1.dashboard.html` and `.csv` (local-only). `python docs/story-kit/fill_numbers.py R F`: exit 0, "wrote 42 values, 3 empty". All 42 values equal the committed `docs/story-kit/numbers.csv` (no number changed from the earlier release at `c3749d7`). The two overall privacy scores (component `privacy`) were read from R's `measured.privacy.components` and equal the earlier ones (0.1716 before, 1.0000 after).
+- **Earlier provenance:** the prior release at `c3749d7` (`...\22\health-s1\`) and the story-kit merge `15b2a42` are superseded by R above; the earlier timed-out attempt at `936e583` supplied no numbers.
+- **Sacrifices at the tip:** `sacrifices` lists three policy-enumerated entries, each with floor 0.6000: H-U4 (0.7952 after), H-U6 (0.9462) and H-U8 (0.9505). Only H-U4 is a visible loss; none is a full pass claim.
+- Python runs use `PYTHONUTF8=1`, `PYTHONDONTWRITEBYTECODE=1`, `TZ=UTC`. CSVs are read as strings; no kit rows are displayed or sent to a service.
 
 ## Filled numbers
 
@@ -69,14 +69,14 @@ These drafts demonstrate R's hand plan. Other merged features are not implicitly
 | Measured search (#26 / ticket 25) | Not shown by R: `measured.search.status` = `not_measured`. Keep search blocks conditional. Do not promise every original floor passes when a policy sacrifice is used. |
 | CS-S1 release and exact-match per-label recall (#24 / ticket 23) | Conditional; needs a real CS-S1 release and `measured.redaction.status` = `measured`. No transcript rows on screen. |
 | Recipient-scoped keys (#29 / ticket 28, merged) | R uses recipient default; a separate recipient-scoped run is needed before enabling the optional demo claim. |
-| Two-tier verification and signed manifest | Historical story-kit verification is recorded in its README and decision log. Fresh verification must use the bound revision, kit and key; limited verification catches accidents only. The 36/4 figures above count R's gate records, not a new verification result. |
+| Two-tier verification and signed manifest | Verified for this story: both tiers were run with the real CLI on the fresh tip release (exit 0, outputs recorded under Source). Re-run at recording time; if either fails, report the failure, not a success line. Limited verification catches accidents only. |
 | Planted card refusal / byte-identical offline rerun | Still requires the actual recording-time planted-copy test / same-input rerun. This documentation update does not certify either as a new check pass. |
 
 ## Limits and presentation
 
 - Taglines must remain <= 140 characters; description body <= 5,000 including conditional text and remaining placeholders. Count the body after the separator, not the editing notes.
 - Video timeline is 1:50; optional CS-S1 aggregate insert adds at most 5 seconds (1:55). Narration word-count estimates are not a timed recording: rehearse and confirm the exported video is < 2:00.
-- Tagline character counts (including spaces): T1 118, T2 124, T3 127, T4 117, T5 122. Name counts: N1 58, N2 56, N3 52. Video narration: 149 words (about 75 seconds at 120 words/minute, within the 110-second screen schedule).
+- Tagline character counts (including spaces): T1 118, T2 124, T3 127, T4 117, T5 122. Name counts: N1 58, N2 56, N3 52. Video narration: 160 words (about 80 seconds at 120 words/minute, within the 110-second screen schedule).
 - Description body: 4,731 characters including conditional markup and remaining placeholders; 4,554 with comment markers stripped. Its four CS-S1 placeholders stay in the editing draft only, never an unmeasured submission claim.
 - Names, age-band width and timing markers are presentation/schema choices, not measured performance claims. No data values belong in screenshots, narration, manifests, logs or commits.
 
@@ -84,4 +84,4 @@ These drafts demonstrate R's hand plan. Other merged features are not implicitly
 
 - A high-severity hit fails its check and refuses the release.
 - A hit of any severity in a check bound to an export assertion prevents that assertion from being written false, so the writer refuses.
-- A low-severity hit in another check remains in `gate.checks[].hits`; it is not automatically copied into `residualRisks` (built in `run/narrative.py`). Errors, missing checks and unknown outcomes never count as passes.
+- A low-severity hit in another check does not refuse. It stays in `gate.checks[].hits` AND is written to `residualRisks` as kind `gate_low_severity` (`writer/assemble.py`), which `verify` re-derives (`verify/core.py`). Tip release: `text.health` (release scope) has 83 low-severity HEALTH hits over 512,166 turns scanned. Errors, missing checks and unknown outcomes never count as passes.
