@@ -270,7 +270,7 @@ def test_identifiers_live_in_namespaces_the_kit_cannot_use(tmp_path, gen):
         bad = values[~values.str.match(pattern)]
         assert bad.empty, (table, column, len(bad))
 
-from pets_eval.check import hetu_ok, iban_ok, scan_text  # noqa: E402  (production detectors)
+from pets_eval.check import hetu_ok, iban_ok, scan_text
 
 
 def _century(sign: str) -> int:
@@ -326,3 +326,51 @@ def test_no_visit_precedes_the_patients_birth_date(tmp_path, gen):
     gen.generate(tmp_path / "kit")
     visits = pd.read_csv(tmp_path / "kit" / "health" / "ed_visits.csv", dtype=str)
     assert (pd.to_datetime(visits["arrival_ts"]) >= pd.to_datetime(visits["date_of_birth"])).all()
+
+
+# --- follow-up #46 ---------------------------------------------------------
+
+
+def _phrases(table):
+    return {p for lists in table.values() for group in lists for p in group}
+
+
+def test_eval_phrase_variants_are_disjoint_from_train_variants(gen):
+    assert set(gen.INTENT_TEXT) == set(gen.EVAL_INTENT_TEXT) == set(gen.INTENT_CLASSES)
+    assert not _phrases(gen.INTENT_TEXT) & _phrases(gen.EVAL_INTENT_TEXT)
+    for intent, groups in gen.EVAL_INTENT_TEXT.items():
+        assert len(groups) == 3 and all(len(g) >= 2 for g in groups), intent
+
+
+def test_each_split_only_uses_its_own_phrase_variants(tmp_path, gen):
+    gen.generate(tmp_path / "kit")
+    cs = tmp_path / "kit" / "customer_service"
+    conv = pd.read_csv(cs / "conversations.csv", dtype=str)
+    turns = pd.read_csv(cs / "turns.csv", dtype=str)
+    split_of = dict(zip(conv["conversation_id"], conv["split"]))
+    train_p, eval_p = _phrases(gen.INTENT_TEXT), _phrases(gen.EVAL_INTENT_TEXT)
+    seen = {"train": set(), "eval": set()}
+    for cid, text in zip(turns["conversation_id"], turns["text"]):
+        split = split_of[cid]
+        hit_train = {p for p in train_p if p in text}
+        hit_eval = {p for p in eval_p if p in text}
+        assert not (hit_eval if split == "train" else hit_train), split
+        seen[split] |= hit_train | hit_eval
+    assert seen["train"] and seen["eval"]
+
+
+def test_products_use_the_kit_pipe_separator(tmp_path, gen):
+    gen.generate(tmp_path / "kit")
+    customers = pd.read_csv(tmp_path / "kit" / "customer_service" / "customers.csv", dtype=str)
+    assert not customers["products"].str.contains(";").any()
+    assert customers["products"].str.contains(r"\|").any()
+
+
+def test_icd10_secondary_has_pipe_separated_pairs(tmp_path, gen):
+    gen.generate(tmp_path / "kit")
+    visits = pd.read_csv(tmp_path / "kit" / "health" / "ed_visits.csv", dtype=str, keep_default_na=False)
+    sec = visits["icd10_secondary"]
+    pairs = sec[sec.str.contains(r"\|")]
+    assert len(pairs) > 0
+    assert all(len(set(v.split("|"))) == 2 for v in pairs)
+    assert (sec != "").any() and not sec.str.contains(";").any()
