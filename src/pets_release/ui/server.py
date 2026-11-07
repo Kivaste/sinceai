@@ -15,7 +15,7 @@ from urllib.parse import parse_qs, urlsplit
 from pets_release.manifest.value_scan import identifier_shape_counts
 from pets_release.offline import install
 from pets_release.ui.jobs import SCENARIOS, Jobs, scenarios
-from pets_release.ui.views import choose_page, result_page
+from pets_release.ui.views import DEMONSTRATIONS, choose_page, demonstration_page, result_page, rows_page
 
 
 def local_listener(host, port):
@@ -64,8 +64,14 @@ class Handler(BaseHTTPRequestHandler):
         # The stdlib error page reflects browser input and bypasses dispatch for unknown verbs.
         self.respond(403 if not self.authorized() else (405 if code == 501 else code), "Request refused")
 
-    def respond(self, status, body, content_type="text/html"):
-        if identifier_shape_counts(body):
+    def respond(self, status, body, content_type="text/html", *, verified_rows=False):
+        shapes = identifier_shape_counts(body)
+        if verified_rows:
+            # The manifest-value scanner has no column contract. Fresh limited verify
+            # already ran release.token-hex64, which permits these ONLY in token columns.
+            # No aggregate or unverified response gets this narrowly typed exception.
+            shapes.pop("HEX64_OUTSIDE_TOKEN", None)
+        if shapes:
             status, body, content_type = 422, "Unsafe artefact refused", "text/plain"
         if not isinstance(body, str):
             body = json.dumps(body, sort_keys=True, separators=(",", ":"), allow_nan=False)
@@ -96,6 +102,19 @@ class Handler(BaseHTTPRequestHandler):
             self.respond(200, scenarios())
         elif self.command == "GET" and path == "/api/result":
             self.respond(200, jobs.snapshot())
+        elif self.command == "GET" and path.startswith("/demo/") and path[6:] in DEMONSTRATIONS:
+            self.respond(200, demonstration_page(jobs.snapshot(), path[6:], self.server.banner))
+        elif self.command == "GET" and path in ("/rows", "/api/rows"):
+            try:
+                query = parse_qs(urlsplit(self.path).query, keep_blank_values=True)
+                if set(query) - {"token", "file", "limit"} or any(len(v) != 1 for v in query.values()):
+                    raise ValueError
+                preview = jobs.rows(name=query.get("file", [None])[0],
+                                    limit=int(query["limit"][0]) if "limit" in query else None)
+                self.respond(200, preview if path == "/api/rows" else rows_page(preview, self.server.banner),
+                             verified_rows=True)
+            except Exception:  # noqa: BLE001 - unknown verification/path state never serves rows or exceptions
+                self.respond(422, "Protected rows unavailable: fresh verification and manifest membership required")
         elif self.command == "GET" and path == "/dashboard":
             try:
                 dashboard = jobs.dashboard()
@@ -114,11 +133,14 @@ class Handler(BaseHTTPRequestHandler):
                 self.respond(400, "Invalid run request")
                 return
             started = jobs.start(node["scenario"])
-            self.respond(202 if started else 409, {"started": started})
+            if started:
+                self.respond(202, {"started": True})
+            else:
+                self.respond(409, {"started": False, "message": "Busy, run in progress"})
         elif self.command == "GET" and path == "/":
-            self.respond(200, choose_page(scenarios()))
+            self.respond(200, choose_page(scenarios(), self.server.banner))
         elif self.command == "GET" and path == "/result":
-            self.respond(200, result_page(jobs.snapshot()))
+            self.respond(200, result_page(jobs.snapshot(), self.server.banner))
         else:
             self.respond(404, "Not found")
 
@@ -134,6 +156,8 @@ def serve(argv=None):
     parser.add_argument("--out", required=True)
     parser.add_argument("--created", required=True)
     parser.add_argument("--plan", default="hand", choices=("hand", "measured"))
+    parser.add_argument("--preview-rows", type=int, default=10, choices=range(1, 26))
+    parser.add_argument("--demo-banner", default=os.environ.get("PETS_UI_DEMO_BANNER", ""))
     try:
         args = parser.parse_args(argv)
     except SystemExit:
@@ -148,6 +172,7 @@ def serve(argv=None):
     server = local_listener(args.host, args.port)
     install()
     server.jobs = Jobs(args)
+    server.banner = args.demo_banner
     server.token = secrets.token_urlsafe(32)
     key = os.environ["PETS_HMAC_KEY"]
     server.key_shapes = (key, key.encode().hex(), base64.b64encode(key.encode()).decode())

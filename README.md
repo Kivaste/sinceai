@@ -70,11 +70,31 @@ python -m pets_release.ui --kit "$env:PETS_KIT" --out ..\sinceai-out\ui-demo --c
 
 Open the token-bearing URL printed at startup. The server binds only `127.0.0.1`
 (`--port 8765` by default; `--port 0` chooses a free port). Every request needs that
-launch's random token. Stop with Ctrl+C. Do not share the startup URL.
+launch's random token. Stop with Ctrl+C. Treat the URL as a capability: share it only
+with intended demo viewers. The hosted demo uses the same loopback listener behind
+a forwarder; the app makes no assumptions about the host.
 
 Choose HEALTH-S1 to run the unchanged production CLI, see gate counts, both verification
 tiers, purpose scores, sacrifices and residual risks, then open the manifest-only dashboard.
-The UI has no external assets, row previews, table downloads, or row-map routes. The offline
+Five separate demonstration views cover data types and risks, PETs and why, protected
+output, measured privacy and utility, and scenario and limitations. The targets table
+keeps strict utility thresholds separate from allowed sacrifice floors. Missing scores
+are **not measured**, never assumed met.
+
+The protected-rows view shows the first 10 released rows per table (`--preview-rows N`,
+1–25). Every display re-runs limited verification on the release and an exact-byte
+snapshot, and checks manifest-listed file digests. No raw input, row maps, `truth/`,
+unlisted files or paths outside the release are served. Before/after comparisons are
+field-level only. Agents must not read or screenshot real-kit row pages. The production
+identifier scanner still guards responses; only verified row responses permit the
+64-hex keyed-pseudonym shape, whose column placement the production release checks enforce.
+
+Set `PETS_UI_DEMO_BANNER` or pass `--demo-banner "Demo — synthetic kit data"` for an
+optional banner. Only one run can be active; another start returns HTTP 409 with
+"Busy, run in progress". Refusals show available check names and counts, or explicitly
+say that no refusal report is available.
+
+The UI has no external assets, raw previews, table downloads, or row-map routes. The offline
 guard blocks new sockets in the server and its CLI children; only the pre-bound loopback
 listener accepts incoming connections. Release bytes match the CLI for the same inputs,
 key, creation time, plan and tool revision.

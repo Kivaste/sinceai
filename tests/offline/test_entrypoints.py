@@ -36,6 +36,7 @@ MODULES = [
     "pets_attacker",
     "pets_attacker.bridge",
     "pets_release.measure.wire",
+    "pets_release.ui",
 ]
 # `<module>.main(argv)` called directly (e.g. from Python, or by the dispatcher).
 MAINS = [

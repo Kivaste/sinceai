@@ -82,17 +82,26 @@ def capture():
             raise RuntimeError("UI run timed out")
         get(url.replace("/?", "/result?"))
         screenshot(url.replace("/?", "/result?"), "result")
+        # D41: never decode, store, print or screenshot real-kit rows. Count transport
+        # bytes only; screenshots above contain aggregates, with no rows auto-loaded.
+        with urlopen(url.replace("/?", "/rows?"), timeout=300) as response:
+            row_status = response.status
+            row_bytes = 0
+            for chunk in iter(lambda: response.read(65536), b""):
+                row_bytes += len(chunk)
         same_bytes = None
         if args.reference:
             release = evidence / "runs" / "run-1"
             reference = Path(args.reference)
             same_bytes = {p.name: p.read_bytes() for p in release.iterdir()} == {
                 p.name: p.read_bytes() for p in reference.iterdir()}
-        record = {"revision": revision, "http": report, "sameBytesAsCLI": same_bytes}
+        record = {"revision": revision, "http": report, "sameBytesAsCLI": same_bytes,
+                  "protectedRowsHTTP": {"status": row_status, "bytes": row_bytes}}
         (evidence / "http-evidence.json").write_text(json.dumps(record, sort_keys=True, indent=2), encoding="utf-8")
         print(json.dumps({"revision": revision, "status": report["status"], "gate": report.get("gate"),
-                          "steps": report["steps"], "sameBytesAsCLI": same_bytes}, sort_keys=True))
-        if report["status"] != "RELEASED" or same_bytes is False:
+                          "steps": report["steps"], "sameBytesAsCLI": same_bytes,
+                          "protectedRowsHTTP": {"status": row_status, "bytes": row_bytes}}, sort_keys=True))
+        if report["status"] != "RELEASED" or same_bytes is False or row_status != 200 or row_bytes <= 0:
             return 1
         get(url.replace("/?", "/dashboard?"))
         return 0

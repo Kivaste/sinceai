@@ -12,6 +12,8 @@ from urllib.error import HTTPError
 from urllib.parse import parse_qs, urlsplit
 from urllib.request import Request, urlopen
 
+import pytest
+
 from pets_release.manifest import canonical_bytes
 from pets_release.manifest.value_scan import identifier_shape_counts
 
@@ -32,7 +34,8 @@ def server_env():
 
 
 @contextmanager
-def running(tmp_path, *, extra_env=None, edit=coarse_qis, probe=False):
+def running(tmp_path, *, extra_env=None, edit=coarse_qis, probe=False, verifier_unavailable=False,
+            remove_refusal_report=False):
     kit = build_kit(tmp_path / "kit", edit)
     env = server_env()
     env.update(extra_env or {})
@@ -51,8 +54,29 @@ def probe():
     except OSError as exc:
         blocked = "offline guard" in str(exc)
     child = subprocess.run([sys.executable, "-c", "import socket; socket.socket()"], capture_output=True)
-    pathlib.Path({str(output)!r}).write_text(json.dumps([blocked, child.returncode != 0 and b"offline guard" in child.stderr]))
+    output = pathlib.Path({str(output)!r})
+    temporary = output.with_suffix(".tmp")
+    temporary.write_text(json.dumps([blocked, child.returncode != 0 and b"offline guard" in child.stderr]))
+    temporary.replace(output)
 threading.Thread(target=probe, daemon=True).start()
+sys.argv = {command[2:]!r}
+runpy.run_module("pets_release.ui", run_name="__main__")
+'''
+        command = [sys.executable, "-c", code]
+    if verifier_unavailable or remove_refusal_report:
+        # Fault only at the external-process boundary, after a real successful run.
+        # Never replace a production check with a passing stub.
+        code = f'''
+import pathlib, runpy, subprocess, sys
+original = subprocess.run
+def external_process(command, *args, **kwargs):
+    if {verifier_unavailable!r} and len(command) > 3 and command[3] == "verify" and pathlib.Path({str(tmp_path / 'verifier-unavailable')!r}).exists():
+        raise FileNotFoundError("synthetic unavailable executable")
+    result = original(command, *args, **kwargs)
+    if {remove_refusal_report!r} and len(command) > 3 and command[3] == "run" and result.returncode == 1:
+        pathlib.Path({str(tmp_path / 'out' / 'run-1.scoring' / 'refusal_report.json')!r}).unlink()
+    return result
+subprocess.run = external_process
 sys.argv = {command[2:]!r}
 runpy.run_module("pets_release.ui", run_name="__main__")
 '''
@@ -85,7 +109,11 @@ def request(url, path="/", *, auth=True, data=None, method=None):
             node = json.loads(body)
         except ValueError:
             node = body
-        assert identifier_shape_counts(node) == {}, "HTTP response contains an identifier shape"
+        shapes = identifier_shape_counts(node)
+        if path.split("?")[0] in {"/rows", "/api/rows"} and response.status == 200:
+            # Independently allow only the contract-checked keyed pseudonym shape, not identifiers.
+            shapes.pop("HEX64_OUTSIDE_TOKEN", None)
+        assert shapes == {}, "HTTP response contains an identifier shape"
         assert TEST_KEY not in body
         return response.status, body
 
@@ -284,3 +312,206 @@ def test_cs_attempt_reports_the_production_cli_failure_without_a_release(tmp_pat
         assert report["steps"] == [{"name": "run", "exit": reference.returncode}]
         assert not (out / "run-1").exists()
         assert "FAILED" in request(url, "/result")[1]
+        assert "Not yet supported by this build" in request(url, "/result")[1]
+        assert "Not yet supported by this build" in request(url)[1]
+
+
+def test_refusal_without_report_is_explicit(tmp_path):
+    """HTTP + real CLI seam: unavailable scoring storage -> explicit missing-report notice."""
+    with running(tmp_path) as (_, url, _, out):
+        (out / "run-1.scoring").write_text("synthetic storage obstacle")
+        assert request(url, "/api/run", data={"scenario": "HEALTH-S1"})[0] == 202
+        assert result(url)["status"] == "FAILED"
+        status, page = request(url, "/result")
+        assert status == 200
+        assert "No refusal report available" in page
+
+
+def test_failed_full_verification_is_not_pending(tmp_path):
+    """HTTP + CLI seam: source disappears after run -> real full verify fails visibly."""
+    with running(tmp_path) as (_, url, kit, _):
+        assert request(url, "/api/run", data={"scenario": "HEALTH-S1"})[0] == 202
+        deadline = time.monotonic() + 120
+        while time.monotonic() < deadline:
+            state = json.loads(request(url, "/api/result")[1])
+            if len(state["steps"]) >= 2:
+                break
+            time.sleep(0.02)
+        else:
+            raise AssertionError("limited verification never started")
+        (kit / "data" / "health" / "ed_visits.csv").unlink()
+        report = result(url)
+        assert report["status"] == "FAILED"
+        assert report["steps"][2]["exit"] != 0
+        page = request(url, "/result")[1]
+        assert 'Controller verification</div><div class="value">Failed</div>' in page
+
+
+def test_concurrent_run_is_refused_with_a_busy_message(tmp_path):
+    """HTTP + CLI seam: a second start cannot replace the active release."""
+    with running(tmp_path) as (_, url, _, out):
+        assert request(url, "/api/run", data={"scenario": "HEALTH-S1"})[0] == 202
+        status, body = request(url, "/api/run", data={"scenario": "HEALTH-S1"})
+        assert status == 409
+        assert json.loads(body) == {"started": False, "message": "Busy, run in progress"}
+        assert result(url)["status"] == "RELEASED"
+        assert not (out / "run-2").exists()
+
+
+@pytest.mark.parametrize("case", ["first-rows", "extra", "rowmap", "truth", "raw", "escape", "tampered", "missing", "bad-contract"])
+def test_protected_rows_require_current_verification_and_manifest_membership(tmp_path, case):
+    """HTTP + real CLI seam: only exact, verified protected bytes can reach the rows view."""
+    import pandas as pd
+
+    with running(tmp_path) as (_, url, kit, out):
+        assert request(url, "/api/run", data={"scenario": "HEALTH-S1"})[0] == 202
+        assert result(url)["status"] == "RELEASED"
+        release = out / "run-1"
+        path = "/api/rows?file=ed_visits.csv&limit=2"
+        if case == "first-rows":
+            status, body = request(url, path)
+            assert status == 200
+            table = json.loads(body)["tables"][0]
+            expected = pd.read_csv(release / "ed_visits.csv", dtype=str, keep_default_na=False)
+            assert table == {"file": "ed_visits.csv", "columns": list(expected.columns),
+                             "rows": expected.head(2).values.tolist()}
+            page = request(url, "/rows")[1]
+            assert "Protected release rows" in page
+            assert "Synthetic kit data © Since AI ry, CC BY 4.0. In a real deployment only the recipient sees this view." in page
+            assert len(json.loads(request(url, "/api/rows?limit=25")[1])["tables"][0]["rows"]) <= 25
+            assert request(url, "/api/rows?limit=26")[0] == 422
+            return
+        if case in {"extra", "rowmap", "truth"}:
+            name = {"extra": "extra.csv", "rowmap": "rowmap_ed_visits.csv", "truth": "truth/hidden.csv"}[case]
+            planted = release / name
+            planted.parent.mkdir(exist_ok=True)
+            planted.write_text("never_serve\nsynthetic-canary\n")
+            path = "/api/rows?file=" + name
+        elif case == "raw":
+            path = "/api/rows?file=" + str(kit / "data" / "health" / "ed_visits.csv").replace("\\", "/")
+        elif case == "escape":
+            path = "/api/rows?file=../run-1.scoring/rowmap_ed_visits.csv"
+        elif case == "tampered":
+            with (release / "ed_visits.csv").open("a") as handle:
+                handle.write("synthetic-canary\n")
+        elif case == "missing":
+            (release / "privacy_manifest.json").unlink()
+        elif case == "bad-contract":
+            import hashlib
+            table = pd.read_csv(release / "ed_visits.csv", dtype=str, keep_default_na=False)
+            table["uncontracted"] = "synthetic-canary"
+            table.to_csv(release / "ed_visits.csv", index=False, lineterminator="\n")
+            manifest_path = release / "privacy_manifest.json"
+            manifest = json.loads(manifest_path.read_bytes())
+            manifest["bindings"]["files"]["ed_visits.csv"] = hashlib.sha256((release / "ed_visits.csv").read_bytes()).hexdigest()
+            manifest_path.write_bytes(canonical_bytes(manifest))
+            # Digests match: only the fresh production checks can catch the extra column.
+            from pets_release.manifest import validate_manifest_file
+            assert validate_manifest_file(release) == []
+        status, body = request(url, path)
+        assert status == 422
+        assert "synthetic-canary" not in body
+        # A fresh display must fail too, even though the original run verified successfully.
+        if case in {"tampered", "missing", "extra", "rowmap", "truth", "bad-contract"}:
+            assert request(url, "/rows")[0] == 422
+
+
+def test_targets_show_measured_values_and_never_assume_missing_results_pass(tmp_path):
+    """HTTP + CLI seam: policy floors/strict utility thresholds retain numbers and unknowns."""
+    with running(tmp_path) as (_, url, _, _):
+        assert request(url, "/api/run", data={"scenario": "HEALTH-S1"})[0] == 202
+        report = result(url)
+        assert report["status"] == "RELEASED"
+        targets = {t["name"]: t for t in report["targets"]}
+        assert targets["qi-k"]["threshold"] == ">= 5"
+        assert targets["qi-k"]["measured"] >= 5
+        assert targets["qi-k"]["status"] == "met"
+        assert targets["H-U2"]["threshold"] == ">= 0.9"
+        assert targets["H-U2"]["measured"] >= 0.9
+        assert targets["ed_visits.patient_name"]["measured"] == "withheld"
+        assert targets["ed_visits.patient_name"]["status"] == "met"
+        assert targets["H-U4 sacrifice floor"]["threshold"] == ">= 0.6"
+        assert "Targets met / not met" in request(url, "/result")[1]
+        assert request(url, "/api/run", data={"scenario": "CS-S1"})[0] == 202
+        failed = result(url)
+        assert failed["status"] == "FAILED"
+        assert failed["targets"]
+        assert all(t["status"] == "not measured" and t["measured"] is None for t in failed["targets"])
+        assert "not measured" in request(url, "/result")[1]
+
+
+def test_five_demonstration_views_project_production_inventory_and_manifest(tmp_path):
+    """HTTP + CLI seam: five distinct jury views expose only real metadata and measured aggregates."""
+    with running(tmp_path) as (_, url, _, _):
+        assert request(url, "/api/run", data={"scenario": "HEALTH-S1"})[0] == 202
+        report = result(url)
+        assert report["status"] == "RELEASED"
+        for route, title in (("risks", "Data types and privacy risks found"), ("pets", "PETs chosen and why"),
+                             ("protected", "The protected output"), ("measurements", "Measured privacy and utility"),
+                             ("limitations", "Scenario and limitations")):
+            status, page = request(url, "/demo/" + route)
+            assert status == 200
+            assert title in page
+            assert "not measured" in page or route in {"pets", "protected", "limitations"}
+        risks = request(url, "/demo/risks")[1]
+        assert "Production detector" in risks and "direct_identifier" in risks and "patient_name" in risks
+        assert "Baseline" in risks and "Attacker" in risks
+        pets = request(url, "/demo/pets")[1]
+        assert "keyed_pseudonym" in pets and "H-U7" in pets
+        protected = request(url, "/demo/protected")[1]
+        assert "Before (field level only)" in protected and "age.band10" in protected
+        measurements = request(url, "/demo/measurements")[1]
+        assert all(word in measurements for word in ("privacy", "utility", "composite", "Targets met / not met"))
+        limitations = request(url, "/demo/limitations")[1]
+        assert all(word in limitations for word in ("Recipient", "Trust", "Not-fit-for", "Residual risks", "Sacrifices"))
+
+
+def test_optional_demo_banner_is_visible_and_escaped(tmp_path):
+    """HTTP seam: an operator banner is optional, shared across views and HTML-escaped."""
+    with running(tmp_path / "plain") as (_, url, _, _):
+        assert 'role="status"' not in request(url)[1]
+    with running(tmp_path / "demo", extra_env={"PETS_UI_DEMO_BANNER": "Demo <synthetic> only"}) as (_, url, _, _):
+        for route in ("/", "/result", "/demo/risks"):
+            status, page = request(url, route)
+            assert status == 200
+            assert 'role="status"' in page
+            assert "Demo &lt;synthetic&gt; only" in page and "<synthetic>" not in page
+
+
+def test_unavailable_display_verifier_never_serves_rows(tmp_path):
+    """HTTP + external-process seam: execution failure must not reuse the run's successful verify."""
+    with running(tmp_path, verifier_unavailable=True) as (_, url, _, _):
+        assert request(url, "/api/run", data={"scenario": "HEALTH-S1"})[0] == 202
+        assert result(url)["status"] == "RELEASED"
+        assert request(url, "/api/rows?limit=1")[0] == 200
+        (tmp_path / "verifier-unavailable").touch()
+        assert request(url, "/api/rows?limit=1")[0] == 422
+        assert request(url, "/rows")[0] == 422
+
+
+def test_planted_release_junction_outside_root_is_refused(tmp_path):
+    """HTTP + filesystem seam: a planted alias to a valid release elsewhere cannot grant row access."""
+    with running(tmp_path) as (_, url, _, out):
+        assert request(url, "/api/run", data={"scenario": "HEALTH-S1"})[0] == 202
+        assert result(url)["status"] == "RELEASED"
+        assert request(url, "/api/rows?limit=1")[0] == 200
+        release = out / "run-1"
+        elsewhere = tmp_path / "elsewhere"
+        release.rename(elsewhere)
+        if os.name == "nt":
+            proc = subprocess.run(["cmd", "/c", "mklink", "/J", str(release), str(elsewhere)],
+                                  capture_output=True, check=False)
+            assert proc.returncode == 0
+        else:
+            release.symlink_to(elsewhere, target_is_directory=True)
+        assert request(url, "/api/rows?limit=1")[0] == 422
+
+
+def test_refused_cli_with_removed_report_keeps_the_explicit_unknown(tmp_path):
+    """HTTP + filesystem fault: a real exit-1 refusal whose report disappears remains refused, not empty."""
+    with running(tmp_path, edit=None, remove_refusal_report=True) as (_, url, _, _):
+        assert request(url, "/api/run", data={"scenario": "HEALTH-S1"})[0] == 202
+        report = result(url)
+        assert report["status"] == "REFUSED" and report["steps"][-1]["exit"] == 1
+        assert "No refusal report available" in request(url, "/result")[1]
+        assert request(url, "/api/rows")[0] == 422
