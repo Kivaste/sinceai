@@ -69,8 +69,8 @@ POLICY = ScenarioPolicy(
     qi=(),
     risk_vector=("text_recall_shortfall", "health_in_text", "direct_identifier_leak", "pseudonym_linkage"),
     sacrifices=(
-        {"check": "CS-U4", "floor_score": 0.8, "reason": "handle time rounding"},
-        {"check": "CS-U5", "floor_score": 0.8, "reason": "vocabulary removed by redaction of identifying phrases"},
+        {"check": "CS-U5", "floor_score": 0.8, "reason": "vocabulary removed by redaction of identifying phrases",
+         "via": [{"table": "turns", "column": "text"}]},
     ),
     joint_qi_moves=(),
     linked=((("conversations", "conversation_id"), ("turns", "conversation_id")),),

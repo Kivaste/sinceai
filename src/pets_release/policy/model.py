@@ -5,16 +5,42 @@ Rung IDs are ticket 07's (pets_release.ladders.LADDERS); this module defines non
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
-from typing import Any
+from dataclasses import dataclass, field
 
-from pets_release.ladders import LADDERS, WITHHELD  # single source of rung IDs (ticket 07)
+from pets_release.ladders import CONTRACT_FORMS, LADDERS, WITHHELD  # single source of rung IDs (ticket 07)
 
 PLAN_KEYS = frozenset({"table", "column", "rung", "params", "floor", "reason", "source"})
 
 
 class PlanError(ValueError):
     pass
+
+
+class PolicyError(ValueError):
+    """A policy record is malformed (closed sub-records: exact keys)."""
+
+
+_TARGETS = {
+    "k_anonymity": {"id", "kind", "k", "unit", "over"},
+    "text_recall": {"id", "kind", "min", "labels"},
+    "health_in_text": {"id", "kind", "max_hits"},
+    "timestamp_floor": {"id", "kind", "rung"},
+}
+_QI_REQ = {"table", "column", "derived"}
+_QI_OPT = {"note", "join_via"}
+_SACRIFICE = {"check", "floor_score", "reason", "via"}
+_MOVE = {"table", "column", "rung"}
+_SUPPRESSION = {"method", "unit", "k", "max_share", "order", "then"}
+_NOTE = {"id", "status", "note"}
+_NOTE_STATUS = {"not_applicable", "open"}
+
+
+def _exact(rec, keys, what, optional=frozenset()):
+    if not isinstance(rec, dict):
+        raise PolicyError(f"{what} must be an object")
+    ks = set(rec)
+    if not keys <= ks or not ks <= (keys | optional):
+        raise PolicyError(f"{what} keys must be {sorted(keys)} (+optional {sorted(optional)}), got {sorted(ks)}")
 
 
 @dataclass(frozen=True)
@@ -38,7 +64,56 @@ class ScenarioPolicy:
     joint_qi_moves: tuple[tuple[dict, ...], ...]  # each move = tuple of {table, column, rung[, params]}
     linked: tuple[tuple[tuple[str, str], ...], ...]  # column groups that must share rung + params
     param_minimums: dict  # (table, column) -> {"rung": r, "param": p, "min": n}
-    alt_floors: dict = None  # (table, column) -> alternative floor rung (conditional-keep fallback)
+    alt_floors: dict = field(default_factory=dict)  # (table, column) -> alternative floor rung (conditional release)
+    residual_notes: tuple[dict, ...] = ()  # {id, status, note}: e.g. a target that is not applicable
+    suppression: dict | None = None  # last-step local suppression of below-k persons (applied by ticket 21)
+
+    def __post_init__(self):
+        cols = set(self.floors)
+        for key, fl in self.floors.items():
+            if fl.family not in LADDERS or fl.rung not in LADDERS[fl.family]:
+                raise PolicyError(f"floor for {key} is not on its ladder")
+        for t in self.privacy_targets:
+            if not isinstance(t, dict) or t.get("kind") not in _TARGETS:
+                raise PolicyError("unknown privacy target kind")
+            _exact(t, _TARGETS[t["kind"]], "privacy target")
+        for q in self.qi:
+            _exact(q, _QI_REQ, "qi row", _QI_OPT)
+            if (q["table"], q["column"]) not in cols:
+                raise PolicyError("qi row names an unknown column")
+            jv = q.get("join_via")
+            if jv is not None and (not isinstance(jv, list) or len(jv) != 2 or tuple(jv) not in cols):
+                raise PolicyError("join_via must be [table, column] of a policy column")
+        for sc in self.sacrifices:
+            _exact(sc, _SACRIFICE, "sacrifice")
+            if sc["check"] not in self.purpose_checks:
+                raise PolicyError("sacrifice names a check outside the purpose checks")
+            if not (isinstance(sc["floor_score"], (int, float)) and 0 <= sc["floor_score"] < 0.9):
+                raise PolicyError("sacrifice floor_score must be in [0, 0.9)")
+            if not isinstance(sc["via"], list) or not sc["via"]:
+                raise PolicyError("sacrifice needs plan columns in via")
+            for v in sc["via"]:
+                _exact(v, {"table", "column"}, "sacrifice via")
+                if (v["table"], v["column"]) not in cols:
+                    raise PolicyError("sacrifice via names an unknown column")
+        for mv in self.joint_qi_moves:
+            for m in mv:
+                _exact(m, _MOVE, "joint QI move")
+                if (m["table"], m["column"]) not in cols:
+                    raise PolicyError("joint QI move names an unknown column")
+                if m["rung"] not in CONTRACT_FORMS and m["rung"] != WITHHELD:
+                    raise PolicyError("joint QI move names an unknown rung")
+        for key, rung in (self.alt_floors or {}).items():
+            if key not in cols or (rung not in CONTRACT_FORMS and rung != WITHHELD):
+                raise PolicyError("alt_floors entry is invalid")
+        for n in self.residual_notes:
+            _exact(n, _NOTE, "residual note")
+            if n["status"] not in _NOTE_STATUS:
+                raise PolicyError("residual note status invalid")
+        if self.suppression is not None:
+            _exact(self.suppression, _SUPPRESSION, "suppression")
+            if not 0 < self.suppression["max_share"] <= 1:
+                raise PolicyError("suppression max_share must be in (0, 1]")
 
     def to_json(self) -> dict:
         return {
@@ -55,6 +130,11 @@ class ScenarioPolicy:
             "riskVector": list(self.risk_vector),
             "sacrifices": [dict(s) for s in self.sacrifices],
             "jointQiMoves": [[dict(m) for m in mv] for mv in self.joint_qi_moves],
+            "altFloors": [
+                {"table": t, "column": c, "floor": r} for (t, c), r in sorted((self.alt_floors or {}).items())
+            ],
+            "residualNotes": [dict(n) for n in self.residual_notes],
+            "suppression": dict(self.suppression) if self.suppression else None,
             "linked": [[{"table": t, "column": c} for t, c in g] for g in self.linked],
             "paramMinimums": [
                 {"table": t, "column": c, **v} for (t, c), v in sorted(self.param_minimums.items())
@@ -97,16 +177,17 @@ def validate_plan(plan: list, policy: ScenarioPolicy) -> None:
             raise PlanError(f"params not JSON-serialisable for {key}") from None
         fl = policy.floors[key]
         alt = (policy.alt_floors or {}).get(key)
-        if alt and e["floor"] == alt and e["rung"] in (alt, WITHHELD):
-            seen[key] = e
-            continue
-        ladder = LADDERS[fl.family]
-        if e["floor"] != fl.rung:
+        if e["floor"] == fl.rung:
+            ladder = LADDERS[fl.family]
+            if e["rung"] not in ladder:
+                raise PlanError(f"rung {e['rung']!r} not on the {fl.family} ladder for {key}")
+            if ladder.index(e["rung"]) < ladder.index(fl.rung):
+                raise PlanError(f"rung for {key} is finer than its floor")
+        elif alt and e["floor"] == alt:  # conditional-keep fallback: only the alt rung or withheld
+            if e["rung"] not in (alt, WITHHELD):
+                raise PlanError(f"rung for {key} is finer than its alternative floor")
+        else:
             raise PlanError(f"floor field for {key} does not match the policy floor")
-        if e["rung"] not in ladder:
-            raise PlanError(f"rung {e['rung']!r} not on the {fl.family} ladder for {key}")
-        if ladder.index(e["rung"]) < ladder.index(fl.rung):
-            raise PlanError(f"rung for {key} is finer than its floor")
         if e["rung"] == "id.pseudonym" and not isinstance(e["params"].get("label", "RECORD_KEY"), str):
             raise PlanError(f"pseudonym label must be a string for {key}")
         seen[key] = e
