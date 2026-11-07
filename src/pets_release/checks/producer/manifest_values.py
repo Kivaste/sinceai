@@ -70,20 +70,48 @@ def _enum_item(path: tuple, text: str, released: dict) -> bool:
     return False
 
 
-def occurs(values: set, text: str) -> bool:
-    """Any value (each >= SCAN_MIN_LEN long) a substring of ``text``. An n-gram prefilter keeps big kits fast."""
-    grams = {text[i:i + SCAN_MIN_LEN] for i in range(len(text) - SCAN_MIN_LEN + 1)}
-    return any(v[:SCAN_MIN_LEN] in grams and v in text for v in values)
+def index(values: set) -> dict:
+    """{first SCAN_MIN_LEN characters: [values]}: the prefilter that keeps the scan linear in manifest text."""
+    out: dict = {}
+    for v in values:
+        out.setdefault(v[:SCAN_MIN_LEN], []).append(v)
+    return out
+
+
+def occurs(idx: dict, text: str) -> bool:
+    """Any indexed value (each >= SCAN_MIN_LEN long) a substring of ``text``."""
+    for i in range(len(text) - SCAN_MIN_LEN + 1):
+        for v in idx.get(text[i:i + SCAN_MIN_LEN], ()):
+            if text.startswith(v, i):
+                return True
+    return False
+
+
+# The source index is the expensive part (every source cell, folded); the gate runs once per suppression round
+# and the self-scan again, all on the same source mapping. One entry, held by identity (the reference keeps the
+# mapping alive, so its id cannot be reused while cached).
+_SOURCE_CACHE: list = []
+
+
+def _source_index(source: Mapping) -> tuple[dict, set]:
+    if _SOURCE_CACHE and _SOURCE_CACHE[0][0] is source and _SOURCE_CACHE[0][1] == tuple(
+            (k, id(df), df.shape) for k, df in source.items()):
+        return _SOURCE_CACHE[0][2]
+    headers = set(source) | {str(c) for df in source.values() for c in df.columns}
+    entry = (index(_values(source.values())), headers)
+    _SOURCE_CACHE[:] = [(source, tuple((k, id(df), df.shape) for k, df in source.items()), entry)]
+    return entry
 
 
 def hit_count(manifest_like: dict, source: Mapping, release_tables: Mapping) -> int:
     """Number of manifest strings/keys that carry a source or released value (see the module docstring).
     ``release_tables``: {file name: DataFrame} of the released CSVs."""
-    headers = set(source) | {str(c) for df in source.values() for c in df.columns} | set(release_tables) \
+    src_idx, src_headers = _source_index(source)
+    headers = src_headers | set(release_tables) \
         | {name[:-4] for name in release_tables if name.endswith(".csv")} \
         | {str(c) for df in release_tables.values() for c in df.columns}
     released = {(name, str(c)): set(df[c].tolist()) for name, df in release_tables.items() for c in df.columns}
-    values = _values(source.values()) | _values(release_tables.values())
+    rel_idx = index(_values(release_tables.values()))
     texts: list = []
     _walk(manifest_like, (), texts)
     hits = 0
@@ -91,7 +119,7 @@ def hit_count(manifest_like: dict, source: Mapping, release_tables: Mapping) -> 
         if text in headers or _enum_item(path, text, released):
             continue
         f = fold(text)
-        if len(f) >= SCAN_MIN_LEN and occurs(values, f):
+        if len(f) >= SCAN_MIN_LEN and (occurs(src_idx, f) or occurs(rel_idx, f)):
             hits += 1
     return hits
 
