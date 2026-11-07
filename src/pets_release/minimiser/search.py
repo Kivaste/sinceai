@@ -7,8 +7,11 @@ Phases, each in fixed (table, column) order; linked columns move as one unit:
   joint        the policy's enumerated joint QI moves; adopt only on a strictly better objective
   sacrifice    only if the k shortfall still exceeds the suppression budget: coarsen sacrifice ``via``
                columns and retry joint moves, accepting a policy-enumerated sacrifice at or above its floor
-  final        local suppression to reach k, then an uncached re-check of every purpose check and the k
-               checks (04's runner, ticket 11's checks) on the full data
+  final        local suppression to reach k, then an uncached re-check of every purpose check and every
+               privacy target the policy declares on the full data. k_anonymity (persons) runs ticket 11's k
+               checks through 04's runner (no QI released: k holds iff at least k units remain); any other
+               kind is unsupported and refuses the plan, as do a raising, refused or incomplete check run.
+               A policy declaring no target records privacy ``not_applicable``, never ``pass``
 
 Acceptance: every purpose check status ``ok`` with score >= 0.9. A check below 0.9 is waived only if it is an
 enumerated sacrifice, scored (status ok) at or above its floor score, and the candidate differs from the
@@ -151,6 +154,8 @@ class _Search:
         unknown = [c for c in self.p.risk_vector if c not in R.BUILTIN_COMPONENTS]
         if unknown and self.risk_extra is None:
             raise MinimiserRefused("risk components without a measurement: " + ",".join(unknown))
+        if self.k is None and set(self.p.risk_vector) & R.K_COMPONENTS:
+            raise MinimiserRefused("k risk components without a k target")
         if self.k is not None and self.kspec is None:
             raise MinimiserRefused("k target needs a person/record-key spec")
         if not self.checks:
@@ -348,13 +353,20 @@ class _Search:
                 return False
             via = {(v["table"], v["column"]) for v in s["via"]}
             by_move = bool(diff & via)
-            in_effect = any(cand[k][0] != self.floor_rung[k] for k in via)
+            in_effect = any(self._coarser_than_floor(k, cand[k][0]) for k in via)
             # _strict(pre[c]) is defensive: the strict phases leave every check passing, and a sacrifice-phase
             # failure is already covered by by_move; kept so a future phase cannot widen the waiver.
             by_suppression = c in pre and _strict(pre[c]) and in_effect
             if not (by_move or by_suppression):
                 return False
         return True
+
+    def _coarser_than_floor(self, key, rung) -> bool:
+        """``rung`` lies strictly coarser than the policy floor on the family ladder (an alternative floor, or a
+        rung or floor off the ladder, is never coarser)."""
+        lad = LADDERS[self.family(key)]
+        fl = self.floor_rung[key]
+        return rung in lad and fl in lad and lad.index(rung) > lad.index(fl)
 
     # ---------------------------------------------------------------- logging
     def moves(self, cand, cur):
@@ -480,6 +492,7 @@ class _Search:
                 for m in mv:
                     step_reason((m["table"], m["column"]), f"{m['rung']}: joint QI move {i + 1} lowers risk", step)
         base = cur
+        self.base_ev = cur_ev
         # sacrifice phase
         if self.p.sacrifices and self._needs_more(cur_ev):
             for u in self.units:
@@ -580,8 +593,7 @@ class _Search:
         budget = (self.p.suppression or {}).get("max_share")
         prot = apply_suppression(full, suppressed)
         results = self._final_purpose(prot)
-        priv = (R.gate_k(prot, plan, self.p, self.src, self.kspec, self.k) if self.k is not None
-                else {"refused": False, "registryError": None, "records": [], "vacuous": True})
+        priv, targets, pstatus = self._final_privacy(prot, plan, suppressed)
         rv, _ = R.risk_vector(self.p, plan, prot, self.src, self.kspec, self.k)
         if self.risk_extra is not None:
             ex = self.risk_extra(plan, prot)
@@ -599,29 +611,33 @@ class _Search:
         fails = [c for c, r in results.items() if not _strict(r)]
         if fails and not self.final_ok(results, cur, base, cur_ev["results"]):
             problems.append("re-check fails: " + ",".join(sorted(fails)))
-        if self.k is not None and not priv.get("vacuous"):
-            recs = {r["check"]: r for r in priv["records"]}
-            for name in ("producer.person-k", "producer.row-k"):
-                if recs.get(name, {}).get("status") != "pass":
-                    problems.append(f"re-check {name} not pass")
+        problems += [f"re-check privacy target {t['id']} ({t['kind']}): {t['status']}" for t in targets
+                     if t["status"] != "pass"]
         ok = not problems
         ev = {"results": {c: results.get(c, {"score": None, "status": "missing"}) for c in self.checks},
               "risk": {c: (0.0 if v is None else v) for c, v in rv.items()}, "cached": False}
         reason = (f"final: local suppression of {sup_persons} of {persons} persons, then full uncached re-check of "
-                  f"every purpose check and the k target: " + ("passed" if ok else "; ".join(problems)) + bound)
+                  f"every purpose check and every privacy target (privacy {pstatus}): "
+                  + ("passed" if ok else "; ".join(problems)) + bound)
         self.record(cur, cur, ev, ok, reason, step="final")
         if not ok:
             raise MinimiserRefused("; ".join(problems), self.log, self.stats)
         sacrifices = []
         for c in sorted(fails):
             s = self.sacr[c]
+            # score just before the sacrifice took effect: the unsuppressed adopted candidate when suppression
+            # caused the drop, else the strict-phase plan (before any sacrifice move)
+            pre = cur_ev["results"].get(c)
+            before = pre["score"] if pre is not None and _strict(pre) else self.base_ev["results"][c]["score"]
             sacrifices.append({"check": c, "floor_score": s["floor_score"], "reason": s["reason"],
                                "via": [dict(v) for v in s["via"]],
-                               "score_before": self.start_ev["results"][c]["score"],
+                               "score_before": before,
                                "score_after": results[c]["score"]})
         final = {
             "purpose": [{"id": c, **results[c]} for c in sorted(results)],
             "privacy": priv,
+            "privacy_targets": targets,
+            "privacy_status": pstatus,
             "risk": rv,
             "persons": persons,
             "suppressed_persons": sup_persons,
@@ -631,6 +647,47 @@ class _Search:
                    "start_risk": dict(self.start_ev["risk"]), "final_risk": rv}
         return SearchResult(plan=plan, log=self.log, suppressed=suppressed, final=final, sacrifices=sacrifices,
                             stats=dict(self.stats), summary=summary)
+
+    def _final_privacy(self, prot, plan, suppressed):
+        """Re-check every privacy target the policy declares, failing closed.
+
+        Returns (k gate summary or None, [{id, kind, status}] sorted by id, overall status). A target passes only
+        if it was evaluated and held; a kind the minimiser cannot evaluate is ``unsupported``, a raising,
+        refused or incomplete check run is ``error``. No declared target: ``not_applicable``, never ``pass``.
+        """
+        priv, out = None, []
+        for t in sorted(self.p.privacy_targets, key=lambda x: str(x.get("id"))):
+            kind = t.get("kind")
+            if kind == "k_anonymity" and t.get("unit") == "persons":
+                status, priv = self._final_k(prot, plan, suppressed)
+            else:
+                status = "unsupported"
+            out.append({"id": t.get("id"), "kind": kind, "status": status})
+        overall = "not_applicable" if not out else ("pass" if all(r["status"] == "pass" for r in out) else "fail")
+        return priv, out, overall
+
+    def _final_k(self, prot, plan, suppressed):
+        if self.k is None or self.kspec is None:
+            return "error", None
+        if not R.contract_for(self.p, plan, self.k)["qi"]:
+            # no QI released: every unit remaining shares one class, so k holds iff there are at least k units
+            pt = self.kspec["person"]["table"]
+            gone = set(suppressed.get(pt, ()))
+            rows = [i for i in self.src[pt].index if i not in gone]
+            n = _units(self.src[pt][self.kspec["person"]["column"]], rows)
+            return ("pass" if n >= self.k else "fail"), {"refused": False, "registryError": None, "records": [],
+                                                          "vacuous": True, "units": n}
+        try:
+            priv = R.gate_k(prot, plan, self.p, self.src, self.kspec, self.k)
+        except Exception:  # noqa: BLE001 - the message could carry values
+            return "error", None
+        if not isinstance(priv, Mapping) or priv.get("refused") is not False or priv.get("registryError") is not None:
+            return "error", (dict(priv) if isinstance(priv, Mapping) else None)
+        recs = {r.get("check"): r.get("status") for r in priv.get("records") or [] if isinstance(r, Mapping)}
+        got = [recs.get(name) for name in ("producer.person-k", "producer.row-k")]
+        if all(s == "pass" for s in got):
+            return "pass", dict(priv)
+        return ("fail" if all(s in ("pass", "fail") for s in got) else "error"), dict(priv)
 
     def _final_purpose(self, prot) -> dict:
         if self.purpose_all is not None:

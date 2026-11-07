@@ -21,6 +21,17 @@ Failure rows (trigger -> result):
   F13 cache serves a result whose read columns changed         -> test_cache_hits_only_on_unchanged_read_columns
   F14 suppression beyond the policy's max share returned       -> test_suppression_over_budget_refuses
   F15 risk component the minimiser cannot measure silently 0   -> test_unknown_risk_component_refuses
+
+Round-1 review fix (final privacy re-check covers every declared privacy target, fail closed):
+  F16 a declared target kind the minimiser cannot evaluate      -> test_unevaluable_privacy_target_refuses
+  F17 k checks errored/refused/missing, or the k run raises     -> test_k_recheck_error_refuses
+  F18 no QI released: k recorded as a vacuous pass below k      -> test_no_qi_released_k_judged_on_unit_count
+  F19 policy declaring no target recorded as a pass; k risk
+      components without a k target crash                       -> test_no_privacy_targets_not_applicable
+  F20 suppression waiver with a via column not coarser than its
+      floor on the ladder (alternative floor counted)           -> test_suppression_waiver_needs_via_coarser_on_ladder
+  F21 sacrifice score_before is the start score, not the score
+      just before the sacrifice took effect                     -> test_score_before_is_pre_suppression_score
 """
 
 from __future__ import annotations
@@ -317,3 +328,124 @@ def test_unknown_risk_component_refuses(syn):
     pol = type(pol)(**{**pol.__dict__, "risk_vector": pol.risk_vector + ("text_recall_shortfall",)})
     with pytest.raises(MinimiserRefused):
         _run(syn, pol)
+
+
+# ---------------------------------------------------------------- round-1 review fix: final privacy re-check
+
+
+def _with_targets(pol, targets):
+    return type(pol)(**{**pol.__dict__, "privacy_targets": tuple(targets)})
+
+
+def _all_ok(task, orig, prot):
+    return {"score": 1.0, "status": "ok"}
+
+
+@pytest.mark.parametrize("target", [
+    {"id": "text-recall", "kind": "text_recall", "min": 0.98, "labels": "x"},
+    {"id": "no-health-in-text", "kind": "health_in_text", "max_hits": 0},
+    {"id": "timestamps-hour", "kind": "timestamp_floor", "rung": "ts.hour"},
+])
+def test_unevaluable_privacy_target_refuses(syn, target):
+    pol = syn.policy()
+    pol = _with_targets(pol, (*pol.privacy_targets, target))
+    with pytest.raises(MinimiserRefused) as ei:
+        _run(syn, pol)
+    last = ei.value.log[-1]
+    assert last["step"] == "final" and last["accepted"] is False
+    assert target["id"] in last["reason"] and target["id"] in ei.value.reason
+
+
+def _gate(kind):
+    def gate(*a, **kw):
+        if kind == "raise":
+            raise RuntimeError("runner broke")
+        recs = [{"check": "producer.person-k", "status": "pass", "hits": 0},
+                {"check": "producer.row-k", "status": "pass", "hits": 0}]
+        if kind == "refused":
+            return {"refused": True, "registryError": None, "records": recs, "vacuous": False}
+        if kind == "error":
+            recs[0] = dict(recs[0], status="error")
+        if kind == "missing":
+            recs = recs[:1]
+        return {"refused": False, "registryError": None, "records": recs, "vacuous": False}
+    return gate
+
+
+@pytest.mark.parametrize("kind", ["raise", "refused", "error", "missing"])
+def test_k_recheck_error_refuses(syn, monkeypatch, kind):
+    from pets_release.minimiser import risk
+    monkeypatch.setattr(risk, "gate_k", _gate(kind))
+    with pytest.raises(MinimiserRefused) as ei:
+        _run(syn)
+    assert ei.value.log[-1]["step"] == "final" and ei.value.log[-1]["accepted"] is False
+    assert "qi-k" in ei.value.reason
+
+
+def test_no_qi_released_k_judged_on_unit_count(syn):
+    # every QI withheld: all 25 persons share one class, so k holds iff 25 >= k (never a vacuous pass)
+    res = _run(syn, syn.policy(), purpose=_all_ok)
+    assert res.final["privacy_targets"] == [{"id": "qi-k", "kind": "k_anonymity", "status": "pass"}]
+    assert res.final["privacy_status"] == "pass"
+    with pytest.raises(MinimiserRefused) as ei:
+        _run(syn, syn.policy(k=30), purpose=_all_ok)
+    assert "qi-k" in ei.value.reason
+
+
+def test_no_privacy_targets_not_applicable(syn):
+    pol = syn.policy()
+    pol = _with_targets(type(pol)(**{**pol.__dict__, "suppression": None}), ())
+    with pytest.raises(MinimiserRefused, match="k risk components"):
+        _run(syn, pol)  # k components cannot be measured without a k target
+    pol = type(pol)(**{**pol.__dict__, "risk_vector": ("join_derived_qi", "direct_identifier_leak")})
+    res = _run(syn, pol)
+    assert res.final["privacy_targets"] == []
+    assert res.final["privacy_status"] == "not_applicable"
+    assert res.final["privacy"] is None
+    assert "not_applicable" in res.log[-1]["reason"]
+
+
+def test_privacy_targets_recorded_on_pass(syn):
+    res = _run(syn)
+    assert res.final["privacy_targets"] == [{"id": "qi-k", "kind": "k_anonymity", "status": "pass"}]
+    assert res.final["privacy_status"] == "pass"
+
+
+def test_suppression_waiver_needs_via_coarser_on_ladder(syn):
+    # pid's floor is withheld; U-JOIN needs it, so the alternative floor (id.pseudonym) is released. A
+    # suppression drop of U-FLAG enumerated via pid is not waived: pid is at its (alternative) floor, not coarser.
+    n = len(syn.tables["visits"])
+
+    def purpose(t, orig, prot):
+        v = prot.get("visits")
+        if t == "U-JOIN" and (v is None or "pid" not in v.columns):
+            return {"score": None, "status": "not_answerable"}
+        if t == "U-FLAG" and v is not None and len(v) < n:
+            return {"score": 0.85, "status": "ok"}
+        return syn.purpose(t, orig, prot)
+
+    s = {"check": "U-FLAG", "floor_score": 0.6, "reason": "x", "via": [{"table": "visits", "column": "pid"}]}
+    with pytest.raises(MinimiserRefused) as ei:
+        _run(syn, syn.policy(sacrifices=(syn.sacrifice, s)), purpose=purpose)
+    assert any(e["accepted"] and "alternative floors" in e["reason"] for e in ei.value.log)
+    assert "U-FLAG" in ei.value.reason
+
+
+def test_score_before_is_pre_suppression_score(syn):
+    # U-FLAG scores 1.0 while spare is released (start) and 0.95 once spare is withheld (strict search), then
+    # 0.85 after suppression: score_before is the score just before the sacrifice took effect (0.95)
+    n = len(syn.tables["visits"])
+
+    def purpose(t, orig, prot):
+        v = prot.get("visits")
+        if t == "U-FLAG" and v is not None and "flag" in v.columns:
+            if len(v) < n:
+                return {"score": 0.85, "status": "ok"}
+            return {"score": 1.0 if "spare" in v.columns else 0.95, "status": "ok"}
+        return syn.purpose(t, orig, prot)
+
+    s = {"check": "U-FLAG", "floor_score": 0.6, "reason": "x", "via": [{"table": "visits", "column": "dob"}]}
+    res = _run(syn, syn.policy(sacrifices=(syn.sacrifice, s)), purpose=purpose)
+    got = {x["check"]: x for x in res.sacrifices}
+    assert got["U-FLAG"]["score_before"] == 0.95 and got["U-FLAG"]["score_after"] == 0.85
+    assert got["U-TOWN"]["score_before"] == 1.0
