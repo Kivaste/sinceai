@@ -309,21 +309,21 @@ def plates(text):
 
 _CUE_TABLE = [
     ("digits", 3, 4,
-     r"cvv2?|cvc2?|cvn|card\s+verification\s+(?:code|value)|turvakoodi\w*|turvanumero\w*|"
-     r"säkerhetskod\w*|security\s+code"),
+     (r"cvv2?|cvc2?|cvn|card\s+verification\s+(?:code|value)|turvakoodi\w*|turvanumero\w*|"
+     r"säkerhetskod\w*|security\s+code")),
     ("digits", 4, 8,
-     r"pin(?:[ -]?(?:koodi\w*|kod\w*|code|number|numero\w*|nummer\w*))?|pinkod\w*|"
-     r"tunnuslu(?:ku|vu)\w*|personal\s+identification\s+number"),
+     (r"pin(?:[ -]?(?:koodi\w*|kod\w*|code|number|numero\w*|nummer\w*))?|pinkod\w*|"
+     r"tunnuslu(?:ku|vu)\w*|personal\s+identification\s+number")),
     ("code", 4, 10,
-     r"otp|one[\s-]?time\s+(?:code|password|passcode|pin)|verification\s+code|"
+     (r"otp|one[\s-]?time\s+(?:code|password|passcode|pin)|verification\s+code|"
      r"confirmation\s+code|auth(?:entication)?\s+code|sms\s+code|login\s+code|access\s+code|"
      r"vahvistuskoodi\w*|varmennuskoodi\w*|kertakäyttö(?:koodi|salasana)\w*|"
-     r"tekstiviestikoodi\w*|engångs(?:kod|lösenord)\w*|verifieringskod\w*|bekräftelsekod\w*"),
+     r"tekstiviestikoodi\w*|engångs(?:kod|lösenord)\w*|verifieringskod\w*|bekräftelsekod\w*")),
     ("secret", 4, 128,
-     r"password|passwd|pwd|passcode|passphrase|salasana\w*|tunnussana\w*|lösenord\w*|"
-     r"api[ _-]?(?:key|avain\w*|nyckel\w*)|token|secret\s+key"),
+     (r"password|passwd|pwd|passcode|passphrase|salasana\w*|tunnussana\w*|lösenord\w*|"
+     r"api[ _-]?(?:key|avain\w*|nyckel\w*)|token|secret\s+key")),
 ]
-_CUES = [(kind, lo, hi, re.compile(r"(?i)(?<![\w-])(?:" + rx + r")(?![\w])")) for kind, lo, hi, rx in _CUE_TABLE]
+_CUES = [(kind, lo, hi, re.compile(r"(?i)\b(?<!-)(?:" + rx + r")(?![\w])")) for kind, lo, hi, rx in _CUE_TABLE]
 _FILLERS = {
     "is", "was", "on", "oli", "är", "var", "it's", "its", "my", "minun", "min", "mitt", "the",
     "your", "now", "nyt", "nu", "code", "koodi", "kod", "number", "numero", "nummer", ":", "=",
