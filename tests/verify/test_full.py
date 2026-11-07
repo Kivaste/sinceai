@@ -118,9 +118,9 @@ def test_full_pass_with_runnable_checks(real_bed):
     assert rep.lines[-1].startswith("VERIFIED (full):")
     producer = {r.check: r for r in rep.records if r.scope == "producer"}
     # the bed is built by this code, so a deleted check would also be missing from its gate: pin the names
-    assert set(producer) >= {"producer.key-material", "producer.original-values", "producer.person-k",
-                             "producer.unkeyed-hashes"}
-    assert all(r.status == "pass" and r.denominator["n"] >= 1 for r in producer.values())
+    named = ("producer.key-material", "producer.original-values", "producer.person-k", "producer.unkeyed-hashes")
+    assert set(producer) >= set(named)
+    assert all(producer[n].status == "pass" and producer[n].denominator["n"] >= 1 for n in named)
 
 
 def test_full_bad_signature(bed, kit, tb):
