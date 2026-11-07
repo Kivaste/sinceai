@@ -55,7 +55,10 @@ def run_measured(*, kit, scenario: dict, created: str, key_text: str, out, plan_
 
     def with_measured(**kw):
         n = original(**kw)
-        n["measured"] = block
+        own = n["measured"]["search"]
+        n["measured"] = dict(block)
+        if own.get("status") == "measured":  # ticket 25: a search run's own measured.search (from its log) stays
+            n["measured"]["search"] = own
         return n
 
     pipeline.build_narrative = with_measured
