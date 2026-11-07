@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+from producer_helpers import with_detected
 
 from pets_release.checks import all_checks, run_checks
 from pets_release.run.context import person_normaliser
@@ -13,6 +14,7 @@ SEX = ["F"] * 3 + ["M"] * 3  # two classes of 3
 
 def _run(name, rel, contract, ctx):
     (chk,) = [c for c in all_checks() if c.name == name]
+    ctx = with_detected(rel, contract, ctx)  # production detector QI set (#106)
     return run_checks(rel, contract, ctx, checks=[chk]).to_dict()["records"][0]
 
 

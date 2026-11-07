@@ -40,12 +40,22 @@ TRUTH_SCAN_EXEMPT = frozenset({"pets_release/kit.py"})
 # positional argument of ``subprocess.run`` (no executable=, shell= or **kwargs). ``subprocess``, ``sys`` and the
 # two names are never rebound or shadowed. Every other mention or use, any dynamic-import or exec route, and an
 # unparseable or unreadable file are violations. The truth scan and the runtime guard are unchanged for it.
+#
+# Round 3 (identity, AGENTS.md "Paths"): the exemption applies only when the launcher's canonical content
+# (UTF-8 text without BOM, LF line endings) has exactly LAUNCHER_SHA256. Any other content at that path gets the
+# any-mention rule. Changing the launcher therefore needs a visible, reviewed update of this digest. The shape
+# check (launcher_shape_violates) stays as defence in depth.
+# Residual risk: a separate module that monkeypatches ``subprocess`` (or ``sys``) at runtime before the launcher
+# runs is outside this static scan of the launcher; the runtime guard below covers import time only. Any such
+# module would itself have to avoid the any-mention scan, so it could not name the attacker directly.
 ATTACKER_LAUNCHER = "pets_release/measure/attackers.py"
+LAUNCHER_SHA256 = "9d1f3ee9e4685814f54236fd8891847e71990f612135a51e909b8a3ec2c99ac1"
 LAUNCHER_ASSIGNMENTS = {"ATTACKER_MODULE": ATTACKER, "BRIDGE_MODULE": ATTACKER + ".bridge"}
 _LAUNCH_MODULES = ("subprocess", "sys")
 _PINNED = frozenset({*_LAUNCH_MODULES, *LAUNCHER_ASSIGNMENTS})
 _DYNAMIC = frozenset({"importlib", "__import__", "import_module", "runpy", "run_module", "run_path", "pkgutil",
-                      "exec", "eval", "compile", "builtins", "__builtins__", "globals", "locals", "vars"})
+                      "exec", "eval", "compile", "builtins", "__builtins__", "globals", "locals", "vars",
+                      "modules", "_getframe", "f_builtins", "f_globals", "f_locals", "__dict__"})
 _ATTR_CALLS = frozenset({"getattr", "setattr", "delattr", "hasattr"})  # the name argument must be a literal
 
 
@@ -86,7 +96,7 @@ def _binds_pinned(node) -> bool:
     return not isinstance(node, ast.alias) and getattr(node, "name", None) in _PINNED
 
 
-def _launcher_violates(text: str) -> bool:
+def launcher_shape_violates(text: str) -> bool:
     import ast
 
     try:
@@ -106,7 +116,13 @@ def _launcher_violates(text: str) -> bool:
     if set(defined) != set(LAUNCHER_ASSIGNMENTS):
         return True
     allowed_stores = {id(t) for t in defined.values()}
-    allowed_loads = {id(u) for u in map(_launch_use, ast.walk(tree)) if u is not None}
+    launches = [c for c in ast.walk(tree) if _launch_use(c) is not None]
+    allowed_loads = {id(_launch_use(c)) for c in launches}
+    # round 3: subprocess and sys are used only as these attribute reads, never passed, stored or inspected
+    module_uses = {id(c.func) for c in launches} | {id(c.args[0].elts[0]) for c in launches} | {
+        id(n) for n in ast.walk(tree) if isinstance(n, ast.Attribute) and isinstance(n.ctx, ast.Load)
+        and _is_name(n.value, "subprocess") and n.attr == "TimeoutExpired"}
+    parent = {id(c): p for p in ast.walk(tree) for c in ast.iter_child_nodes(p)}
     for node in ast.walk(tree):
         if isinstance(node, ast.Name) and node.id in _PINNED:
             if not isinstance(node.ctx, ast.Load):
@@ -114,9 +130,10 @@ def _launcher_violates(text: str) -> bool:
                     return True  # rebinding, deleting or shadowing a pinned name
             elif node.id in LAUNCHER_ASSIGNMENTS and id(node) not in allowed_loads:
                 return True  # a module-name constant used anywhere but the approved launch position
-        elif isinstance(node, ast.Attribute) and not isinstance(node.ctx, ast.Load) and _is_name(node.value) \
-                and node.value.id in _LAUNCH_MODULES:
-            return True  # e.g. ``subprocess.run = ...`` or ``sys.executable = ...``
+            elif node.id in _LAUNCH_MODULES and id(parent.get(id(node))) not in module_uses:
+                return True  # e.g. sys.modules, sys._getframe, setattr(subprocess, ...), type(subprocess)
+        elif isinstance(node, ast.Attribute) and not isinstance(node.ctx, ast.Load):
+            return True  # any attribute store or delete, e.g. ``type(subprocess).run = fn``
         elif _binds_pinned(node):
             return True
         elif isinstance(node, ast.Call) and _is_name(node.func) and node.func.id in _ATTR_CALLS and not (
@@ -179,8 +196,22 @@ def truth_references(src: Path) -> list[str]:
 
 def attacker_importers(src: Path) -> list[str]:
     """Files outside the attacker package mentioning `pets_attacker` at all (or unreadable). The one launcher
-    file (#138) may name it only as its exact module-name constants."""
+    file (#138), pinned by content digest and shape, may name it only as its exact module-name constants."""
     return _scan(src, lambda t: ATTACKER in t, special={ATTACKER_LAUNCHER: _launcher_violates})
+
+
+def launcher_digest(text: str) -> str:
+    """SHA-256 of the launcher's canonical content: UTF-8 text (no BOM), LF line endings."""
+    import hashlib
+
+    return hashlib.sha256(text.replace("\r\n", "\n").encode("utf-8")).hexdigest()
+
+
+def _launcher_violates(text: str) -> bool:
+    """Not the pinned launcher content -> the any-mention rule; the pinned content must also keep its shape."""
+    if launcher_digest(text) != LAUNCHER_SHA256:
+        return ATTACKER in text
+    return launcher_shape_violates(text)
 
 
 def attacker_reads_truth(src: Path) -> bool:

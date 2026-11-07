@@ -23,6 +23,8 @@ LADDERS: dict[str, tuple[str, ...]] = {
     "identifier": ("id.pseudonym", WITHHELD),
     "text": ("text.redacted", WITHHELD),
     "categorical": ("keep", WITHHELD),
+    # D33 (#106): a lab test name is a QI; "CRP vs other" keeps only what H-U7 needs (CRP identified)
+    "lab_test": ("lab.full", "lab.crp_other", WITHHELD),
 }
 
 _NUM = r"-?\d+(?:\.\d+)?"
@@ -50,6 +52,8 @@ CONTRACT_FORMS: dict[str, str] = {
     "id.pseudonym": "hex64",
     "text.redacted": "text",
     "keep": "text",
+    "lab.full": "text",
+    "lab.crp_other": r"^(?:CRP|other)$",
 }
 
 # Every rung emits an empty cell for a null or malformed source value, so every contract entry

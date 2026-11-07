@@ -64,7 +64,7 @@ def test_unmodified_release_verifies_in_both_tiers(released, tmp_path):
 
 def test_pass_with_low_hit_cannot_back_assertion_in_either_tier(released, tmp_path):
     kit, rel = copy_release(released, tmp_path)
-    set_cell(rel, "lab_results.csv", "test_name", PLANTED_IP)
+    set_cell(rel, "lab_results.csv", "unit", PLANTED_IP)  # a released text column (test_name is withheld, #106)
     resign(rel)
     m = json.loads((rel / MANIFEST).read_text(encoding="utf-8"))
     assert m["exportAssertions"]["ipAddresses"] is False and m["assertionEvidence"]["ipAddresses"]["hits"] == 0
