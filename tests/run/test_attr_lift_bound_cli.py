@@ -21,7 +21,7 @@ import pytest
 
 from run_helpers import CREATED, MINIKIT, build_kit, cli, grouped_qis
 
-from pets_release.policy.health_s1 import MAX_LIFT
+from pets_release.policy.health_s1 import LOS_MAX_LIFT as MAX_LIFT
 
 ARGS = ("--scenario", "HEALTH-S1", "--created", CREATED)
 
@@ -72,7 +72,7 @@ def test_lift_over_the_bound_refuses(tmp_path):
     final = [e for e in log if e["step"] == "final"]
     assert len(final) == 1 and final[0]["accepted"] is False
     reason = final[0]["reason"]
-    assert "attribute lift above bound: ed_visits.icd10_primary" in reason
+    assert "attribute lift above bound: ed_visits.icd10_primary" not in reason  # disclosed, not bounded
     assert "attribute lift above bound: ed_visits.los_minutes" in reason
     # the purpose floors held: the coarser rungs that would lower the lift were rejected on purpose, not relaxed
     rejected = {e["reason"] for e in log if e["step"] != "final" and not e["accepted"]}
@@ -116,6 +116,17 @@ def test_adoption_respects_the_lift_bound(tmp_path, monkeypatch, full, chars3, e
             return {**m, "lift": chars3}
         return m if full == 1.0 else {**m, "lift": full}
 
+    import dataclasses
+
+    from pets_release.policy.health_s1 import POLICY
+    from pets_release.run import pipeline
+
+    # the diagnosis is disclosed, not bounded, in HEALTH-S1 (D64 b); this test gives it a bound to drive the rule
+    al = dict(POLICY.attribute_lift, attributes=[
+        {"table": "ed_visits", "column": "icd10_primary", "max_lift": MAX_LIFT},
+        {"table": "ed_visits", "column": "los_minutes", "max_lift": MAX_LIFT}])
+    bounded = dataclasses.replace(POLICY, attribute_lift=al)
+    monkeypatch.setattr(pipeline, "get_policy", lambda s: bounded)
     monkeypatch.setattr(attr_lift, "measure", stub)
     monkeypatch.setenv("PETS_HMAC_KEY", TEST_KEY)
     kit = build_kit(tmp_path / "kit", edit=flat_sensitive)
@@ -138,7 +149,10 @@ def test_lift_regress_rule_rows():
 
     from pets_release.minimiser.search import _Search
 
-    s = SimpleNamespace(p=SimpleNamespace(attribute_lift={"max_lift": MAX_LIFT}))
+    s = SimpleNamespace(p=SimpleNamespace(attribute_lift={"attributes": [
+        {"table": "t", "column": "c", "max_lift": MAX_LIFT}, {"table": "t", "column": "u", "max_lift": None}]}))
+    s.bounds = lambda: _Search.bounds(s)
+    assert _Search.lift_regress(s, {"lift": {"t.u": {"lift": None}}}, {"lift": {}}) == []  # unbounded: no rule
 
     def rule(cur, cand):
         ev = {"lift": {"t.c": {"lift": cand}}}
@@ -160,16 +174,15 @@ def test_lift_under_the_bound_releases_and_states_the_bound(tmp_path):
     m = json.loads((out / "privacy_manifest.json").read_text(encoding="utf-8"))
     note = next(r for r in m["residualRisks"] if r["risk"] == "attribute-lift-bound")
     d = note["description"]
-    assert f"at most {MAX_LIFT} for icd10_primary, los_minutes" in d and "refused" in d
-    assert "population estimator" in d and "not #139's sampled attacker" in d
-    assert "icd10 lift disclosed, not reduced: chapter coding fails H-U4" in d
-    assert f"2.0 refused the real kit; {MAX_LIFT}, just above the irreducible icd10 lift, awaits a human" in d
-    assert d.endswith(" Enforced lift: icd10_primary 1.0000, los_minutes 1.0000.")
+    assert f"los_minutes bound {MAX_LIFT}, else refused" in d
+    assert "icd10_primary: no bound, a disclosed residual risk" in d and "chapter-level coding makes H-U4 0.0" in d
+    assert "population estimator" in d and "distinct from #139's sampled attacker" in d
+    assert d.endswith(" Measured lift: icd10_primary 1.0000, los_minutes 1.0000."), d
     # the stay-bin coarsening is recorded in the note, not as a sacrifice entry: a sacrifice entry would waive H-U2
     # below 0.9 (tests/run/test_purpose_rule.py), relaxing a purpose floor
-    assert "los: 30-min bins, H-U2 0.967 -> 0.920 (kit)" in d
+    assert "30-min bins cost H-U2 0.967 -> 0.920 (kit)" in d
     assert "H-U2" not in {s["check"] for s in m["sacrifices"]}
     final = [e for e in _log(out) if e["step"] == "final"][0]
     assert final["accepted"] is True
-    assert (f"attribute lift (bound {MAX_LIFT}): ed_visits.icd10_primary 1.000, ed_visits.los_minutes 1.000"
-            in final["reason"])
+    assert ("attribute lift: ed_visits.icd10_primary 1.000 (disclosed, not bounded), ed_visits.los_minutes 1.000 "
+            f"(bound {MAX_LIFT})" in final["reason"])

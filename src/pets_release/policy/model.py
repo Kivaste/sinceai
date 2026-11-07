@@ -40,7 +40,7 @@ _MOVE = {"table", "column", "rung"}
 _SUPPRESSION = {"method", "unit", "k", "max_share", "order", "then"}
 _NOTE = {"id", "status", "note"}
 _NOTE_STATUS = {"not_applicable", "open"}
-_ATTR_LIFT = {"max_lift", "attributes", "attacker", "reason"}  # D64 (#157)
+_ATTR_LIFT = {"attributes", "attacker", "reason"}  # D64 (#157); per-attribute max_lift
 
 
 def _exact(rec, keys, what, optional=frozenset()):
@@ -82,8 +82,9 @@ class ScenarioPolicy:
     # Adopted only when k measured at `from` needs more suppression than the budget and `check` still passes
     # strictly at `to`; the release records the measured scores under the check's sacrifice entry.
     rung_sacrifices: tuple[dict, ...] = ()
-    # D64 (#157): {max_lift, attributes: [{table, column}], attacker, reason}. A plan is feasible only if every
-    # released bounded attribute's attribute-inference lift (minimiser.attr_lift) is at or under max_lift.
+    # D64 (#157): {attributes: [{table, column, max_lift}], attacker, reason}. A plan is feasible only if every
+    # released attribute with a max_lift has its attribute-inference lift (minimiser.attr_lift) at or under it;
+    # max_lift None: measured and disclosed, not bounded.
     attribute_lift: dict | None = None
 
     def __post_init__(self):
@@ -170,15 +171,16 @@ class ScenarioPolicy:
         if self.attribute_lift is not None:
             al = self.attribute_lift
             _exact(al, _ATTR_LIFT, "attribute lift bound")
-            ml = al["max_lift"]
-            if not isinstance(ml, (int, float)) or isinstance(ml, bool) or not 1.0 <= ml < float("inf"):
-                raise PolicyError("attribute lift max_lift must be a finite number >= 1")
             if not isinstance(al["attributes"], list) or not al["attributes"]:
                 raise PolicyError("attribute lift bound needs attributes")
             for a in al["attributes"]:
-                _exact(a, {"table", "column"}, "attribute lift attribute")
+                _exact(a, {"table", "column", "max_lift"}, "attribute lift attribute")
                 if (a["table"], a["column"]) not in cols:
                     raise PolicyError("attribute lift names an unknown column")
+                ml = a["max_lift"]  # None: measured and disclosed, not bounded (D64 option b)
+                if ml is not None and (not isinstance(ml, (int, float)) or isinstance(ml, bool)
+                                       or not 1.0 <= ml < float("inf")):
+                    raise PolicyError("attribute lift max_lift must be null or a finite number >= 1")
             if not all(isinstance(al[k], str) and al[k].strip() for k in ("attacker", "reason")):
                 raise PolicyError("attribute lift needs an attacker and a reason")
         if self.suppression is not None:

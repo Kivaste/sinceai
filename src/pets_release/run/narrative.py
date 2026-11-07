@@ -55,10 +55,10 @@ def _lift_text(search) -> str:
     """The enforced producer lift per bounded attribute (aggregates, 4 decimals) from the search's final step."""
     al = (search or {}).get("attribute_lift")
     if not al:
-        return " Enforced lift: not measured (no search run)."
+        return " Measured lift: not measured (no search run)."
     parts = [f"{n.split('.', 1)[-1]} {m['lift']:.4f}" if isinstance(m.get("lift"), (int, float)) else
              f"{n.split('.', 1)[-1]} not measured" for n, m in sorted(al["measured"].items())]
-    return " Enforced lift: " + (", ".join(parts) or "no bounded attribute released") + "."
+    return " Measured lift: " + (", ".join(parts) or "no bounded attribute released") + "."
 
 
 def build_narrative(*, policy, plan, scenario_ids, suppression: dict, k: int, purpose=None, search=None,

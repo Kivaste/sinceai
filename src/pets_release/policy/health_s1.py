@@ -75,27 +75,25 @@ _ROWS += withheld_table("published_weekly_stats", [
 FLOORS, DIRECT, _PLAN = build(_ROWS)
 
 # D64 (#157): bounded attribute-inference lift. Content-free; stated in the manifest via the residual note below.
-MAX_LIFT = 2.25
+LOS_MAX_LIFT = 2.0  # human decision D64 option (b), 23:00: los_minutes bounded, icd10_primary disclosed only
 LOS_BIN_MIN = 30
 LIFT_ATTACKER = ("the #139 red-team attribute-inference attacker: knows a released visit's quasi-identifiers and "
                  "guesses the most common released value among the visits that match them; compared with always "
                  "guessing the release's most common value (base rate); seeded sample of at most 3000 targets")
-LIFT_REASON = (f"lift = attacker accuracy / base-rate accuracy, at most {MAX_LIFT} for icd10_primary and "
-               f"los_minutes. Tighter is not reachable with the purpose floors kept (measured on the kit, #157): "
-               f"icd10 at chapter level scores H-U4 0.0, so it stays at 3 characters, and every QI is already at "
-               f"the coarsest rung its check accepts; there the diagnosis lift measures just above 2.0, and 2.0 "
-               f"refused the release. los_minutes, which the search can coarsen, is binned at least "
-               f"{LOS_BIN_MIN} minutes wide (10-minute bins measure 2.92). A plan over the bound is refused, "
-               f"never relaxed")
-# The manifest note; the run appends the enforced lift per attribute (run.narrative, from the search's final step).
-LIFT_NOTE = (f"D64: lift (accuracy from QIs / base rate) at most {MAX_LIFT} for icd10_primary, los_minutes, else "
-             f"refused. Producer population estimator (exact QI classes, all released rows), not #139's sampled "
-             f"attacker (rates: attribute-inference-redteam). icd10 lift disclosed, not reduced: chapter "
-             f"coding fails H-U4. los: {LOS_BIN_MIN}-min bins, H-U2 0.967 -> 0.920 (kit). 2.0 refused the real "
-             f"kit; {MAX_LIFT}, just above the irreducible icd10 lift, awaits a human decision.")
-ATTRIBUTE_LIFT = {"max_lift": MAX_LIFT, "attacker": LIFT_ATTACKER, "reason": LIFT_REASON,
-                  "attributes": [{"table": "ed_visits", "column": "icd10_primary"},
-                                 {"table": "ed_visits", "column": "los_minutes"}]}
+LIFT_REASON = (f"lift = attacker accuracy / base-rate accuracy. los_minutes at most {LOS_MAX_LIFT}: binned at "
+               f"least {LOS_BIN_MIN} minutes wide (10-minute bins measure 2.92 on the kit, #157); a plan over it is "
+               f"refused, never relaxed. icd10_primary is measured and disclosed, not bounded: chapter-level coding "
+               f"scores H-U4 0.0, so it stays at 3 characters with every QI at its coarsest accepted rung, where its "
+               f"lift measures about 2.1")
+# The manifest note; the run appends the measured lift per attribute (run.narrative, from the search's final step).
+LIFT_NOTE = (f"D64: lift = accuracy guessing from the QIs / base rate. los_minutes bound {LOS_MAX_LIFT}, else "
+             f"refused; {LOS_BIN_MIN}-min bins cost H-U2 0.967 -> 0.920 (kit). icd10_primary: no bound, a disclosed "
+             f"residual risk (lift about 2.1); it cannot be reduced: chapter-level coding makes H-U4 0.0. Lifts are "
+             f"the producer population estimator (exact QI classes, all released rows), distinct from #139's "
+             f"sampled attacker, whose rates are the attribute-inference-redteam entries.")
+ATTRIBUTE_LIFT = {"attacker": LIFT_ATTACKER, "reason": LIFT_REASON,
+                  "attributes": [{"table": "ed_visits", "column": "icd10_primary", "max_lift": None},
+                                 {"table": "ed_visits", "column": "los_minutes", "max_lift": LOS_MAX_LIFT}]}
 # clinical_notes.author_name is a staff direct identifier (floor withheld)
 DIRECT = tuple(sorted(set(DIRECT) | {("clinical_notes", "author_name")}))
 

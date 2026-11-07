@@ -391,24 +391,28 @@ class _Search:
             out[f"{t}.{c}"] = AL.measure(prot[t], qcols, output_column(e))
         return out
 
+    def bounds(self) -> dict:
+        """``{"table.column": max_lift}`` of the bounded attributes (``max_lift`` None: measured, not bounded)."""
+        al = self.p.attribute_lift or {"attributes": []}
+        return {f"{a['table']}.{a['column']}": a["max_lift"] for a in al["attributes"] if a["max_lift"] is not None}
+
     def lift_over(self, lifts) -> list:
-        """Bounded attributes over ``max_lift``; an unmeasured lift counts as over (fail closed). Schema only."""
-        if self.p.attribute_lift is None:
-            return []
-        bound = self.p.attribute_lift["max_lift"]
-        return sorted(n for n, m in lifts.items() if not _num(m.get("lift")) or m["lift"] > bound)
+        """Bounded attributes over their ``max_lift``; an unmeasured lift counts as over (fail closed)."""
+        b = self.bounds()
+        return sorted(n for n, m in lifts.items() if n in b and (not _num(m.get("lift")) or m["lift"] > b[n]))
 
     def lift_regress(self, ev, cur_ev) -> list:
         """Feasibility (D64), the one rule every adoption path uses: bounded attributes that make the candidate
         inadmissible. Unmeasured in the candidate: always. Under the bound (or not released) in the current plan:
         the candidate must stay at or under the bound. Over the bound in the current plan: the candidate must not
         raise it (a move that lowers it is allowed, so the search can still repair it). Schema names only."""
-        if self.p.attribute_lift is None:
-            return []
-        bound = self.p.attribute_lift["max_lift"]
+        bs = self.bounds()
         cur = cur_ev["lift"]
         out = []
         for n, m in sorted(ev["lift"].items()):
+            if n not in bs:
+                continue
+            bound = bs[n]
             v = m.get("lift")
             if not _num(v):
                 out.append(n)
@@ -424,9 +428,11 @@ class _Search:
     def lift_text(self, lifts) -> str:
         if self.p.attribute_lift is None:
             return ""
-        parts = ", ".join(f"{n} {m['lift']:.3f}" if _num(m.get("lift")) else f"{n} not measured"
+        b = self.bounds()
+        parts = ", ".join((f"{n} {m['lift']:.3f}" if _num(m.get("lift")) else f"{n} not measured")
+                          + (f" (bound {b[n]})" if n in b else " (disclosed, not bounded)")
                           for n, m in sorted(lifts.items()))
-        return f"; attribute lift (bound {self.p.attribute_lift['max_lift']}): {parts or 'no bounded attribute released'}"
+        return f"; attribute lift: {parts or 'no bounded attribute released'}"
 
     def objective(self, ev, cand):
         vals = list(ev["risk"].values()) or [0.0]
@@ -828,7 +834,7 @@ class _Search:
             "persons": persons,
             "suppressed_persons": sup_persons,
             "suppressed_rows": {t: len(v) for t, v in sorted(suppressed.items())},
-            "attribute_lift": ({"max_lift": self.p.attribute_lift["max_lift"], "measured": lifts,
+            "attribute_lift": ({"bounds": self.bounds(), "measured": lifts,
                                 "start": dict(self.start_ev["lift"])} if self.p.attribute_lift is not None else None),
         }
         summary = {"start_scores": {c: self.start_ev["results"][c]["score"] for c in self.checks},
