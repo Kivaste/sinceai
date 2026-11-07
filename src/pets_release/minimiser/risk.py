@@ -54,7 +54,7 @@ def _write(folder: Path, prot: Mapping[str, pd.DataFrame], contract: dict, sourc
         qcols.setdefault(q["table"], []).append(q["column"])
     person_t = kspec["person"]["table"]
     rowmaps = {}
-    for t in sorted(set(qcols) | ({person_t} if qcols else set())):
+    for t in sorted(set(qcols) | {person_t}):
         if t not in prot:
             continue
         df = prot[t]
@@ -76,10 +76,9 @@ def _context(source, rowmaps, kspec, k):
 
 
 def person_k(prot, plan, policy, source, kspec, k):
-    """(PersonK | None, contract). None when no QI is released (every person shares one class)."""
+    """(PersonK, contract) from ticket 11's production per-person k. With no QI released every identified
+    person shares one class and an unidentified record is still a hit (the person table is always written)."""
     contract = contract_for(policy, plan, k)
-    if not contract["qi"]:
-        return None, contract
     with tempfile.TemporaryDirectory(prefix="pets-min-") as d:
         rowmaps = _write(Path(d), prot, contract, source, kspec)
         res = person_k_values(d, contract, _context(source, rowmaps, kspec, k))
@@ -87,17 +86,21 @@ def person_k(prot, plan, policy, source, kspec, k):
 
 
 def gate_k(prot, plan, policy, source, kspec, k) -> dict:
-    """Run the registered producer.person-k and producer.row-k checks (04's runner) on the candidate."""
+    """Run the registered producer.person-k and producer.row-k checks (04's runner) on the candidate. With no
+    QI released only person-k applies (row-k has no QI rows); the caller requires exactly ``k_checks_for``."""
     contract = contract_for(policy, plan, k)
-    checks = [c for c in all_checks() if c.name in (PERSON_K, ROW_K)]
-    if len(checks) != 2:
+    names = k_checks_for(contract)
+    checks = [c for c in all_checks() if c.name in names]
+    if len(checks) != len(names):
         raise RuntimeError("k checks not registered")
-    if not contract["qi"]:  # nothing to link on: k holds vacuously; recorded as such, never as a pass
-        return {"refused": False, "registryError": None, "records": [], "vacuous": True}
     with tempfile.TemporaryDirectory(prefix="pets-min-") as d:
         rowmaps = _write(Path(d), prot, contract, source, kspec)
         res = run_checks(d, contract, _context(source, rowmaps, kspec, k), checks=checks)
-    return {**res.summary(), "vacuous": False}
+    return res.summary()
+
+
+def k_checks_for(contract) -> tuple:
+    return (PERSON_K, ROW_K) if contract["qi"] else (PERSON_K,)
 
 
 def risk_vector(policy, plan, prot, source, kspec, k) -> tuple[dict, object]:
