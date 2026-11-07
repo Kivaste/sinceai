@@ -4,7 +4,7 @@ from __future__ import annotations
 from ._build import build, withheld_table
 from .model import ScenarioPolicy
 
-REL = {"scope": "release"}
+REL = {"label": "RECORD_KEY"}
 C = "conversations"
 T = "turns"
 
@@ -29,9 +29,9 @@ _ROWS = [
     _r(C, "n_turns", "numeric", "exact", False, "no required check"),
     _r(C, "split", "categorical", "exact", False, "CS-U1 reads it from the protected table; dropping it broke CS-U1 under B2"),
     _r(C, "agent_note", "text", "withheld", False, "free text, no check needs it"),
-    _r(T, "turn_id", "key", "exact", False,
+    _r(T, "turn_id", "categorical", "exact", False,
        "kept as-is iff check turn-id-synthetic confirms a synthetic record key (CS-U5 matches by turn_id)",
-       "exact", {"requires_check": "turn-id-synthetic", "fallback_rung": "pseudonym"},
+       "exact", {"requires_check": "turn-id-synthetic", "fallback_rung": "id.pseudonym"},
        "kept as-is only if turn-id-synthetic passes; else release-scope pseudonym with a lineage adapter"),
     _r(T, "conversation_id", "identifier", "pseudonym", False, "release-scope pseudonym, identical in conversations", "pseudonym", REL),
     _r(T, "seq", "numeric", "exact", False, "CS-U1 orders by seq"),
@@ -75,8 +75,21 @@ POLICY = ScenarioPolicy(
     joint_qi_moves=(),
     linked=((("conversations", "conversation_id"), ("turns", "conversation_id")),),
     param_minimums={},
+    alt_floors={("turns", "turn_id"): "id.pseudonym"},
 )
 
 
 def hand_plan() -> list:
     return [dict(e, params=dict(e["params"])) for e in _PLAN]
+
+
+def turn_id_fallback_plan(plan: list) -> list:
+    """Plan for when check turn-id-synthetic fails: turns.turn_id becomes a release-scope pseudonym."""
+    out = []
+    for e in plan:
+        e = dict(e, params=dict(e["params"]))
+        if (e["table"], e["column"]) == ("turns", "turn_id"):
+            e.update(rung="id.pseudonym", floor="id.pseudonym", params={"label": "RECORD_KEY"},
+                     reason="turn-id-synthetic failed: release-scope pseudonym; lineage adapter restores scoring IDs")
+        out.append(e)
+    return out

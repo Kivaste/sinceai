@@ -4,7 +4,7 @@ from __future__ import annotations
 from ._build import build, withheld_table
 from .model import ScenarioPolicy
 
-REL = {"scope": "release"}
+REL = {"label": "RECORD_KEY"}
 D = "direct identifier"
 
 
@@ -22,7 +22,7 @@ _ROWS = [
     _r(E, "home_address", "identifier", "withheld", True, D),
     _r(E, "attending_physician_name", "identifier", "withheld", True, D),
     _r(E, "date_of_birth", "age", "age_band_5", False, "QI; released only as derived column age_band (H-U6)",
-       "age_band_10", {"derived_column": "age_band", "top_code": 90}, "10-year band, top-coded 90+, serves H-U6 and k"),
+       "age_band_10", {"ref_column": "arrival_ts", "output": "age_band"}, "10-year band, top-coded 90+, serves H-U6 and k"),
     _r(E, "sex", "categorical", "exact", False, "QI", "exact"),
     _r(E, "postcode", "geo", "withheld", False, "municipality suffices"),
     _r(E, "municipality", "geo", "exact", False, "QI; H-U4 needs the eight largest municipalities",
@@ -101,18 +101,18 @@ POLICY = ScenarioPolicy(
         {"check": "H-U8", "floor_score": 0.6, "reason": "coarser arrival time to reach k"},
     ),
     joint_qi_moves=(
-        ({"table": "ed_visits", "column": "date_of_birth", "rung": "age_band_10"},
-         {"table": "ed_visits", "column": "municipality", "rung": "top_n"}),
-        ({"table": "ed_visits", "column": "arrival_ts", "rung": "month_hour"},
-         {"table": "ed_visits", "column": "municipality", "rung": "top_n"}),
-        ({"table": "ed_visits", "column": "date_of_birth", "rung": "age_band_10"},
-         {"table": "ed_visits", "column": "arrival_ts", "rung": "day"}),
-        ({"table": "ed_visits", "column": "date_of_birth", "rung": "age_band_10"},
-         {"table": "ed_visits", "column": "municipality", "rung": "top_n"},
-         {"table": "ed_visits", "column": "arrival_ts", "rung": "month_hour"}),
+        ({"table": "ed_visits", "column": "date_of_birth", "rung": "age.band10"},
+         {"table": "ed_visits", "column": "municipality", "rung": "geo.topn"}),
+        ({"table": "ed_visits", "column": "arrival_ts", "rung": "ts.month_hour"},
+         {"table": "ed_visits", "column": "municipality", "rung": "geo.topn"}),
+        ({"table": "ed_visits", "column": "date_of_birth", "rung": "age.band10"},
+         {"table": "ed_visits", "column": "arrival_ts", "rung": "ts.day"}),
+        ({"table": "ed_visits", "column": "date_of_birth", "rung": "age.band10"},
+         {"table": "ed_visits", "column": "municipality", "rung": "geo.topn"},
+         {"table": "ed_visits", "column": "arrival_ts", "rung": "ts.month_hour"}),
     ),
     linked=((("ed_visits", "visit_id"), ("lab_results", "visit_id")),),
-    param_minimums={("ed_visits", "municipality"): {"rung": "top_n", "param": "n", "min": 8}},
+    param_minimums={("ed_visits", "municipality"): {"rung": "geo.topn", "param": "n", "min": 8}},
 )
 
 
