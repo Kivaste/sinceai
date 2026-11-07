@@ -1,4 +1,4 @@
-﻿"""Wire the measurer (19) into the HEALTH-S1 ``run`` (21) without editing ``run/``.
+"""Wire the measurer (19) into the HEALTH-S1 ``run`` (21) without editing ``run/``.
 
     python -m pets_release.measure.wire <the same arguments as `pets-release run`>
 
@@ -18,7 +18,7 @@ import sys
 from pathlib import Path
 
 from pets_release.cli import UsageError, resolve_run_context
-from pets_release.measure import MeasureRejected, measure, person_k_components
+from pets_release.measure import MeasureRejected, attackers, measure, person_k_components
 from pets_release.offline import entry_point
 from pets_release.recipient import RecipientError, validate_recipient_id
 from pets_release.run import pipeline
@@ -53,10 +53,12 @@ def run_measured(*, kit, scenario: dict, created: str, key_text: str, out, plan_
     block = measure(scid, root=kit.root, original_dir=kit.root / "data" / dataset, protected_dir=scratch,
                     rowmaps=rowmaps, lineage=lineage, record_keys=spec["record_keys"], out_dir=work / "scorecards",
                     person_k=person_k_components(person, k=first.suppression["k"]))
+    attack, why = _attack(kit.root, scratch, rowmaps, work / "attack")
     original = pipeline.build_narrative
 
     def with_measured(**kw):
         n = original(**kw)
+        n["residualRisks"] = attackers.merge(n["residualRisks"], attack, why)  # #138: both personas' rates
         own = n["measured"]["search"]
         kw_sets = n["measured"]["kSets"]
         n["measured"] = dict(block)
@@ -86,6 +88,15 @@ def run_measured(*, kit, scenario: dict, created: str, key_text: str, out, plan_
                                     "AND cleanup failed: a mismatched release was left behind, delete it by hand")
         raise pipeline.RunError("measured release tables differ from the scored scratch release")
     return final
+
+
+def _attack(kit_root, release: Path, rowmaps: dict, work: Path):
+    """(per-persona residualRisks entries, None), or (None, content-free reason) when the attacker cannot run."""
+    try:
+        return attackers.attacker_risks(kit_root=kit_root, release=release, rowmaps=rowmaps, work=work), None
+    except attackers.AttackUnavailable as e:
+        print(f"measure.wire: attacker rates not measured: {e}", file=sys.stderr)
+        return None, str(e)
 
 
 def _rowmaps_by_identity(sc: Path, lineage: dict, release: Path) -> dict:

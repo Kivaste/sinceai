@@ -1,4 +1,4 @@
-﻿"""Truth-boundary and import-graph guards. Both fail closed.
+"""Truth-boundary and import-graph guards. Both fail closed.
 
 (a) Static: no Python file under src/ outside pets_attacker/ may contain the substring
     ``pets_attacker`` or a ``truth`` path-segment literal (raw-text regex; an unreadable
@@ -34,6 +34,128 @@ _TRUTH_RE = re.compile(r"""(^|[\\/'"])truth([\\/'"]|$)""", re.MULTILINE)
 TRUTH_SCAN_EXEMPT = frozenset({"pets_release/kit.py"})
 
 
+# #138: the measured run starts the attacker as a separate child process from this one file. Structural allowlist
+# (round 2): the file names the attacker only in exactly two top-level assignments (LAUNCHER_ASSIGNMENTS), and uses
+# those two names only as the third element of ``[sys.executable, "-m", <NAME>, ...]`` passed as the only
+# positional argument of ``subprocess.run`` (no executable=, shell= or **kwargs). ``subprocess``, ``sys`` and the
+# two names are never rebound or shadowed. Every other mention or use, any dynamic-import or exec route, and an
+# unparseable or unreadable file are violations. The truth scan and the runtime guard are unchanged for it.
+#
+# Round 3 (identity, AGENTS.md "Paths"): the exemption applies only when the launcher's canonical content
+# (UTF-8 text without BOM, LF line endings) has exactly LAUNCHER_SHA256. Any other content at that path gets the
+# any-mention rule. Changing the launcher therefore needs a visible, reviewed update of this digest. The shape
+# check (launcher_shape_violates) stays as defence in depth.
+# Residual risk: a separate module that monkeypatches ``subprocess`` (or ``sys``) at runtime before the launcher
+# runs is outside this static scan of the launcher; the runtime guard below covers import time only. Any such
+# module would itself have to avoid the any-mention scan, so it could not name the attacker directly.
+ATTACKER_LAUNCHER = "pets_release/measure/attackers.py"
+LAUNCHER_SHA256 = "9d1f3ee9e4685814f54236fd8891847e71990f612135a51e909b8a3ec2c99ac1"
+LAUNCHER_ASSIGNMENTS = {"ATTACKER_MODULE": ATTACKER, "BRIDGE_MODULE": ATTACKER + ".bridge"}
+_LAUNCH_MODULES = ("subprocess", "sys")
+_PINNED = frozenset({*_LAUNCH_MODULES, *LAUNCHER_ASSIGNMENTS})
+_DYNAMIC = frozenset({"importlib", "__import__", "import_module", "runpy", "run_module", "run_path", "pkgutil",
+                      "exec", "eval", "compile", "builtins", "__builtins__", "globals", "locals", "vars",
+                      "modules", "_getframe", "f_builtins", "f_globals", "f_locals", "__dict__"})
+_ATTR_CALLS = frozenset({"getattr", "setattr", "delattr", "hasattr"})  # the name argument must be a literal
+
+
+def _is_name(node, name: str | None = None) -> bool:
+    import ast
+
+    return isinstance(node, ast.Name) and (name is None or node.id == name)
+
+
+def _launch_use(node):
+    """The ``<NAME>`` node of an approved ``subprocess.run([sys.executable, "-m", <NAME>, ...])`` call, else None."""
+    import ast
+
+    if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "run"
+            and _is_name(node.func.value, "subprocess") and len(node.args) == 1 and isinstance(node.args[0], ast.List)):
+        return None
+    if any(k.arg in (None, "executable", "shell") for k in node.keywords):
+        return None
+    elts = node.args[0].elts
+    if len(elts) < 3 or not (isinstance(elts[0], ast.Attribute) and elts[0].attr == "executable"
+                             and _is_name(elts[0].value, "sys")):
+        return None
+    if not (isinstance(elts[1], ast.Constant) and elts[1].value == "-m"):
+        return None
+    name = elts[2]
+    return name if _is_name(name) and name.id in LAUNCHER_ASSIGNMENTS and isinstance(name.ctx, ast.Load) else None
+
+
+def _binds_pinned(node) -> bool:
+    """global/nonlocal, a parameter, a def/class, an ``except ... as`` or a match capture naming a pinned name.
+    Import aliases are checked separately (``ast.alias.name`` is the imported module, not a binding)."""
+    import ast
+
+    if isinstance(node, (ast.Global, ast.Nonlocal)):
+        return bool(set(node.names) & _PINNED)
+    if isinstance(node, ast.arg):
+        return node.arg in _PINNED
+    return not isinstance(node, ast.alias) and getattr(node, "name", None) in _PINNED
+
+
+def launcher_shape_violates(text: str) -> bool:
+    import ast
+
+    try:
+        tree = ast.parse(text)
+    except (SyntaxError, ValueError):
+        return True
+    if text.count(ATTACKER) != len(LAUNCHER_ASSIGNMENTS):  # comments, docstrings and other strings included
+        return True
+    defined = {}
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and any(_is_name(t) and t.id in LAUNCHER_ASSIGNMENTS for t in node.targets):
+            t = node.targets[0]
+            if (len(node.targets) != 1 or not _is_name(t) or t.id in defined or not isinstance(node.value, ast.Constant)
+                    or node.value.value != LAUNCHER_ASSIGNMENTS[t.id]):
+                return True
+            defined[t.id] = t
+    if set(defined) != set(LAUNCHER_ASSIGNMENTS):
+        return True
+    # AST nodes hash and compare by object (ast.AST defines no __eq__/__hash__): the nodes themselves are the keys
+    allowed_stores = set(defined.values())
+    launches = [c for c in ast.walk(tree) if _launch_use(c) is not None]
+    allowed_loads = {_launch_use(c) for c in launches}
+    # round 3: subprocess and sys are used only as these attribute reads, never passed, stored or inspected
+    module_uses = {c.func for c in launches} | {c.args[0].elts[0] for c in launches} | {
+        n for n in ast.walk(tree) if isinstance(n, ast.Attribute) and isinstance(n.ctx, ast.Load)
+        and _is_name(n.value, "subprocess") and n.attr == "TimeoutExpired"}
+    parent = {c: p for p in ast.walk(tree) for c in ast.iter_child_nodes(p)}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and node.id in _PINNED:
+            if not isinstance(node.ctx, ast.Load):
+                if node not in allowed_stores:
+                    return True  # rebinding, deleting or shadowing a pinned name
+            elif node.id in LAUNCHER_ASSIGNMENTS and node not in allowed_loads:
+                return True  # a module-name constant used anywhere but the approved launch position
+            elif node.id in _LAUNCH_MODULES and parent.get(node) not in module_uses:
+                return True  # e.g. sys.modules, sys._getframe, setattr(subprocess, ...), type(subprocess)
+        elif isinstance(node, ast.Attribute) and not isinstance(node.ctx, ast.Load):
+            return True  # any attribute store or delete, e.g. ``type(subprocess).run = fn``
+        elif _binds_pinned(node):
+            return True
+        elif isinstance(node, ast.Call) and _is_name(node.func) and node.func.id in _ATTR_CALLS and not (
+                len(node.args) >= 2 and isinstance(node.args[1], ast.Constant) and isinstance(node.args[1].value, str)):
+            return True  # a computed attribute name (e.g. getattr(m, "__imp" + "ort__"))
+        elif isinstance(node, (ast.Import, ast.ImportFrom)):
+            mods = [a.name for a in node.names] + ([node.module or ""] if isinstance(node, ast.ImportFrom) else [])
+            if any(m.split(".")[0] in _DYNAMIC for m in mods):
+                return True
+            for a in node.names:
+                bound = a.asname or a.name.split(".")[0]
+                plain = isinstance(node, ast.Import) and a.asname is None and a.name in _LAUNCH_MODULES
+                if bound in _PINNED and not plain:
+                    return True
+        elif getattr(node, "id", None) in _DYNAMIC or getattr(node, "attr", None) in _DYNAMIC:
+            return True  # a Name or Attribute naming a dynamic-import or exec route
+        elif isinstance(node, ast.Constant) and isinstance(node.value, str) and node.value in _DYNAMIC:
+            return True  # e.g. getattr(builtins, "__import__")
+    return False
+
+
 class BoundaryError(ValueError):
     """The scan could not be performed (bad root)."""
 
@@ -55,13 +177,15 @@ def _text(p: Path) -> str | None:
         return None
 
 
-def _scan(src: Path, pattern, *, inside_attacker: bool = False, exempt=frozenset()) -> list[str]:
+def _scan(src: Path, pattern, *, inside_attacker: bool = False, exempt=frozenset(), special=None) -> list[str]:
     out = []
     for p in _py_files(src, inside_attacker=inside_attacker):
-        if p.relative_to(src).as_posix() in exempt:
+        rel = p.relative_to(src).as_posix()
+        if rel in exempt:
             continue
         t = _text(p)
-        if t is None or pattern(t):  # unreadable = violation
+        check = special.get(rel, pattern) if special else pattern
+        if t is None or check(t):  # unreadable = violation
             out.append(str(p))
     return out
 
@@ -72,8 +196,23 @@ def truth_references(src: Path) -> list[str]:
 
 
 def attacker_importers(src: Path) -> list[str]:
-    """Files outside the attacker package mentioning `pets_attacker` at all (or unreadable)."""
-    return _scan(src, lambda t: ATTACKER in t)
+    """Files outside the attacker package mentioning `pets_attacker` at all (or unreadable). The one launcher
+    file (#138), pinned by content digest and shape, may name it only as its exact module-name constants."""
+    return _scan(src, lambda t: ATTACKER in t, special={ATTACKER_LAUNCHER: _launcher_violates})
+
+
+def launcher_digest(text: str) -> str:
+    """SHA-256 of the launcher's canonical content: UTF-8 text (no BOM), LF line endings."""
+    import hashlib
+
+    return hashlib.sha256(text.replace("\r\n", "\n").encode("utf-8")).hexdigest()
+
+
+def _launcher_violates(text: str) -> bool:
+    """Not the pinned launcher content -> the any-mention rule; the pinned content must also keep its shape."""
+    if launcher_digest(text) != LAUNCHER_SHA256:
+        return ATTACKER in text
+    return launcher_shape_violates(text)
 
 
 def attacker_reads_truth(src: Path) -> bool:
