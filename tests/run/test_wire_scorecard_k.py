@@ -12,6 +12,7 @@ Rows (trigger -> result):
   k denominator kept, k<5 component dropped               -> exit 2, nothing released
   k computed on a QI set other than the catalog's         -> exit 2, nothing released
   k claimed for a table that keeps no catalogued QI       -> exit 2, nothing released
+  review pass 3 probe (QI released, k denominator > 0; note + k<5 dropped, other risks left) -> exit 2
 
 #113 rule: measure.wire takes row maps by identity (the stems in the run's own lineage), never by file presence.
 Seam: measure CLI; the measurer is stubbed (as in test_wire.py) so the selector itself is observed.
@@ -95,14 +96,24 @@ def _k_without_qi(report):
     report["risk_components"][f"lab_results: {K_RISK}"] = 0.0
 
 
+def _pass3_probe(report):
+    """Rolling final review pass 3 (Spec, Sol) evaluator-child probe on #110: the catalogued QI is released and
+    the real child computed k over it (non-zero denominator); the k result is replaced by the "no QI kept" note
+    and its k<5 component removed, while at least one other risk component of the table remains."""
+    tr = report["tables"]["ed_visits"]
+    assert tr["k_anonymity"]["n"] > 0 and QI in tr["k_anonymity"]["qis"]  # the probe's precondition
+    _note_instead_of_k(report)
+    assert tr["risks"] and K_RISK not in tr["risks"]  # one or more other risk components left, as in the probe
+
+
 def test_untampered_report_releases_through_the_measure_cli(measured_kit):
     kit, out = measured_kit
     assert wire.main(run_args(kit, out)[1:]) == 0
     assert any(out.glob("*.csv"))
 
 
-@pytest.mark.parametrize("mutate", [_note_instead_of_k, _drop_k_component, _other_qis, _k_without_qi],
-                         ids=["note_instead_of_k", "k_component_dropped", "other_qis", "k_without_qi"])
+@pytest.mark.parametrize("mutate", [_note_instead_of_k, _drop_k_component, _other_qis, _k_without_qi, _pass3_probe],
+                         ids=["note_instead_of_k", "k_component_dropped", "other_qis", "k_without_qi", "pass3_probe"])
 def test_skipped_or_contradicting_k_evaluation_fails_the_measure_cli(measured_kit, monkeypatch, capsys, mutate):
     kit, out = measured_kit
     _rewrite_after_report(monkeypatch, mutate)
