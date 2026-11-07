@@ -19,6 +19,8 @@ Rows (trigger -> result):
 from __future__ import annotations
 
 import json
+import subprocess
+from pathlib import Path
 
 import pandas as pd
 import pytest
@@ -91,6 +93,11 @@ def test_measured_run_records_both_persona_linkage_rates_with_denominators(attac
     assert insider["status"] == "measured" and 0.0 <= insider["value"] <= 1.0
     assert insider["denominator"] == {"unit": "rows", "n": released_visits}
     assert not any(STALE in r["rate"].get("reason", "") for r in risks.values())
+    # round 2 (Sol Spec): the insider's targets are a seeded sample capped at 3000 visits; both insider entries
+    # disclose the frame, the cap and the seed instead of implying a whole-release measurement
+    for rid in ("linkage-insider", "attribute-inference-insider"):
+        d = risks[rid]["description"]
+        assert "released visits" in d and "sample" in d and "3000" in d and "seed 0" in d, rid
 
 
 def test_plain_run_names_the_measured_run_instead_of_a_closed_ticket(attack_kit):
@@ -102,6 +109,45 @@ def test_plain_run_names_the_measured_run_instead_of_a_closed_ticket(attack_kit)
     risks = _risks(out)
     assert not any(STALE in r["rate"].get("reason", "") for r in risks.values())
     assert "measure.wire" in risks["linkage-attackers"]["rate"]["reason"]
+
+
+def _extra_entry_key(entry):
+    entry["rows"] = ["planted"]
+
+
+def _extra_rate_key(entry):
+    entry["rate"]["values"] = ["planted"]
+
+
+def _extra_denominator_key(entry):
+    entry["rate"]["denominator"]["ids"] = ["planted"]
+
+
+@pytest.mark.parametrize("plant", [_extra_entry_key, _extra_rate_key, _extra_denominator_key],
+                         ids=["entry", "rate", "denominator"])
+def test_bridge_output_with_unknown_keys_never_reaches_the_manifest(attack_kit, monkeypatch, plant):
+    """Round 2 (Grok, closed record): the bridge output is projected to exactly risk/kind/label/rate/description,
+    rate to status/value/denominator{unit,n}/source; any unknown key makes the attacker output unusable, so the
+    generic entries stay not_measured. Seam: measure CLI; the bridge child's output file is rewritten after it ran."""
+    kit, out = attack_kit
+    real = subprocess.run
+
+    def run(cmd, *a, **k):
+        proc = real(cmd, *a, **k)
+        if isinstance(cmd, list) and "--attack" in cmd and proc.returncode == 0:
+            p = Path(cmd[cmd.index("--out") + 1])
+            doc = json.loads(p.read_text(encoding="utf-8"))
+            plant(next(r for r in doc["residualRisks"] if r["rate"]["status"] == "measured"))
+            p.write_text(json.dumps(doc), encoding="utf-8")
+        return proc
+
+    monkeypatch.setattr(subprocess, "run", run)
+    assert wire.main(run_args(kit, out)[1:]) == 0
+    risks = _risks(out)
+    assert risks["linkage-attackers"]["rate"]["status"] == "not_measured"
+    assert "malformed" in risks["linkage-attackers"]["rate"]["reason"]
+    assert not any(r["kind"] == "linkage" and r["rate"]["status"] == "measured" for r in risks.values())
+    assert "planted" not in (out / MANIFEST_FILENAME).read_text(encoding="utf-8")
 
 
 def test_attacker_that_cannot_run_is_recorded_as_not_measured_with_a_current_reason(attack_kit):

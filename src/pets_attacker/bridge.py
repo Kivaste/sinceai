@@ -19,6 +19,8 @@ from pathlib import Path
 from pets_release.manifest.canonical import loads_strict
 from pets_release.offline import entry_point
 
+from .personas import MAX_SAMPLE, SEED
+
 _ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:+-]{0,63}$")
 _METHODS = {
     "linkage": ("reidentification_rate", "linkage",
@@ -30,6 +32,14 @@ _METHODS = {
 
 class BridgeError(ValueError):
     """Attacker output is malformed; no entries are produced."""
+
+
+_FRAMES = {  # sampling frame of each persona's targets (the denominator), content-free
+    "insider": (f"targets: released visits, a seeded random sample (seed {SEED}) of at most {MAX_SAMPLE} when the "
+                "release holds more; not a whole-release measurement when capped"),
+    "broker": (f"targets: adversary records whose person is in the release; the adversary file is a seeded random "
+               f"sample (seed {SEED}) of at most {MAX_SAMPLE} records when it holds more"),
+}
 
 
 def _entry(persona: str, method: str, agg: dict, source: str) -> dict:
@@ -48,7 +58,8 @@ def _entry(persona: str, method: str, agg: dict, source: str) -> dict:
         r = {"status": "measured", "value": float(rate), "denominator": {"unit": "rows", "n": n}, "source": source}
     else:
         r = {"status": "not_measured", "reason": f"{source}: persona not evaluated or rate unavailable"[:500]}
-    return {"risk": risk, "kind": kind, "label": None, "rate": r, "description": f"{source}: {what}"[:500]}
+    frame = _FRAMES["insider" if persona == "insider" else "broker"]
+    return {"risk": risk, "kind": kind, "label": None, "rate": r, "description": f"{source}: {what}; {frame}"[:500]}
 
 
 def residual_risks(attack: dict) -> list:

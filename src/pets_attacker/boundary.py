@@ -45,7 +45,8 @@ LAUNCHER_ASSIGNMENTS = {"ATTACKER_MODULE": ATTACKER, "BRIDGE_MODULE": ATTACKER +
 _LAUNCH_MODULES = ("subprocess", "sys")
 _PINNED = frozenset({*_LAUNCH_MODULES, *LAUNCHER_ASSIGNMENTS})
 _DYNAMIC = frozenset({"importlib", "__import__", "import_module", "runpy", "run_module", "run_path", "pkgutil",
-                      "exec", "eval", "compile", "builtins", "__builtins__"})
+                      "exec", "eval", "compile", "builtins", "__builtins__", "globals", "locals", "vars"})
+_ATTR_CALLS = frozenset({"getattr", "setattr", "delattr", "hasattr"})  # the name argument must be a literal
 
 
 def _is_name(node, name: str | None = None) -> bool:
@@ -118,6 +119,9 @@ def _launcher_violates(text: str) -> bool:
             return True  # e.g. ``subprocess.run = ...`` or ``sys.executable = ...``
         elif _binds_pinned(node):
             return True
+        elif isinstance(node, ast.Call) and _is_name(node.func) and node.func.id in _ATTR_CALLS and not (
+                len(node.args) >= 2 and isinstance(node.args[1], ast.Constant) and isinstance(node.args[1].value, str)):
+            return True  # a computed attribute name (e.g. getattr(m, "__imp" + "ort__"))
         elif isinstance(node, (ast.Import, ast.ImportFrom)):
             mods = [a.name for a in node.names] + ([node.module or ""] if isinstance(node, ast.ImportFrom) else [])
             if any(m.split(".")[0] in _DYNAMIC for m in mods):

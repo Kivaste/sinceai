@@ -19,6 +19,12 @@ AGGREGATE_KEYS = (
 )
 
 
+# Sampling frame of both personas (disclosed in the manifest by the bridge): at most MAX_SAMPLE targets per run,
+# a seeded random sample (SEED) when there are more.
+MAX_SAMPLE = 3000
+SEED = 0
+
+
 class MappingError(ValueError):
     """Row map or identity truth is incomplete, duplicated or inconsistent; scoring refused."""
 
@@ -115,7 +121,7 @@ class _Tally:
 def broker_attack(adversary: pd.DataFrame, adv_truth: pd.DataFrame, protected: pd.DataFrame,
                   rowmap: pd.DataFrame, identity: pd.DataFrame, qis: list,
                   original: pd.DataFrame | None = None, record_key: str | None = None,
-                  sensitive: str | None = None, max_adversary: int = 3000, seed: int = 0, rungs: dict | None = None) -> dict:
+                  sensitive: str | None = None, max_adversary: int = MAX_SAMPLE, seed: int = SEED, rungs: dict | None = None) -> dict:
     """Data broker: link each adversary record to protected rows through fuzzy QI matching."""
     if not qis:
         return _empty()
@@ -138,7 +144,7 @@ def broker_attack(adversary: pd.DataFrame, adv_truth: pd.DataFrame, protected: p
 
 def insider_attack(original: pd.DataFrame, protected: pd.DataFrame, rowmap: pd.DataFrame, identity: pd.DataFrame,
                    date_col: str, place_col: str, record_key: str, sensitive: str | None = None,
-                   max_targets: int = 3000, seed: int = 0, rungs: dict | None = None) -> dict:
+                   max_targets: int = MAX_SAMPLE, seed: int = SEED, rungs: dict | None = None) -> dict:
     """Municipal insider: knows the visit's date and municipality and looks for the matching visit."""
     world = _World(protected, rowmap, identity, original, record_key, sensitive)
     qis = []

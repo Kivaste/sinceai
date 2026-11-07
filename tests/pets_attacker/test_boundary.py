@@ -272,11 +272,17 @@ def test_launcher_in_the_approved_child_launch_form_is_clean(tmp_path: Path):
     "def f(sys):\n    return sys\n",
     "def subprocess():\n    return None\n",
     "try:\n    pass\nexcept Exception as ATTACKER_MODULE:\n    pass\n",
+    # round 2 (Grok Standards, high): the computed-attribute variant, and computed getattr / namespace lookups
+    'def load():\n    return getattr(__builtins__, "__imp" + "ort__")(ATTACKER_MODULE)\n',
+    'import os\ndef load(n):\n    return getattr(os, "sys" + "tem")(n)\n',
+    'def load():\n    return globals()["ATTACKER_" + "MODULE"]\n',
+    'def load():\n    return vars()["BRIDGE_MODULE"]\n',
 ], ids=["import", "from", "from_sub", "comment", "other_string", "importlib", "dunder_import", "runpy", "pkgutil",
         "exec", "eval_compile", "from_importlib", "unparseable", "getattr_builtins", "alias_getattr_computed",
         "alias_importlib", "concat", "fstring", "format", "percent", "other_list", "dash_c", "other_executable",
         "executable_kw", "shell_kw", "popen", "rebind_constant", "rebind_subprocess", "rebind_sys",
-        "store_sys_attr", "store_subprocess_attr", "shadow_param", "shadow_def", "shadow_except"])
+        "store_sys_attr", "store_subprocess_attr", "shadow_param", "shadow_def", "shadow_except", "grok_computed_dunder", "computed_getattr",
+        "globals_lookup", "vars_lookup"])
 def test_launcher_with_any_other_route_to_the_attacker_is_a_violation(tmp_path: Path, extra):
     _plant(tmp_path, LAUNCHER, CLEAN + extra)
     assert any(h.endswith("attackers.py") for h in attacker_importers(tmp_path / "src"))

@@ -74,10 +74,32 @@ def _rungs(manifest: dict) -> dict:
     return out
 
 
-def _checked(risks) -> list:
-    if not isinstance(risks, list) or not all(isinstance(r, dict) and isinstance(r.get("risk"), str)
-                                              and isinstance(r.get("rate"), dict) for r in risks):
+_ENTRY_KEYS = {"risk", "kind", "label", "rate", "description"}
+_RATE_KEYS = {"measured": {"status", "value", "denominator", "source"}, "not_measured": {"status", "reason"}}
+_KINDS = {"linkage", "attribute_inference"}
+
+
+def _entry(r) -> dict:
+    """Closed record: exactly the aggregate keys (names, rate, denominator); any unknown key is refused."""
+    if not isinstance(r, dict) or set(r) != _ENTRY_KEYS or r["kind"] not in _KINDS or r["label"] is not None:
         raise AttackUnavailable("attacker bridge output malformed")
+    rate = r["rate"]
+    if not isinstance(rate, dict) or set(rate) != _RATE_KEYS.get(rate.get("status"), set()):
+        raise AttackUnavailable("attacker bridge output malformed")
+    if rate["status"] == "measured":
+        d, v = rate["denominator"], rate["value"]
+        if (not isinstance(d, dict) or set(d) != {"unit", "n"} or d["unit"] != "rows" or type(d["n"]) is not int
+                or d["n"] < 1 or type(v) is not float or not 0.0 <= v <= 1.0):
+            raise AttackUnavailable("attacker bridge output malformed")
+    if not all(isinstance(r[k], str) for k in ("risk", "description")):
+        raise AttackUnavailable("attacker bridge output malformed")
+    return {k: r[k] for k in sorted(_ENTRY_KEYS)}
+
+
+def _checked(risks) -> list:
+    if not isinstance(risks, list):
+        raise AttackUnavailable("attacker bridge output malformed")
+    risks = [_entry(r) for r in risks]
     ids = {r["risk"] for r in risks}
     if "linkage-insider" not in ids or not any(i.startswith("linkage-broker-") for i in ids):
         raise AttackUnavailable("attacker bridge output lacks a persona")

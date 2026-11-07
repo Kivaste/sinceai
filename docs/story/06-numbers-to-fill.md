@@ -29,7 +29,7 @@ Authoritative code inspected at the prep base `f98cf626e1b7edf104fecbee1602b2f91
 | Same schema, top-level records | `inventory`, `pets[].{table,column,pet,params}`, `fieldJustifications[].{table,column,outputColumn,decision,rung,floor,reason,source}`, `contract.k`, `contract.files`, `bindings.files`, `bindings.toolRevision` |
 | Same schema, evidence and risks | `assertionEvidence.<name>.{check,version,scope,status,denominator,hits}`, `gate.{status,checks}`, `residualRisks[].{risk,kind,label,rate,description}`, `sacrifices[].{check,floor,before,after,reason}` |
 | `src/pets_release/writer/assemble.py` | `assemble_manifest` copies the narrative, derives assertions only from their required checks, copies gate records and binds `bindings.toolRevision` and inputs; it does not invent measurement fields |
-| `src/pets_release/run/narrative.py` | Writes local suppression under `pets[pet=local_suppression].params.{k,maxShare,unitsSuppressed,share}`; sacrifice floors; risk IDs `free-text-recall`, `linkage-attackers`, `attribute-inference` |
+| `src/pets_release/run/narrative.py` | Writes local suppression under `pets[pet=local_suppression].params.{k,maxShare,unitsSuppressed,share}`; sacrifice floors; risk IDs `free-text-recall`, `linkage-attackers`, `attribute-inference` (placeholders; the measured run replaces them with `linkage-<persona>` / `attribute-inference-<persona>` from `src/pets_release/measure/attackers.py`) |
 | `src/pets_release/measure/ids.py`, `core.py`, `k.py` | Actual component IDs `privacy`, `k_below_5_share`, `linkage_reid`, `person_k.min`, `person_k.persons`, `person_k.below_k_share`; utility/composite overall scores are deliberately not privacy components |
 | `src/pets_release/run/purpose.py`, `policy/health_s1.py`, `policy/cs_s1.py` | Normal utility threshold 0.90; enumerated sacrifice floors 0.60 (H-U4/H-U6/H-U8), 0.80 (CS-U5); k=5, suppression cap 0.10; CS label recall 0.98 and timestamp floor `ts.hour` |
 
@@ -213,9 +213,21 @@ controller retains the key. Synthetic templated data does not establish general
 speech performance. Recipient digests catch accidental changes, not a determined
 editor; only full verify checks the HMAC signature.
 
-Attacker linkage after protection:
-{{manifest.residualRisks[risk=linkage-attackers].rate.status}}; attribute inference:
-{{manifest.residualRisks[risk=attribute-inference].rate.status}}. If either status
+Attacker linkage after protection (per persona; value over denominator n):
+municipal insider {{manifest.residualRisks[risk=linkage-insider].rate.value}} over
+{{manifest.residualRisks[risk=linkage-insider].rate.denominator.n}} released visits (a seeded sample
+capped at 3000; say so, never "the whole release" when capped); data broker
+{{manifest.residualRisks[risk=linkage-broker-public_directory].rate.value}} over
+{{manifest.residualRisks[risk=linkage-broker-public_directory].rate.denominator.n}},
+{{manifest.residualRisks[risk=linkage-broker-social_posts_health].rate.value}} over
+{{manifest.residualRisks[risk=linkage-broker-social_posts_health].rate.denominator.n}},
+{{manifest.residualRisks[risk=linkage-broker-news_clips_health].rate.value}} over
+{{manifest.residualRisks[risk=linkage-broker-news_clips_health].rate.denominator.n}} adversary records.
+Attribute inference: the same ids with the `attribute-inference-` prefix, e.g.
+{{manifest.residualRisks[risk=attribute-inference-insider].rate.value}} over
+{{manifest.residualRisks[risk=attribute-inference-insider].rate.denominator.n}}. If the per-persona entries
+are absent, read {{manifest.residualRisks[risk=linkage-attackers].rate.reason}} (the
+attacker could not run). If any status
 is `not_measured`, write “not measured”, never zero. To claim both personas, require
 actual per-persona measured risk entries bound to the final inputs and document
 their IDs; a generic note or scorecard linkage number is insufficient.
