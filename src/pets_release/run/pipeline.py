@@ -59,6 +59,17 @@ def _refuse(out: Path, report: dict) -> None:
     (sc / "refusal_report.json").write_bytes(canonical_bytes(report))
 
 
+def resolve_recipient(recipient: str | None) -> str:
+    """Recipient-scoped keys (ticket 28): HKDF key + recipient-bound scope ID; the manifest records the ID."""
+    if recipient is None:
+        return DEFAULT_RECIPIENT
+    try:
+        validate_recipient_id(recipient)
+    except RecipientError as e:
+        raise RunError(str(e)) from None
+    return recipient
+
+
 def run_release(*, kit, scenario: dict, created: str, key_text: str, out, plan_name: str,
                 tool_revision: str, recipient: str | None = None) -> RunOutcome:
     scenario_id = scenario.get("id")
@@ -66,7 +77,7 @@ def run_release(*, kit, scenario: dict, created: str, key_text: str, out, plan_n
         from pets_release.cs_s1.release import run_cs_s1
 
         return run_cs_s1(kit=kit, scenario=scenario, created=created, key_text=key_text, out=out,
-                         tool_revision=tool_revision)
+                         tool_revision=tool_revision, recipient=resolve_recipient(recipient))
     if scenario_id not in SCENARIO_SPEC:
         raise RunError("run supports only HEALTH-S1 in this build")
     if plan_name != "hand":
@@ -83,13 +94,7 @@ def run_release(*, kit, scenario: dict, created: str, key_text: str, out, plan_n
     source = kit.load_dataset(policy.dataset)
     inputs = kit.input_digests(policy.dataset)
     master = MasterKey.from_text(key_text)
-    if recipient is None:
-        recipient = DEFAULT_RECIPIENT
-    else:  # recipient-scoped keys (ticket 28): HKDF key + recipient-bound scope ID; manifest records the ID
-        try:
-            validate_recipient_id(recipient)
-        except RecipientError as e:
-            raise RunError(str(e)) from None
+    recipient = resolve_recipient(recipient)
     rsid = release_scope_id(scenario=scenario_id, recipient=recipient, inputs=inputs, tool_revision=tool_revision)
 
     released = apply_plan(plan, source, token_keys(master, rsid, recipient))

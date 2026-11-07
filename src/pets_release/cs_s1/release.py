@@ -19,7 +19,7 @@ from pets_release.cs_s1.prepare import SCENARIO, prepare
 from pets_release.manifest import canonical_bytes, not_measured, release_scope_id
 from pets_release.policy import get_policy
 from pets_release.pseudonym import MasterKey
-from pets_release.run.context import DEFAULT_RECIPIENT, SCENARIO_SPEC, producer_context, token_keys
+from pets_release.run.context import SCENARIO_SPEC, producer_context, token_keys
 from pets_release.run.narrative import build_narrative
 from pets_release.writer import Candidate, ProtectedTable, scoring_dir, write_release
 
@@ -36,7 +36,8 @@ def _sorted_like_writer(df: pd.DataFrame, final: list[str]):
     return df.iloc[order].reset_index(drop=True), [final[i] for i in order]
 
 
-def run_cs_s1(*, kit, scenario: dict, created: str, key_text: str, out, tool_revision: str):
+def run_cs_s1(*, kit, scenario: dict, created: str, key_text: str, out, tool_revision: str, recipient: str):
+    """``recipient`` is already resolved and validated by ``pipeline.resolve_recipient`` (ticket 28 keys)."""
     from pets_release.run.pipeline import RunError, RunOutcome, RunRefused
     from pets_release.run.purpose import evaluate as evaluate_purpose
 
@@ -49,7 +50,6 @@ def run_cs_s1(*, kit, scenario: dict, created: str, key_text: str, out, tool_rev
     source = kit.load_dataset(policy.dataset)
     inputs = kit.input_digests(policy.dataset)
     master = MasterKey.from_text(key_text)
-    recipient = DEFAULT_RECIPIENT
     rsid = release_scope_id(scenario=SCENARIO, recipient=recipient, inputs=inputs, tool_revision=tool_revision)
 
     prep = prepare(source, token_keys(master, rsid, recipient))
