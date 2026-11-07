@@ -540,7 +540,13 @@ def test_protected_rows_require_current_verification_and_manifest_membership(tmp
         if case in {"tampered", "missing", "extra", "rowmap", "truth", "bad-contract"}:
             assert request(url, "/rows")[0] == 422
             # A changed, missing or extra entry withdraws the run-time proof as well.
-            assert json.loads(request(url, "/api/result")[1])["status"] == "CHANGED"
+            state = json.loads(request(url, "/api/result")[1])
+            assert state["status"] == "CHANGED"
+            # A prior verify pass is never rendered as current once the bytes changed.
+            assert not any(s["name"].startswith("verify") and s["exit"] == 0 for s in state["steps"])
+            page = request(url, "/result")[1]
+            assert "verify --full · passed" not in page and "Controller verification" not in page
+            assert "passed (full)" not in request(url, "/demo/limitations")[1]
 
 
 def test_targets_show_measured_values_and_never_assume_missing_results_pass(tmp_path):
@@ -685,13 +691,16 @@ def test_digest_consistent_cell_swap_with_stale_signature_is_never_served(tmp_pa
         assert state["status"] == "CHANGED"
         for field in ("gate", "exportAssertions", "assertionEvidence", "personK", "targets", "measured"):
             assert field not in state, field
+        assert not any(s["name"].startswith("verify") and s["exit"] == 0 for s in state["steps"])
         page = request(url, "/result")[1]
         assert "changed since verification" in page
-        for text in ("The gate passed", "checks passed", "Export assertions", "below k", ">met<"):
+        for text in ("The gate passed", "checks passed", "Export assertions", "below k", ">met<",
+                     "verify --full · passed", "verify (limited) · passed", "Controller verification"):
             assert text not in page, text
         for item in ("risks", "pets", "protected", "measurements", "limitations"):
             demo = request(url, "/demo/" + item)[1]
-            for text in ("Gate ", ">met<", "accepted sacrifice", "keyed_pseudonym", "age.band10"):
+            for text in ("Gate ", ">met<", "accepted sacrifice", "keyed_pseudonym", "age.band10",
+                         "passed (full)", "passed (limited)"):
                 assert text not in demo, (item, text)
 
 
