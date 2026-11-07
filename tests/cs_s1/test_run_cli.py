@@ -104,8 +104,8 @@ def test_manifest_turn_id_measurements_and_risks(cs_run):
     assert "healthInText" in m["exportAssertions"] and "quasiIdentifiersBelowK" not in m["exportAssertions"]
     import pandas as pd
 
-    conv = pd.read_csv(out / "conversations.csv", dtype=str, keep_default_na=False)
-    turns = pd.read_csv(out / "turns.csv", dtype=str, keep_default_na=False)
+    conv = pd.read_csv(out / "conversations.csv", dtype=str, keep_default_na=False, na_filter=False)
+    turns = pd.read_csv(out / "turns.csv", dtype=str, keep_default_na=False, na_filter=False)
     assert conv.conversation_id.map(lambda v: bool(HEX64.match(v))).all()
     assert set(turns.conversation_id) == set(conv.conversation_id)
 

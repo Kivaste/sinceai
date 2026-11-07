@@ -26,8 +26,8 @@ def build_cs_kit(root: Path, gold: bool = True) -> Path:
     for p in sorted(MINIKIT.glob("*.csv")):
         shutil.copyfile(p, root / "data" / "customer_service" / p.name)
     if gold:
-        cust = pd.read_csv(MINIKIT / "customers.csv", dtype=str, keep_default_na=False)
-        turns = pd.read_csv(MINIKIT / "turns.csv", dtype=str, keep_default_na=False)
+        cust = pd.read_csv(MINIKIT / "customers.csv", dtype=str, keep_default_na=False, na_filter=False)
+        turns = pd.read_csv(MINIKIT / "turns.csv", dtype=str, keep_default_na=False, na_filter=False)
         known = [(v, "PERSON") for v in cust.full_name] + [(v, "EMAIL") for v in cust.email]
         with open(root / "metadata" / "pii_spans" / GOLD, "w", encoding="utf-8", newline="\n") as f:
             for tid, text in zip(turns.turn_id, turns.text):

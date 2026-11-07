@@ -30,7 +30,7 @@ def cs_rcp(tmp_path_factory):
 
 
 def _conv_tokens(out):
-    return set(pd.read_csv(out / "conversations.csv", dtype=str, keep_default_na=False)["conversation_id"])
+    return set(pd.read_csv(out / "conversations.csv", dtype=str, keep_default_na=False, na_filter=False)["conversation_id"])
 
 
 def _release(out):

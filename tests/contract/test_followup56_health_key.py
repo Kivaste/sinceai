@@ -30,7 +30,7 @@ def test_cs_s1_contract_states_health_required():
     from pets_release.pseudonym import MasterKey, Scope, pseudonymiser_for
 
     mini = Path(__file__).resolve().parents[1] / "fixtures" / "minikit" / "customer_service"
-    src = {p.stem: pd.read_csv(p, dtype=str, keep_default_na=False) for p in sorted(mini.glob("*.csv"))}
+    src = {p.stem: pd.read_csv(p, dtype=str, keep_default_na=False, na_filter=False) for p in sorted(mini.glob("*.csv"))}
     keys = PseudonymKeys(pseudonymiser_for(MasterKey.from_text("test-only-master-key-0123456789abcdef")),
                          Scope.release("0123456789abcdef"))
     prep = prepare(src, keys)
