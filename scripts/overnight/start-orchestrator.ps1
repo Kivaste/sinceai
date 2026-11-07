@@ -153,6 +153,16 @@ Write-JsonAtomic $StatePath ([ordered]@{ step = 0; last_action_utc = $null; sess
 $res = OcApi @('post', "/api/session/$newId/prompt", '--data', $promptBody)
 if (-not $res) { Write-Error "prompt to $newId failed; session exists but has no brief (the watchdog will nudge it, or re-run with -Force)"; exit 1 }
 Write-Output "sent resume-prompt.md to $newId (delivery=queue)"
+
+# Retire the old orchestrator explicitly: a finishing child can wake an interrupted parent session, and there must never
+# be two orchestrators. The retirement notice is queued, so it is the first thing the old session reads if anything wakes it.
+if ($Force -and $oldId -and $oldId -ne $newId) {
+  $retire = "RETIRED at $((Get-Date).ToString('HH:mm')) EET: you have been replaced by orchestrator session $newId (heartbeat.json now names it). " +
+            "Do NOT dispatch, review, merge, close, comment, push or edit anything from now on, even if a subagent reports back to you. " +
+            "Reply with the single word 'retired' and end your turn. The new orchestrator picks up your in-flight sessions via the API."
+  $rb = @{ text = $retire; delivery = 'queue' } | ConvertTo-Json -Compress
+  if (OcApi @('post', "/api/session/$oldId/prompt", '--data', $rb)) { Write-Output "queued retirement notice to old orchestrator $oldId" } else { Write-Output "WARN: could not queue retirement notice to $oldId" }
+}
 Write-Output ''
 Write-Output "Session id: $newId"
 Write-Output "Attach in the TUI:  cd `"$RepoRoot`"; opencode --session $newId"

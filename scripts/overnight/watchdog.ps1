@@ -44,6 +44,8 @@ param(
   [int]$IdleMinutes = 10,
   [int]$HungMinutes = 90,
   [int]$CooldownMinutes = 20,
+  [int]$MaxContextTokens = 300000,   # hand over to a fresh orchestrator above this context size
+  [int]$HandoverCooldownMinutes = 30,
   [string]$Model = 'claude-agent/opus#high',
   [string]$FallbackModel = 'openai/gpt-6.1-sol',
   [switch]$DryRun,
@@ -153,6 +155,26 @@ try {
     # If our own previous run is far older than the 3-min cadence, the machine was suspended: every age below is
     # inflated by the suspend, and the network may still be reconnecting. Log it and do not act this cycle.
     if ($gapMin -gt 10) { Write-Log ('action=grace reason="resumed after suspend or missed runs (gap {0:N0} min); not acting this cycle"' -f $gapMin); exit 0 }
+
+    # Context hand-over: a long-running orchestrator degrades and slows far beyond ~150k tokens. Above the limit,
+    # start a fresh one (start-orchestrator.ps1 -Force interrupts and retires the old session).
+    $hbNow = Read-Json $HbPath
+    if ($hbNow -and $hbNow.session_id) {
+      $hoFile = Join-Path $StateDir 'last-handover.txt'
+      $hoAge = 1e9; if (Test-Path $hoFile) { $hoAge = ((Get-Date) - [datetime](Get-Content $hoFile)).TotalMinutes }
+      $msgs = OcApi @('get', "/api/session/$($hbNow.session_id)/message")
+      $last = @($msgs.data) | Where-Object { $_.type -eq 'assistant' -and $_.tokens -and $_.tokens.cache } | Select-Object -First 1
+      if ($last) {
+        $ctx = [int64]$last.tokens.input + [int64]$last.tokens.cache.read + [int64]$last.tokens.cache.write
+        if ($ctx -gt $MaxContextTokens -and $hoAge -gt $HandoverCooldownMinutes) {
+          Write-Log ('action=handover reason="orchestrator context {0:N0} > {1:N0} tokens" session={2}' -f $ctx, $MaxContextTokens, $hbNow.session_id)
+          Set-Content $hoFile (Get-Date).ToString('o')
+          $out = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'start-orchestrator.ps1') -Force 2>&1 | Out-String
+          Write-Log ('handover result: ' + (($out -split "`r?`n" | Where-Object { $_ -match 'created session|retirement|interrupting|error|WARN' }) -join ' | '))
+          exit 0
+        }
+      }
+    }
   }
   # ---------- (a) heartbeat ----------
   $hb = Read-Json $HbPath

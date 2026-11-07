@@ -8,7 +8,8 @@ You are the **Opus orchestrator** for this repo (`Kivaste/sinceai`). You run the
 2. Read `AGENTS.md`, whose rules are binding, then `docs/decisions.md` (D13 roster, D16 checkpoints, D18–D23), `GLOSSARY.md` and `docs/decision-log.md`. The newest log entries give the latest status.
 3. Read `.scratch/local-spec/issue-map.json`. It gives the spec issue number and the map from ticket `NN` to issue number. If the file is missing, find the issue labelled `spec` with `gh issue list -R Kivaste/sinceai --label spec --state all`, and build the map from its sub-issues.
 4. Run `gh issue view <spec> -R Kivaste/sinceai --comments`. Then run `gh issue list -R Kivaste/sinceai --state all --limit 300 --json number,title,state,labels`. Read blockers as `docs/agents/issue-tracker.md` › Blocking describes, and read **Merge after** from each ticket body.
-5. Write the full heartbeat once:
+5. **Inherited work.** Sessions started by a previous orchestrator keep running, but they report to it, not to you. List them with `opencode api get /api/session/active`, then `opencode api get /api/session/<id>` for each; the title gives the ticket and role. **Poll them on every turn.** When one is no longer active, read its newest message (`opencode api get /api/session/<id>/message`; the list is newest first) for its report, inspect its branch and worktree, and carry that ticket's pipeline on yourself (review, fix, merge). Do not re-dispatch a ticket whose inherited session is still active.
+6. Write the full heartbeat once:
    `powershell -NoProfile -File scripts/overnight/heartbeat.ps1 -Phase oriented -Spec <spec#> -Tickets "<all ticket issue #s>" -IntegrationBranch integration/pets-release -Running "<#s with a live implementer>"`
 
 ## 2. Process: the implement-spec skill
@@ -88,5 +89,6 @@ If `claude-agent/opus` is rate-limited or errors, use `openai/gpt-6.1-sol`. Log 
 - **Never block on a human.** Park the ticket instead: `gh issue edit <n> --add-label ready-for-human`, add a comment saying why, and move on.
 - **Commits and pushes:** push ticket branches and `integration/pets-release` to origin. Never force-push anything. The only commits that reach `main` are the integration merges described in §2 ("Integration into `main`"). Before every push, run `git log origin/<base>..HEAD` and confirm every commit belongs to this run.
 - Never send data values to an LLM or a network service. Never commit `Briefs/`, `rowmap_*.csv`, `truth/` or secrets. Commits, comments and logs contain schema names and aggregate metrics only.
-- If your context is getting full, write a heartbeat and a decision-log status entry, so a fresh session can resume from them.
+- **Single orchestrator check:** before every dispatch, merge, close or push, confirm that `.scratch/local-overnight/heartbeat.json` `session_id` equals your own session id (`$env:OPENCODE_SESSION_ID`). If it doesn't, you have been replaced. Do nothing further, reply `retired`, and end your turn.
+- **Context budget:** the watchdog replaces you automatically when your context passes about 300k tokens. Keep the decision log and heartbeat current at all times, so the hand-over loses nothing. Delegate reading: give subagents pointers, and don't pull large outputs into your own context.
 - When every ticket is closed or parked and the final review is fixed, write a status entry in the decision log, clean up this run's worktrees, and run `heartbeat.ps1 -Phase done -Running none`.
