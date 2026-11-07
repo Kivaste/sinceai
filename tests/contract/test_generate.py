@@ -15,7 +15,7 @@ from pets_release.ladders import CONTRACT_FORMS, VALIDATOR_FORMS
 from pets_release.manifest import canonical_bytes, canonical_digest
 from pets_release.policy.model import FieldFloor, ScenarioPolicy
 
-REL = {"scope": "release"}
+REL = {"label": "RECORD_KEY"}
 
 
 def _policy(columns: dict, qi: tuple = ()) -> ScenarioPolicy:
@@ -57,14 +57,14 @@ def test_withheld_columns_and_tables_are_absent() -> None:
 def test_derived_column_under_release_name_with_derivation_and_qi() -> None:
     qi = ({"table": "ed_visits", "column": "date_of_birth", "derived": "age_band"},)
     policy, plan = _build([
-        _entry("ed_visits", "date_of_birth", "age.band10", {"ref_column": "date_of_birth"}),
+        _entry("ed_visits", "date_of_birth", "age.band10", {"ref_column": "arrival_ts"}),
         _entry("ed_visits", "sex", "keep"),
     ], qi)
     contract = generate(policy, plan)
     columns = contract["files"]["ed_visits.csv"]["columns"]
     assert "date_of_birth" not in columns
     assert columns["age_band"]["form"] == CONTRACT_FORMS["age.band10"]
-    assert columns["age_band"]["params"]["derived_from"] == "date_of_birth"
+    assert columns["age_band"]["params"]["derived_from"] == "date_of_birth"  # not the ref column
     assert contract["qi"] == [{"table": "ed_visits", "column": "age_band", "derived_from": "date_of_birth"}]
 
 
@@ -105,22 +105,20 @@ def test_every_ladder_form_is_a_gate_form() -> None:
             re.compile(form)
 
 
-def test_token_columns_carry_scope_from_plan() -> None:
+def test_token_columns_carry_release_scope() -> None:
     policy, plan = _build([
         _entry("ed_visits", "visit_id", "id.pseudonym", REL),
-        _entry("turns", "conversation_id", "id.pseudonym", {"scope": "conversation"}),
+        _entry("turns", "conversation_id", "id.pseudonym"),
     ])
     contract = generate(policy, plan)
     assert contract["tokens"] == [
         {"table": "ed_visits", "column": "visit_id", "scope": "release"},
-        {"table": "turns", "column": "conversation_id", "scope": "conversation"},
+        {"table": "turns", "column": "conversation_id", "scope": "release"},
     ]
     assert contract["files"]["ed_visits.csv"]["columns"]["visit_id"]["form"] == "hex64"
-    for params in ({}, {"scope": "global"}):
-        policy, plan = _build([_entry("ed_visits", "visit_id", "id.pseudonym", params)])
-        with pytest.raises(ContractError, match="visit_id: token scope"):
-            generate(policy, plan)
-
+    policy, plan = _build([_entry("ed_visits", "visit_id", "id.pseudonym", {"scope": "global"})])
+    with pytest.raises(ContractError, match="visit_id: token scope"):
+        generate(policy, plan)
 
 def test_plan_must_cover_policy_exactly() -> None:
     policy, plan = _build([_entry("t", "a", "keep"), _entry("t", "b", "keep")])
@@ -198,7 +196,7 @@ def _synthetic():
     qi = ({"table": "ed_visits", "column": "date_of_birth", "derived": "age_band"},)
     policy, plan = _build([
         _entry("ed_visits", "visit_id", "id.pseudonym", REL),
-        _entry("ed_visits", "date_of_birth", "age.band10", {"ref_column": "date_of_birth"}),
+        _entry("ed_visits", "date_of_birth", "age.band10", {"ref_column": "arrival_ts"}),
         _entry("ed_visits", "arrival_ts", "ts.month_hour"),
         _entry("ed_visits", "icd10_primary", "icd.3"),
         _entry("ed_visits", "temp_c", "num.exact"),

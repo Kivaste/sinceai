@@ -7,7 +7,6 @@ Writes ``contracts.txt`` and one ``<scenario>.contract.json`` to OUT_DIR when gi
 
 from __future__ import annotations
 
-import json
 import sys
 from pathlib import Path
 

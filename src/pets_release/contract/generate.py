@@ -8,7 +8,8 @@ Everything comes from the canonical sources, with no fallbacks:
 * QI rows: ``policy.qi`` (ticket 09), kept only when the column is released. A policy QI row may
   carry ``join_via: [table, column]``; its derivation is then the name ``join_<table>_<column>``;
   otherwise the derivation is the source column;
-* token scope: ``params["scope"]`` of an ``id.pseudonym`` entry;
+* token scope: ``release`` for every ``id.pseudonym`` entry (07 binds that scope inside ``apply``);
+  an explicit other ``params["scope"]`` is rejected;
 * digest: ``pets_release.manifest.canonical_digest`` (ticket 02).
 
 Contract shape (what 02's schema stores and 04's contract checks read)::
@@ -27,7 +28,12 @@ import re
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-from pets_release.ladders import VALIDATOR_FORMS, LadderError, contract_form, output_column
+from pets_release.ladders import (
+    VALIDATOR_FORMS,
+    LadderError,
+    contract_form,
+    output_column,
+)
 from pets_release.manifest import canonical_digest
 
 _NAME = re.compile(r"^[A-Za-z0-9_]{1,64}$")
@@ -41,6 +47,7 @@ _QI_KEYS = frozenset({"column", "derived_from", "table"})
 _TOKEN_KEYS = frozenset({"column", "scope", "table"})
 _FORM_MAX = 300
 _WITHHELD = "withheld"
+_PSEUDONYM_SCOPE = "release"  # ticket 07 binds id.pseudonym to the release scope
 
 
 class ContractError(ValueError):
@@ -71,13 +78,13 @@ def generate(policy: Any, plan: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
         form = _form(table, column, entry["rung"])
         params: dict[str, Any] = {"nullable": True, "rung": entry["rung"]}
         if name != column or entry["rung"].startswith("age."):
-            params["derived_from"] = _source_ref(table, column, entry)
+            params["derived_from"] = column
         spec[name] = {"form": form, "params": dict(sorted(params.items()))}
         released[(table, column)] = name
         if entry["rung"] == "id.pseudonym":
-            scope = entry["params"].get("scope")
-            if scope not in _SCOPES:
-                raise ContractError(f"{table}.{column}: token scope missing or invalid")
+            scope = entry["params"].get("scope", _PSEUDONYM_SCOPE)
+            if scope != _PSEUDONYM_SCOPE:
+                raise ContractError(f"{table}.{column}: token scope invalid")
             tokens.append({"table": table, "column": name, "scope": scope})
 
     qi: list[dict[str, str]] = []
@@ -113,13 +120,6 @@ def digest(contract: Mapping[str, Any]) -> str:
     """SHA-256 hex of the canonical contract (ticket 02's ``canonical_digest``)."""
     _validate_contract(contract)
     return canonical_digest(contract)
-
-
-def _source_ref(table: str, column: str, entry: Mapping[str, Any]) -> str:
-    ref = (entry["params"] or {}).get("ref_column") or column
-    if not isinstance(ref, str) or not _NAME.fullmatch(ref):
-        raise ContractError(f"{table}.{column}: ref_column")
-    return ref
 
 
 def _form(table: str, column: str, rung: str) -> str:
