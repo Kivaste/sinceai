@@ -54,7 +54,7 @@ def justify(plan: list, log: list, policy) -> list[dict]:
     for e in sorted(plan, key=lambda x: (x["table"], x["column"])):
         key = (e["table"], e["column"])
         touching = [s for s in steps if any((m["table"], m["column"]) == key for m in s["moves"])]
-        adopted = [s for s in touching if s["accepted"]]
+        adopted = [s for s in touching if s["accepted"] and s["step"] != 0]  # step 0 = every field at its floor
         last_adopt = adopted[-1] if adopted else None
         if last_adopt is not None:
             rung = next(m["rung"] for m in last_adopt["moves"] if (m["table"], m["column"]) == key)
