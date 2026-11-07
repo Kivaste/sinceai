@@ -33,6 +33,9 @@ verify needs only the release. No contract ``k`` -> both k checks return not_run
                 one person; missing -> not_run. If a person token is released, token <-> canonical
                 person must be one-to-one, else error (conflicting mapping).
   joins:        [{table, column, ref_table, ref_column}] source joins to the person table
+  detected_qi:  [{table, column}] every released column the detector classifies as a quasi-identifier (on its
+                released values or through its source column; built by the producer context, #106 / D33).
+                person-k only: one missing from contract.qi -> error (refuse); a malformed set -> error.
 """
 
 from __future__ import annotations
@@ -287,62 +290,28 @@ def person_k_values(release, contract, context) -> PersonK:
     return PersonK(per_person, sorted(below_rows), len(unidentified), unid_rows)
 
 
-QI_ROLE = "quasi_identifier"
-
-
-def _source_of(table: str, column: str, spec) -> tuple[str, str]:
-    """Declared source of a released column: ``params.derived_from`` (``col`` or ``table.col``), else itself."""
-    params = spec.get("params") if isinstance(spec, dict) else None
-    df = params.get("derived_from") if isinstance(params, dict) else None
-    if isinstance(df, str) and df:
-        t, _, c = df.rpartition(".")
-        return (t or table, c)
-    return (table, column)
-
-
-def detector_qis(release, contract, context) -> list[tuple[str, str]]:
-    """(table, released column) of every released column the detector (ticket 20) classifies as a
-    quasi-identifier (#106, D33): on the released values themselves, or through its declared source column in
-    the source tables. The first never reads declared provenance, so a column whose declared source is wrong is
-    still classified by what it holds. Every ``*.csv`` in the release folder is a released table."""
-    from pets_release.detect.inventory import detect_dataset
-
-    rel = release_dir(release)
-    released = {p.name[:-4]: read_table(rel, p.name[:-4]) for p in sorted(rel.glob("*.csv"))}
-    files = (contract or {}).get("files") or {}
-    try:
-        on_release = detect_dataset("release", released)
-        on_source = detect_dataset("source", dict(context["source"]))
-    except Exception as exc:  # noqa: BLE001 - any detector failure is a content-free error
-        raise CheckError("detector failed") from exc
-    src_qi = {(r["table"], r["column"]) for r in on_source if r["role"] == QI_ROLE}
-    out = {(r["table"], r["column"]) for r in on_release if r["role"] == QI_ROLE}
-    for t, df in released.items():
-        cols = (files.get(f"{t}.csv") or {}).get("columns") or {}
-        for c in df.columns:
-            if _source_of(t, c, cols.get(c)) in src_qi:
-                out.add((t, c))
-    return sorted(out)
-
-
-def _require_detector_qis_listed(release, contract, context) -> None:
-    """A released detector QI missing from ``contract.qi`` makes person-k refuse (#106): k over the contract's
-    QIs would not be k over what the recipient holds."""
+def _require_detector_qis_listed(contract, context) -> None:
+    """Every released detector QI (context ``detected_qi``, #106 / D33) must be a contract QI, else person-k
+    refuses: k over the contract's QIs would not be k over what the recipient holds. A malformed set errors."""
+    det = context["detected_qi"]
+    if not isinstance(det, list) or not all(
+            isinstance(q, dict) and isinstance(q.get("table"), str) and isinstance(q.get("column"), str) for q in det):
+        raise CheckError("detected QI set malformed")
     listed = {(q.get("table"), q.get("column")) for q in (contract or {}).get("qi", []) or [] if isinstance(q, dict)}
-    if set(detector_qis(release, contract, context)) - listed:
+    if {(q["table"], q["column"]) for q in det} - listed:
         raise CheckError("released quasi-identifier missing from contract qi")
 
 
-@register(name=PERSON_K, version="1.1.0", scope="producer", unit="persons")
+@register(name=PERSON_K, version="1.0.0", scope="producer", unit="persons")
 def run_person_k(release, contract, context) -> Outcome:
     context = context or {}
     k = _k(contract, context)
-    needed = ("source", "rowmaps", "record_keys", "person")
+    needed = ("source", "rowmaps", "record_keys", "person", "detected_qi")
     if k is None or any(context.get(n) is None for n in needed):
         return Outcome.not_run()
     if context["person"].get("normalise") is None:  # identity canonicaliser not supplied
         return Outcome.not_run()
-    _require_detector_qis_listed(release, contract, context)
+    _require_detector_qis_listed(contract, context)
     res = person_k_values(release, contract, context)
     n = len(res.per_person) + res.unidentified
     if n == 0:

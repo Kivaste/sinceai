@@ -3,18 +3,21 @@
 from __future__ import annotations
 
 import pytest
+from producer_helpers import with_detected
 
 from pets_release.checks import all_checks, run_checks
 from pets_release.run.context import person_normaliser
 
 
 class _Via04:
-    """Runs one registered check through ticket 04's runner; returns its CheckRecord dict."""
+    """Runs one registered check through ticket 04's runner; returns its CheckRecord dict. The context gets the
+    production detector's QI set for the release (#106) unless the test supplies one."""
 
     def __init__(self, name):
         self.check = {c.name: c for c in all_checks()}[name]
 
     def run(self, release, contract, context):
+        context = with_detected(release, contract, context)
         return run_checks(release, contract, context, checks=[self.check]).to_dict()["records"][0]
 
 
@@ -80,13 +83,17 @@ def test_lab_sampled_day_counts_as_qi_of_joined_visit(h):
         }
     )
     ctx = _health_ctx(h, VISITS, PERSONS, LABS, LAB_VISITS)
+    visit_rel = h.release({"ed_visits": {"visit_tok": VISITS, "sex": ["F"] * 10}})
 
-    visit_only = PERSON_K.run(rel, h.contract([("ed_visits", "sex")]), ctx)
+    visit_only = PERSON_K.run(visit_rel, h.contract([("ed_visits", "sex")]), ctx)
     with_lab = PERSON_K.run(
         rel, h.contract([("ed_visits", "sex"), ("lab_results", "sampled_day")]), ctx
     )
+    # #106: the released lab day is a detector QI; leaving it out of contract.qi is refused, never a pass
+    omitted = PERSON_K.run(rel, h.contract([("ed_visits", "sex")]), ctx)
 
     assert visit_only["status"] == "pass"
+    assert omitted["status"] == "error"
     assert with_lab["status"] == "fail"
     assert with_lab["hits"] == 10  # every visit is unique once its lab day is attached
     assert with_lab["denominator"] == {"unit": "persons", "n": 10}
@@ -190,6 +197,22 @@ def test_not_run_without_source_or_k(h):
         assert rec["status"] == "not_run", missing
     assert PERSON_K.run(rel, h.contract([("ed_visits", "sex")]), None)["status"] == "not_run"
     assert PERSON_K.run(rel, h.contract([("ed_visits", "sex")], k=None), full)["status"] == "not_run"
+
+
+def test_detected_qi_set_missing_is_not_run_and_malformed_is_an_error(h):
+    """#106: without the detector's QI set person-k cannot know k covers every released QI, so it never passes."""
+    rel = h.release({"ed_visits": {"visit_tok": VISITS, "sex": ["F"] * 10}})
+    contract = h.contract([("ed_visits", "sex")])
+    full = with_detected(rel, contract, _health_ctx(h, VISITS, PERSONS))
+    assert full["detected_qi"] == [{"table": "ed_visits", "column": "sex"}]
+    assert PERSON_K.run(rel, contract, full)["status"] == "pass"
+    direct = PERSON_K.check
+    without = {k: v for k, v in full.items() if k != "detected_qi"}
+    assert run_checks(rel, contract, without, checks=[direct]).to_dict()["records"][0]["status"] == "not_run"
+    for bad in ("ed_visits.sex", [("ed_visits", "sex")], [{"table": "ed_visits"}], {"table": "t", "column": "c"}):
+        assert PERSON_K.run(rel, contract, dict(full, detected_qi=bad))["status"] == "error", bad
+    unlisted = dict(full, detected_qi=[*full["detected_qi"], {"table": "ed_visits", "column": "visit_tok"}])
+    assert PERSON_K.run(rel, contract, unlisted)["status"] == "error"
 
 
 def test_fail_closed_on_bad_rowmap_or_missing_qi_column(h):

@@ -1,7 +1,8 @@
 """Producer context for the gate and for ``verify --full``: one function, both paths.
 
 The context ticket 11's producer checks read (``source``, ``rowmaps``, ``record_keys``, ``person``, ``joins``,
-``identifiers``, ``keys``, ``k``) is derived only from the kit, the master key and the released tables:
+``identifiers``, ``keys``, ``k``, ``detected_qi``) is derived only from the kit, the master key and the released
+tables (``detected_qi``: the detector's QIs among the released columns, #106):
 
 * row maps are never read from a file. Every released table of a scenario carries its record key as a
   release-scope keyed pseudonym, so each released row is mapped back to its source record by recomputing
@@ -21,6 +22,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from pets_release.detect.released import released_qis
 from pets_release.ladders import PseudonymKeys
 from pets_release.policy import k_target
 from pets_release.pseudonym import (
@@ -122,6 +124,9 @@ def producer_context(*, scenario_id: str, policy, source: Mapping[str, pd.DataFr
             if rm is not None:
                 rowmaps[stem] = rm
         ctx["rowmaps"] = rowmaps
+        # #106 / D33: the detector's QI classification of what is released (values and source columns); person-k
+        # refuses on one missing from contract.qi. Computed from the kit and the released tables, never declared.
+        ctx["detected_qi"] = released_qis(source, released, contract)
     return ctx
 
 

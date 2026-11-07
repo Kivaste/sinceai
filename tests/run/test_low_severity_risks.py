@@ -28,7 +28,7 @@ def _plant(folder):
     coarse_qis(folder)
     p = folder / "lab_results.csv"
     df = pd.read_csv(p, dtype=str, keep_default_na=False, na_filter=False)
-    df.loc[0, "test_name"] = PLANTED
+    df.loc[0, "unit"] = PLANTED  # released as text (keep); test_name is CRP vs other since #106
     df.to_csv(p, index=False, encoding="utf-8", lineterminator="\n")
 
 
