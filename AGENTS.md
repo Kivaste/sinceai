@@ -61,7 +61,8 @@ These apply to every change. A skipped, missing or errored check is a fail, not 
 ### Review
 
 - Every ticket gets two independent read-only reviews, from two different model families (`docs/decisions.md` D13: `claude-agent/sonnet`, `openai/gpt-6.1-sol`, `opencode-go/deepseek-v4.1-flash`). No agent reviews its own change. The orchestrator records the reviews. A new head after fixes gets a fresh review pass.
-- The final integration-branch `/code-review` uses `openai/gpt-6.1-sol` and `claude-agent/sonnet`.
+- Since Sat 02:15 (D13a), every implementer is Claude (Opus or Sonnet), so ticket reviews and the final integration-branch `/code-review` use `openai/gpt-6.1-sol` and `opencode-go/deepseek-v4.1-flash`. Sonnet does not review Claude-written code.
+- Merge a ticket as soon as both reviews pass and the full suite is green on the merged result. Then remove that ticket's worktree and delete its branch, locally and on origin (`scripts/overnight/resume-prompt.md` §2).
 
 ### Worktrees and commits
 

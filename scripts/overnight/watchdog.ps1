@@ -161,7 +161,9 @@ try {
     if ($ticketIds.Count -eq 0) { $ghArgs += @('--label', $TicketLabel) }
     $r = Invoke-Exe $GhExe $ghArgs 60
     if ($r.code -eq 0) {
-      $issues = @($r.out | ConvertFrom-Json)
+      # PS 5.1 emits a JSON array as ONE pipeline object; enumerate it explicitly so each issue is its own element.
+      $parsed = (@($r.out) -join "`n") | ConvertFrom-Json
+      $issues = @(foreach ($i in $parsed) { $i })
       if ($ticketIds.Count -gt 0) { $issues = @($issues | Where-Object { $ticketIds -contains [int]$_.number }) }
       $open = @($issues | Where-Object { $_.state -eq 'OPEN' })
       $parked = @($open | Where-Object { @($_.labels | ForEach-Object { $_.name }) -contains $ParkLabel })
@@ -327,6 +329,11 @@ try {
   if ($acted -and -not $DryRun) { $state.step = $step + 1; $state.last_action_utc = $nowIso; Write-JsonAtomic $StatePath $state }
   if ($action -eq 'unknown') { exit 2 }
   exit 0
+}
+catch {
+  # Never fail silently: a crashed watchdog is an unsupervised night.
+  try { Write-Log ('ERROR watchdog crashed: {0} at {1}' -f $_.Exception.Message, $_.InvocationInfo.PositionMessage -replace '\s+', ' ') } catch {}
+  exit 3
 }
 finally {
   if ($owned) { try { $mutex.ReleaseMutex() } catch {} }
