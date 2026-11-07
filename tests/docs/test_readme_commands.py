@@ -262,13 +262,13 @@ def test_block(block, tmp_path):
         assert stmt.startswith(("pets-release ", r".\.venv\Scripts\pets-release.exe ")), (
             f"block {block['n']}: unrunnable statement {stmt!r}"
         )
-        unkeyed = []  # #128 precondition: released tables without their record key get no recomputable row map
         if re.match(r"pets-release submission\b", stmt):
             _add_submission_inputs(kit)  # after the release run, as in tests/submission (CS tables, catalog)
             rel = re.search(r"--release\s+\.\.\\sinceai-out\\(\S+)", stmt)
             assert rel, f"{stmt!r}: no --release under ..\\sinceai-out"
+            # #128: every released table keeps its record key (default plan too), so the row map is recomputable
             unkeyed = _tables_without_record_key(out_root / rel.group(1))
-            assert not (unkeyed and "--plan hand" in block["body"]), f"the --plan hand release dropped {unkeyed}"
+            assert not unkeyed, f"the release dropped the record key of {unkeyed}"
         args, proc = execute(stmt)
         executed += 1
         _transcript(f"$ {stmt}\nexit={proc.returncode}\n{proc.stdout[:800]}{proc.stderr[:300]}")
@@ -277,11 +277,6 @@ def test_block(block, tmp_path):
         if args and args[0] == "verify" and "--full" not in args:
             assert "VERIFIED (limited)" in proc.stdout, f"{stmt!r}: no limited-verification line"
             assert "VERIFIED (full)" not in proc.stdout
-        if args and args[0] == "submission" and unkeyed:
-            # The packager fails closed on a row map it cannot recompute (#128). The command ran; while the
-            # precondition holds it must refuse with exactly that code, and this test xfails, naming the issue.
-            assert (proc.returncode, proc.stdout.strip()) == (1, "REFUSED: rowmap_unverifiable"), proc.stdout[-300:]
-            pytest.xfail(f"#128: the default HEALTH-S1 release drops the record key of {', '.join(unkeyed)}")
         if args and args[0] == "submission":
             built = "SUBMISSION BUILT (PARTIAL)" if "--partial" in args else "SUBMISSION BUILT (COMPLETE)"
             assert built in proc.stdout, f"{stmt!r}: no {built!r} line: {proc.stdout[-300:]}"
@@ -339,13 +334,10 @@ def test_readme_complete_submission_builds_on_a_hand_plan_release(tmp_path):
 
 
 def test_readme_complete_submission_on_a_default_plan_release(tmp_path):
-    """The same statement on a default-plan release: while #128 drops a record key it must refuse with exactly
-    rowmap_unverifiable and nothing built (strict xfail naming #128); once the key is kept it must build COMPLETE."""
+    """The same statement on a default-plan (search) release: the search keeps every record key (#128), so the
+    packager recomputes the row maps and builds a COMPLETE D46 bundle instead of refusing rowmap_unverifiable."""
     unkeyed, proc, idx = _run_readme_submission(tmp_path, ["run", "--scenario", "HEALTH-S1"])
-    if unkeyed:
-        assert (proc.returncode, proc.stdout.strip()) == (1, "REFUSED: rowmap_unverifiable"), proc.stdout[-300:]
-        assert idx is None
-        pytest.xfail(f"#128: the default HEALTH-S1 release drops the record key of {', '.join(unkeyed)}")
+    assert not unkeyed, f"the default-plan release dropped the record key of {unkeyed}"
     _assert_complete_d46(proc, idx)
 
 

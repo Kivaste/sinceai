@@ -134,7 +134,8 @@ def apply_suppression(tables: Mapping[str, pd.DataFrame], finals: Mapping[str, l
         "share": round(share, 6), "rowsSuppressed": {s: len(v) for s, v in sorted(suppressed.items())},
         "personKBefore": before, "personKAfter": after,
         "recheck": {"privacyTargets": "gate re-runs producer.person-k on the written release",
-                    "purposeChecks": "not_measured: measurer not wired in the walking skeleton"},
+                    "purposeChecks": "run re-runs all purpose checks on full data before publication; "
+                                     "scores in measured.utility"},
         "withinBound": share <= sup["max_share"],
     }
     return tables, finals, suppressed, report
