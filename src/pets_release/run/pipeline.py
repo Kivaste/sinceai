@@ -16,8 +16,8 @@ from pets_release.checks import text as text_checks
 from pets_release.contract import generate as generate_contract
 from pets_release.ladders import apply as apply_plan
 from pets_release.manifest import canonical_bytes, release_scope_id
-from pets_release.minimiser import LOG_KEYS, MinimiserRefused, search
-from pets_release.minimiser.kit import search_options
+from pets_release.minimiser import LOG_KEYS, MinimiserRefused, rebuild_plan, search
+from pets_release.minimiser.kit import params_from_plan, search_options
 from pets_release.policy import get_policy, hand_plan, validate_plan
 from pets_release.pseudonym import MasterKey
 from pets_release.recipient import RecipientError, validate_recipient_id
@@ -152,6 +152,26 @@ def rung_step(policy, rs: dict, contract: dict, at_from: dict) -> dict:
             "privacyTarget": target, "k": contract["k"], "atFrom": dict(at_from)}
 
 
+def search_step_at_from(policy, fields: dict, rs: dict, *, source, master, scope_id, recipient) -> dict:
+    """k measured at ``rs['from']`` for a search plan: ``fields`` (``{(table, column): (rung, floor)}``, the released
+    search plan) with the step's column back at ``from``, rebuilt with the search's own params, through ``protect``
+    and ``k_at_from``. One function for ``run`` and ``verify --full``. Fails closed (RunError)."""
+    key = (rs["table"], rs["column"])
+    at = dict(fields)
+    at[key] = (rs["from"], fields[key][1])
+    try:
+        plan = rebuild_plan(policy, params_from_plan(hand_plan(policy.scenario)), at)
+        validate_plan(plan, policy)
+    except ValueError as e:  # PlanError is a ValueError; messages are schema names only
+        raise RunError(f"rung sacrifice: search plan at the from rung not reproducible ({e})") from None
+    *_, sup, _ = protect(plan, policy=policy, source=source, master=master, scope_id=scope_id, recipient=recipient)
+    return k_at_from(sup)
+
+
+def _plan_core(plan) -> list:
+    return sorted((e["table"], e["column"], e["rung"], canonical_bytes(e["params"]), e["floor"]) for e in plan)
+
+
 def require_strict(purpose, steps):
     """A rung sacrifice holds only if its check still passes strictly (status ok, score >= threshold) at `to`."""
     from pets_release.run.purpose import THRESHOLD, PurposeResult
@@ -217,6 +237,20 @@ def run_release(*, kit, scenario: dict, created: str, key_text: str, out, plan_n
                                                           scope_id=rsid, recipient=recipient)
     # Enumerated rung sacrifices (#89): measured k at `from` beyond the suppression budget is the only trigger.
     steps = []
+    if found is not None:  # a step the search adopted itself: record k at `from` on the search's released plan
+        fields = {(e["table"], e["column"]): (e["rung"], e["floor"]) for e in plan}
+        try:
+            same = _plan_core(rebuild_plan(policy, params_from_plan(hand_plan(scenario_id)), fields)) == \
+                _plan_core(plan)
+        except ValueError:
+            same = False
+        if not same:  # verify --full re-measures from the manifest's rungs: they must pin the plan exactly
+            raise RunError("search plan is not reproducible from its rungs")
+        for rs in policy.rung_sacrifices:
+            if fields[(rs["table"], rs["column"])][0] == rs["to"]:
+                at_from = search_step_at_from(policy, fields, rs, source=source, master=master, scope_id=rsid,
+                                              recipient=recipient)
+                steps.append(rung_step(policy, rs, contract, at_from))
     for rs in policy.rung_sacrifices:
         key = (rs["table"], rs["column"])
         entry = next(e for e in plan if (e["table"], e["column"]) == key)

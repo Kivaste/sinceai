@@ -83,6 +83,18 @@ def grouped_qis(folder):
     df.to_csv(p, index=False, encoding="utf-8", lineterminator="\n")
 
 
+def grouped_spread_arrivals(folder):
+    """``grouped_qis``, then each visit's arrival spread over 12 months x 24 hours: per-person k fails at
+    month+hour beyond the suppression budget, so the search takes the enumerated hour-of-day rung sacrifice."""
+    import pandas as pd
+
+    grouped_qis(folder)
+    p = folder / "ed_visits.csv"
+    df = pd.read_csv(p, dtype=str, keep_default_na=False, na_filter=False)
+    df["arrival_ts"] = [f"2025-{i % 12 + 1:02d}-15 {(i // 12) % 24:02d}:30:00" for i in range(len(df))]
+    df.to_csv(p, index=False, encoding="utf-8", lineterminator="\n")
+
+
 def env(extra=None) -> dict:
     keep = ("PATH", "SYSTEMROOT", "PATHEXT", "WINDIR", "TEMP", "TMP", "USERPROFILE", "APPDATA", "LOCALAPPDATA",
             "HOMEDRIVE", "HOMEPATH", "COMSPEC", "VIRTUAL_ENV")
