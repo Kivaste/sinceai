@@ -43,6 +43,35 @@ ASSERTION_CHECKS = {
 }
 
 
+_COLUMN_SELECTOR = re.compile(r"^column:([A-Za-z0-9_]{1,64}\.csv)/([A-Za-z0-9_]{1,64})$")
+CONTRACT_K = "contract:k"
+
+
+def valid_selector(sel: str) -> bool:
+    """``applies_to`` entries: a column form (a validator ID or an anchored ``^...$`` regex),
+    ``contract:k`` (the contract carries a k target) or ``column:<file>.csv/<column>``."""
+    if sel == CONTRACT_K or _COLUMN_SELECTOR.match(sel):
+        return True
+    if sel.startswith("^"):
+        return True
+    return ":" not in sel
+
+
+def selector_declared(contract, sel: str) -> bool:
+    """True if ``contract`` declares ``sel``; raises on an unreadable contract or unknown selector."""
+    if sel == CONTRACT_K:
+        if not isinstance(contract, dict) or not isinstance(contract["files"], dict):
+            raise ValueError("unreadable contract")
+        return "k" in contract
+    m = _COLUMN_SELECTOR.match(sel)
+    if m:
+        spec = contract["files"].get(m.group(1))
+        return spec is not None and m.group(2) in spec["columns"]
+    if not valid_selector(sel):
+        raise ValueError("unknown selector")
+    return any(spec["form"] == sel for f in contract["files"].values() for spec in f["columns"].values())
+
+
 class RegistryError(Exception):
     """Raised when the registry cannot be trusted; message carries module/check names only."""
 
@@ -70,7 +99,7 @@ def register(*, name: str, version: str, scope: str, unit: str, applies_to: tupl
     declares them may return ``Outcome.not_applicable()``, and only when the contract declares
     no column with any of those forms."""
     applies_to = tuple(applies_to)
-    if not all(isinstance(f, str) and f for f in applies_to):
+    if not all(isinstance(f, str) and f and valid_selector(f) for f in applies_to):
         raise RegistryError(f"bad applies_to for check {name!r}")
     if not isinstance(name, str) or not CHECK_NAME.match(name):
         raise RegistryError(f"bad check name {name!r}")
