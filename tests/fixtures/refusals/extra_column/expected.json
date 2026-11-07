@@ -2,7 +2,7 @@
   "failing": {
     "contract.columns": [
       {
-        "column": "postcode",
+        "column": "unlisted-column#5",
         "count": 1,
         "file": "visits.csv",
         "locations": []

@@ -2,7 +2,7 @@
   "failing": {
     "contract.columns": [
       {
-        "column": "protected_row",
+        "column": "unlisted-column#5",
         "count": 1,
         "file": "visits.csv",
         "locations": []
