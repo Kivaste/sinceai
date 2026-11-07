@@ -30,6 +30,7 @@ from .rungs import (
     VALIDATOR_FORMS,
     WITHHELD,
     LadderError,
+    at_least_as_coarse,
     contract_entry,
     contract_form,
 )
@@ -46,6 +47,7 @@ __all__ = [
     "LadderError",
     "PseudonymKeys",
     "apply",
+    "at_least_as_coarse",
     "contract_entry",
     "contract_form",
     "output_column",

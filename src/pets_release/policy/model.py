@@ -7,7 +7,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 
-from pets_release.ladders import CONTRACT_FORMS, LADDERS, WITHHELD  # single source of rung IDs (ticket 07)
+from pets_release.ladders import CONTRACT_FORMS, LADDERS, WITHHELD, at_least_as_coarse  # single source of rung IDs (ticket 07)
 
 PLAN_KEYS = frozenset({"table", "column", "rung", "params", "floor", "reason", "source"})
 
@@ -120,7 +120,7 @@ class ScenarioPolicy:
                     raise PolicyError("joint QI move column is not a QI")
                 if m["rung"] not in ladder:
                     raise PolicyError("joint QI move rung is not on the column's ladder")
-                if ladder.index(m["rung"]) < ladder.index(fl.rung):
+                if not at_least_as_coarse(m["rung"], fl.rung):
                     raise PolicyError("joint QI move rung is finer than the column's floor")
         for key, rung in (self.alt_floors or {}).items():
             if key not in cols or (rung not in CONTRACT_FORMS and rung != WITHHELD):
@@ -209,7 +209,7 @@ def validate_plan(plan: list, policy: ScenarioPolicy) -> None:
             ladder = LADDERS[fl.family]
             if e["rung"] not in ladder:
                 raise PlanError(f"rung {e['rung']!r} not on the {fl.family} ladder for {key}")
-            if ladder.index(e["rung"]) < ladder.index(fl.rung):
+            if not at_least_as_coarse(e["rung"], fl.rung):
                 raise PlanError(f"rung for {key} is finer than its floor")
         elif alt and e["floor"] == alt:  # conditional-keep fallback: only the alt rung or withheld
             if e["rung"] not in (alt, WITHHELD):

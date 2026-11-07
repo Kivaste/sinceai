@@ -33,7 +33,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from pets_release.ladders import LADDERS, WITHHELD, apply, output_column
+from pets_release.ladders import LADDERS, WITHHELD, apply, at_least_as_coarse, output_column
 from pets_release.policy.model import validate_plan
 
 from . import risk as R
@@ -191,7 +191,7 @@ class _Search:
         lad = LADDERS[self.family(key)]
         if floor not in lad:  # alternative floor: that rung or withheld only
             return (floor, WITHHELD)
-        return lad[lad.index(floor):]
+        return tuple(r for r in lad[lad.index(floor):] if at_least_as_coarse(r, floor))  # skip incomparable rungs
 
     def rung_params(self, key, rung):
         """Params for ``rung`` on ``key``, or None if the rung cannot be parameterised (skipped)."""
@@ -375,7 +375,7 @@ class _Search:
         rung or floor off the ladder, is never coarser)."""
         lad = LADDERS[self.family(key)]
         fl = self.floor_rung[key]
-        return rung in lad and fl in lad and lad.index(rung) > lad.index(fl)
+        return rung in lad and fl in lad and rung != fl and at_least_as_coarse(rung, fl)
 
     # ---------------------------------------------------------------- logging
     def moves(self, cand, cur):

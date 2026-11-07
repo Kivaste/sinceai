@@ -293,8 +293,10 @@ def test_hour_of_day_is_on_timestamp_ladder_between_month_hour_and_day():
 
     lad = LADDERS["timestamp"]
     assert lad.index("ts.month_hour") < lad.index("ts.hour_of_day")
-    assert coarseness("ts.hour_of_day") > coarseness("ts.month_hour")
-    assert coarseness("ts.hour_of_day")[0] == "timestamp"
+    from pets_release.ladders.rungs import at_least_as_coarse
+
+    assert at_least_as_coarse("ts.hour_of_day", "ts.month_hour")
+    assert not at_least_as_coarse("ts.month_hour", "ts.hour_of_day")
 
 
 def test_hour_of_day_form_values_and_nullable():
@@ -327,5 +329,30 @@ def test_hour_of_day_finer_than_floor_refused():
     plan[0]["floor"] = "ts.month_hour"
     apply(plan, {"t": pd.DataFrame({"x": TS}, dtype=str)}, FakeKeys())  # coarser than floor is fine
     plan[0].update(rung="ts.hour", floor="ts.hour_of_day")
+    with pytest.raises(LadderError):
+        apply(plan, {"t": pd.DataFrame({"x": TS}, dtype=str)}, FakeKeys())
+
+
+# ---- follow-up #89: ts.hour_of_day is a branch off the timestamp ladder, not a rung between month_hour and day
+def test_hour_of_day_not_comparable_with_date_rungs():
+    from pets_release.ladders.rungs import at_least_as_coarse, coarseness
+
+    for date_rung in ("ts.day", "ts.week", "ts.month"):
+        assert not at_least_as_coarse("ts.hour_of_day", date_rung)
+        assert not at_least_as_coarse(date_rung, "ts.hour_of_day")
+    for fine in ("ts.exact", "ts.hour", "ts.month_hour", "ts.hour_of_day"):
+        assert at_least_as_coarse("ts.hour_of_day", fine)
+    assert not at_least_as_coarse("ts.month_hour", "ts.hour_of_day")
+    assert at_least_as_coarse("withheld", "ts.hour_of_day")
+    assert at_least_as_coarse("ts.day", "ts.month_hour")
+    with pytest.raises(LadderError):  # no position on the total order: fail closed
+        coarseness("ts.hour_of_day")
+
+
+@pytest.mark.parametrize("rung,floor", [("ts.hour_of_day", "ts.day"), ("ts.day", "ts.hour_of_day"),
+                                       ("ts.month", "ts.hour_of_day"), ("ts.hour_of_day", "ts.week")])
+def test_apply_refuses_incomparable_rung_floor(rung, floor):
+    plan = _plan([("t", "x", rung, None)])
+    plan[0]["floor"] = floor
     with pytest.raises(LadderError):
         apply(plan, {"t": pd.DataFrame({"x": TS}, dtype=str)}, FakeKeys())
