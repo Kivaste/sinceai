@@ -135,6 +135,16 @@ DEMO = r'''
 <section class="card"><p>Purpose checks: {{ policy.get('purposeChecks', []) | join(', ') }}. Each field's reason identifies the check it serves, or why it is withheld.</p><table><tr><th>Field</th><th>PET</th><th>Detail level</th><th>Justification / purpose served</th></tr>
 {% for f in result.get('fieldJustifications', []) %}<tr><td>{{ f.table }}.{{ f.column }}</td><td>{% for pet in result.get('pets', []) if pet.table == f.table and pet.column == f.column %}{{ pet.pet }} {{ pet.params }}<br>{% endfor %}</td><td>{{ f.rung }}</td><td>{{ f.reason }}</td></tr>{% else %}<tr><td colspan="4">No published field justifications available</td></tr>{% endfor %}</table></section>
 {% elif item == 'protected' %}
+{% if released and result.get('contract') and result.get('bindings') %}
+<section class="card"><h2>Released table schemas and value forms</h2>
+<p>From the manifest snapshot verified at run time; the live release still matches those bytes. Schema and form rules only, never row values.</p>
+<p>{{ result.bindings.files | length }} bound files. Row counts: not recorded in the signed manifest.</p>
+{% for file, spec in result.contract.files | dictsort %}<h3>{{ file }} · {{ spec.columns | length }} columns</h3>
+<table><tr><th>Column</th><th>Value form</th><th>Required</th><th>Parameters</th></tr>
+{% for column, rule in spec.columns | dictsort %}<tr><td>{{ column }}</td><td>{{ rule.form }}</td><td>{{ 'yes' if column in spec.required else 'no' }}</td><td><pre>{{ rule.params | tojson(indent=2) }}</pre></td></tr>{% endfor %}</table>{% endfor %}</section>
+<section class="card wide"><h2>File and input bindings</h2><p>Cryptographic digests are bound in the verified manifest; their opaque values are omitted from this content-free view. toolRevision is abbreviated. Check versions are recorded, not inferred.</p>
+<pre>{{ result.bindings | tojson(indent=2) }}</pre></section>
+{% endif %}
 <section class="card"><p>Before is schema detail only, never source rows. After comes from fieldJustifications in the published manifest.</p><table><tr><th>Field</th><th>Before (field level only)</th><th>After</th><th>Reason / trade-off</th></tr>
 {% for f in result.get('fieldJustifications', []) %}<tr><td>{{ f.table }}.{{ f.column }}</td><td>source {{ families.get(f.table ~ '.' ~ f.column, 'field') }}</td><td>{{ f.rung }}{% if f.outputColumn %} → {{ f.outputColumn }}{% endif %}</td><td>{{ f.reason }}</td></tr>{% else %}<tr><td colspan="4">No protected release available</td></tr>{% endfor %}</table></section>
 {% if result.status == 'RELEASED' %}<a class="button" data-route="/rows">Protected release rows (fresh verify required) →</a>{% endif %}
