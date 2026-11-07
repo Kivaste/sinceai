@@ -32,6 +32,11 @@ def _rowmap(final: list[str]) -> pd.DataFrame:
                         dtype=str)
 
 
+def person_k_of(tables, finals, contract, base_ctx, tmp: Path):
+    """``person_k_values`` over in-memory released tables (written to ``tmp``) with row maps from ``finals``."""
+    return _person_k(tables, finals, contract, base_ctx, tmp)
+
+
 def _person_k(tables, finals, contract, base_ctx, tmp: Path):
     for p in tmp.iterdir():
         p.unlink()
