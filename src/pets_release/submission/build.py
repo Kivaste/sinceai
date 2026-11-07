@@ -31,8 +31,9 @@ from pets_release.writer import load_lineage, scoring_dir
 UNSEEN_FILE = "unseen_field_labels.csv"
 CS_REDACTED_FILE = "customer_service_eval_redacted.csv"
 CS_SPANS_FILE = "customer_service_eval_spans.jsonl"
-INDEX_FILE = "submission_index.json"  # in <out>.scoring/: every file digest and the scorecard summaries
-BUNDLE_INDEX_FILE = "bundle_index.json"  # at the bundle root: complete or partial, what is present and missing
+INDEX_FILE = "scoring_index.json"  # in <out>.scoring/: every file digest and the scorecard summaries
+# The one root index of the bundle (the wizard's stage 5 reads it): complete or partial, present and missing parts.
+BUNDLE_INDEX_FILE = "submission_index.json"
 TARGET_SCENARIOS = ("CS-S1", "HEALTH-S1")  # a complete bundle holds a verified release of each (spec #1)
 ROOT_FILES = (CS_REDACTED_FILE, CS_SPANS_FILE, UNSEEN_FILE)
 

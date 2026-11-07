@@ -3,7 +3,7 @@
 Rule: a bundle holds both target scenarios' datasets (CS-S1 customer_service, HEALTH-S1 health) plus the root
 outputs. Without ``--partial`` a missing dataset refuses (exit 1) and nothing that looks like a bundle is written.
 With ``--partial`` the bundle is built, the CLI says PARTIAL on the built line and names the missing datasets, and
-``bundle_index.json`` at the bundle root lists exactly what is present and what is missing.
+``submission_index.json`` at the bundle root lists exactly what is present and what is missing.
 
 Failure rows (trigger -> result):
   CS-S1 release omitted, no --partial         -> exit 1 "REFUSED: incomplete", no out, no scoring, no temp dir
@@ -19,7 +19,7 @@ from pathlib import Path
 
 from sub_helpers import submission
 
-INDEX = "bundle_index.json"
+INDEX = "submission_index.json"  # the one root index the wizard reads (stage 5)
 
 
 def _tree(root: Path) -> dict:
@@ -45,6 +45,7 @@ def test_partial_flag_builds_a_bundle_that_says_partial_and_lists_the_missing_da
     built = [line for line in p.stdout.splitlines() if "SUBMISSION BUILT" in line]
     assert built and all("PARTIAL" in line for line in built)
     assert "missing datasets: customer_service" in p.stdout
+    assert sorted(p.name for p in out.glob("*.json")) == [INDEX]  # exactly one root index
     idx = json.loads((out / INDEX).read_text("utf-8"))
     assert idx["complete"] is False
     assert idx["datasetsMissing"] == ["customer_service"]

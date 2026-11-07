@@ -3,7 +3,7 @@
 Rule: before publication the packager runs the gate's ``text.*`` checks on the exact bytes of
 ``customer_service_eval_redacted.csv`` (stitched per conversation) and ``customer_service_eval_spans.jsonl``.
 A turn with a high-severity hit is masked whole (``[REDACTED]``), keeping the format: same rows, and that turn's
-spans become whole-turn spans, one per label. The masked-turn count goes into ``bundle_index.json``. A successful
+spans become whole-turn spans, one per label. The masked-turn count goes into ``submission_index.json``. A successful
 redactor run is not proof. A hit the packager cannot mask (in the spans file) or a check that cannot run refuses.
 
 Failure rows (trigger -> result):
@@ -50,7 +50,7 @@ def _bundle(kit, rel, out):
              csv.DictReader(io.StringIO((out / "customer_service_eval_redacted.csv").read_text("utf-8"), newline=""))}
     spans = {r["record_id"]: r["spans"] for r in
              map(json.loads, (out / "customer_service_eval_spans.jsonl").read_text("utf-8").splitlines())}
-    idx = json.loads((out / "bundle_index.json").read_text("utf-8"))
+    idx = json.loads((out / "submission_index.json").read_text("utf-8"))
     return p, texts, spans, idx
 
 

@@ -1,4 +1,4 @@
-﻿"""build_submission through its public seam: layout, contents, refusals, determinism.
+"""build_submission through its public seam: layout, contents, refusals, determinism.
 
 Failure rows (trigger -> result):
   out inside the public repo tree / a clone of it      -> refused, nothing written
@@ -69,7 +69,7 @@ def test_layout_is_exactly_the_organiser_layout(world, tmp_path):
     tables = sorted(p.name for p in rel.glob("*.csv"))
     assert tables  # the release has tables
     expected = sorted(
-        ["bundle_index.json", "customer_service_eval_redacted.csv", "customer_service_eval_spans.jsonl",
+        ["customer_service_eval_redacted.csv", "customer_service_eval_spans.jsonl", "submission_index.json",
          "unseen_field_labels.csv", "health/privacy_manifest.json"]
         + [f"health/{t}" for t in tables] + [f"health/rowmap_{t}" for t in tables])
     res = build(world, tmp_path / "pets_submission")
@@ -128,12 +128,12 @@ def test_reruns_are_byte_identical(world, tmp_path):
     a = build(world, tmp_path / "a" / "s")
     b = build(world, tmp_path / "b" / "s")
     assert tree(a.out) == tree(b.out)
-    assert (a.scoring / "submission_index.json").read_bytes() == (b.scoring / "submission_index.json").read_bytes()
+    assert (a.scoring / "scoring_index.json").read_bytes() == (b.scoring / "scoring_index.json").read_bytes()
 
 
 def test_index_lists_every_file_with_its_digest(world, tmp_path):
     res = build(world, tmp_path / "s")
-    idx = json.loads((res.scoring / "submission_index.json").read_text("utf-8"))
+    idx = json.loads((res.scoring / "scoring_index.json").read_text("utf-8"))
     assert idx["files"] == res.files
     assert [d["dataset"] for d in idx["datasets"]] == ["health"]
     sc = idx["datasets"][0]["scorecard"]
