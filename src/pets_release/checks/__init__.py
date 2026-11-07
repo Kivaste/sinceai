@@ -52,6 +52,15 @@ The registry auto-imports every submodule on first ``all_checks()``; names must 
 fails closed: a non-package submodule not starting with ``_`` that registers zero checks, or fails
 to import, raises ``RegistryError`` (the runner refuses). Put helpers in ``_``-prefixed modules; no
 module-level ``CHECKS`` tuples.
+``Outcome.not_applicable()`` is allowed only for a check registered with ``applies_to=(forms...)``
+when the contract declares no column with any of those forms; the runner verifies this, records
+``not_applicable`` with denominator 0 (does not refuse), and records ``error`` for any other use.
+A run where nothing but not_applicable records exist refuses. Writer rules (16): see the
+``runner`` docstring (not_applicable and low-severity hits can never back an export assertion).
+
+Violation ``file``/``column`` name only contract-listed files and columns; any other
+release-derived name is reported as ``unlisted-file#<i>`` / ``unlisted-column#<pos>``.
+
 The runner, not the check, decides status: an exception -> ``error``; ``Outcome.not_run()`` ->
 ``not_run``; denominator 0 on a non-empty release -> ``error``; any high-severity violation ->
 ``fail``; otherwise ``pass`` (low-severity hits stay counted, as residual risk). Nothing outside
