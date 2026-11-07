@@ -26,6 +26,10 @@ BUILTIN_COMPONENTS = frozenset(
 K_COMPONENTS = frozenset({"qi_k_shortfall", "qi_unique_rate"})
 
 
+class PersonKMissing(RuntimeError):
+    """Per-person k was not measured (content-free). The search turns it into a refusal (#112, #118)."""
+
+
 def contract_for(policy, plan: list, k: int | None) -> dict:
     """Minimal release contract for the k checks: released QIs (by output name) and token columns."""
     by_key = {(e["table"], e["column"]): e for e in plan}
@@ -84,7 +88,7 @@ def person_k(prot, plan, policy, source, kspec, k):
         rowmaps = _write(Path(d), prot, contract, source, kspec)
         res = person_k_values(d, contract, _context(source, rowmaps, kspec, k))
     if res is None:  # fail closed (#112): a missing PersonK is never scored, least of all as perfect privacy
-        raise RuntimeError("PersonK missing: per-person k not measured")
+        raise PersonKMissing("PersonK missing: per-person k not measured")
     return res, contract
 
 
@@ -135,7 +139,9 @@ def _homogeneity(policy, by_key, prot, kspec) -> float:
     """Proxy: share of person-table rows whose released-QI class has a single released diagnosis value."""
     t = kspec["person"]["table"]
     df = prot.get(t)
-    if df is None or len(df) == 0:
+    if df is None:  # the search always passes the person table (k_view); its absence is never "no risk"
+        raise RuntimeError("attribute inference: person table missing from the candidate")
+    if len(df) == 0:
         return 0.0
     sens = [output_column(e) for (tt, _), e in sorted(by_key.items())
             if tt == t and e["rung"] != WITHHELD and policy.floors[(tt, e["column"])].family == "icd10"]
