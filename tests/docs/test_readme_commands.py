@@ -28,6 +28,8 @@ ALLOWED_SKIP_REASONS = (
     "environment-setup",
     "sets-secret-placeholder-only",
     "runs-the-whole-test-suite-recursively",
+    # verify --full needs producer context (inputs, key, signed release) from a real run; promote after ticket 21
+    "full-verify-needs-producer-context",
 )
 SUBCOMMANDS = ("run", "verify", "detect", "dashboard", "submission")
 MARKER = re.compile(r"<!--\s*docs-test:\s*(run|skip|pending)\b([^>]*?)-->")
@@ -141,6 +143,9 @@ def test_block(block, tmp_path):
                 assert _subcommand_exists(s), f"run block uses unbuilt subcommand {s}"
         proc = conf.run_cli(*args, env=env)
         _transcript(f"$ {stmt}\nexit={proc.returncode}\n{proc.stdout[:600]}{proc.stderr[:300]}")
+        if args and args[0] == "verify" and "--full" not in args:
+            assert "VERIFIED (limited)" in proc.stdout, f"{stmt!r}: no limited-verification line"
+            assert "VERIFIED (full)" not in proc.stdout
         assert proc.returncode == 0, f"{stmt!r} exited {proc.returncode}: {proc.stderr[:300]}"
 
 

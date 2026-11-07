@@ -80,14 +80,14 @@ Recipient mode needs only the release folder. It re-runs every release-scope che
 VERIFIED (limited): N release-checked, M producer-attested
 ```
 
-<!-- docs-test: pending ticket=17 -->
+<!-- docs-test: run -->
 ```powershell
 pets-release verify ..\sinceai-out\health-s1
 ```
 
 Controller or auditor mode (`--full`) also needs the kit and the key. It re-runs every check in the registry, including the producer-scope ones (original-value survival, reversible hashes, key material, per-person k), the input digests, the tool revision and the signature. Any check that cannot run is a failure.
 
-<!-- docs-test: pending ticket=17 -->
+<!-- docs-test: skip reason=full-verify-needs-producer-context -->
 ```powershell
 pets-release verify --full --kit "$env:PETS_KIT" ..\sinceai-out\health-s1
 ```
