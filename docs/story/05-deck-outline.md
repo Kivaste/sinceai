@@ -63,4 +63,6 @@ Slide 10 evidence handoff (D60): evidence pack not generated (#147 at this build
 Its DPO/Findata-shaped purpose, method/parameters, attacker risk, utility, residual
 risks and reproducibility must come from the authenticated signed manifest only.
 Legal basis and DPIA: to be supplied by the controller. Source rows and keys stay
-in-house; optional LLM drafting is limited to request/schema information.
+in-house. The optional LLM front end drafts a validated purpose-first policy from
+request and schema information only (never row values) for human review; feeding
+the draft into the search is future work.

@@ -110,7 +110,7 @@ and DPIA are “to be supplied by the controller”, not legal approval from a s
 | What remains future work? | Unmerged or unverified optional features, broader sharing scenarios and generalisation beyond templated synthetic data. |
 | How does it fit our platform? | Run the library/CLI inside CI, Airflow or dbt today. The web app is the approval and audit console; self-hosted REST API is future work. |
 | What happens when privacy checks fail? | Exit 0 releases; publish only after successful verification. Exit 1 refuses or fails; exit 2 is bad input/configuration or unknown. Either nonzero exit stops publication. |
-| Does our data leave our infrastructure? | Source rows and keys stay local; only approved protected tables and the content-free signed manifest go to the intended recipient. Optional LLM drafting is request/schema-only. |
+| Does our data leave our infrastructure? | Source rows and keys stay local; only approved protected tables and the content-free signed manifest go to the intended recipient. The optional LLM front end drafts a validated purpose-first policy from request and schema information only (never row values) for human review; feeding the draft into the search is future work. |
 | Why no realistic fake names? | Typed, numbered placeholders make redaction explicit and avoid accidental matches with the shared population. This CS evaluation choice is not a passed CS-S1 release claim. |
 | Where is the CS-S1 release? | Future work under D46; the strict-gate refusal is an honest limitation. No CS-S1 measurements are claimed from the HEALTH-S1 manifest. |
 | Does the evidence pack replace a DPIA? | No. #147 is not generated in this PRE-FILL; legal basis and DPIA remain controller-supplied, even when an evidence pack is available. |
