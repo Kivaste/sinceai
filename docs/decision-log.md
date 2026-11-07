@@ -649,3 +649,47 @@ CS-S1 chain done-report + 4 reviews (23 + #53/#54/#56/#92) -> merge -> #63 -> 25
   4. Merge train 20 (side/video-shot-list, docs-only, planning steer) is running (ses_e49cddb6).
 - **Why:** The D46 fast track; tier-1 fail-closed reviews.
 - **Evidence:** done-reports in sessions ses_e4a27f3f (#117) and ses_e4a0a7cb (#118).
+
+### Sat 15:30-15:42 - #118 merged and closed; #30 approved, train 22; #117 r3; #80 reviews; train 20
+
+- **When:** Sat 15:30-15:42 EET (heartbeat clock)
+- **Decision:**
+  1. #118: 4/4 APPROVE at dbbd7a9. Train 21 merged it at 4ab271e: fast tier exit 0, 2585 passed, 6 skipped; slow tier exit 0, 123 passed. Done-report posted, gate exit 0, closed; worktree and branch removed. #127 now waits only on #106.
+  2. #30 round 4 (2b8ec4b, Opus): the D46 complete bundle = HEALTH-S1 + unseen + D37-gated CS eval exports, with outOfScope CS-S1. Grok and Sol delta reviews both APPROVE. Done-report posted, gate exit 0 locally. Train 22 (ses_e49c2c85) is merging it. #117 was not ready, and pets_submission at 16:00 depends on #30.
+  3. #117 round 2 (0fa353a): Grok APPROVE; Sonnet Spec high (the UI default is `--plan hand`, not the CLI's search default). Round 3 is with Sol (ses_e49cc60d). Grok's non-blocking notes go to a follow-up after the pin.
+  4. #80 (0e0fc58, Opus, core writer): all 4 round-1 reviews dispatched. Under D46 it merges after the recording.
+  5. Train 20 merged side/video-shot-list at 026e3c8 (docs: exit 0, 39 passed, 6 named skips); the branch was deleted on origin.
+- **Why:** D46 order: before the pin, only demo-path work. Close on evidence (D31).
+- **Evidence:** merger sessions ses_e49c94e2 and ses_e49cddb6; review sessions in the issue threads.
+
+### Sat 15:42 - STATUS
+
+#### Blocker -> owner -> next proof
+- #117 (the pin) -> ses_e49cc60d (Sol, round 3) -> UI default = search; red/green; real-kit UI capture with byte equality against the search-default CLI. Then a fast-track delta review, then it merges alone.
+- #132 (rung-form, high, before the pin) -> ses_e49de3e3 (Opus) -> verify-CLI red/green; real-kit run; 4 reviews.
+- #30 (packager) -> train 22 -> merged sha; then the human builds pets_submission from it (D15).
+- #32 (LLM, D47) -> ses_e49db522 (Sol) -> HEALTH-S1 evidence at 5e1bf09; the Mistral run waits on the human's key file. Both axes APPROVE at 5e1bf09. AC3 is open for the human.
+- #110 + #113 + #131 -> ses_e4a02df0 (Opus) -> measured real-kit evidence and the duplicate-key red.
+- #106 (blocks #127) -> ses_e4a0a4c1 (Opus) -> merges after the recording (D46).
+- #116 -> ses_e49e7225 (Sol, round 3) -> overall pass:true smoke with CS-S1 unsupported (D46).
+- #80, #128 -> after the recording. #130 -> ses_e49f49a4 (Sol). #127 -> after #106.
+- Parked until the pin: #124, #125, #126, #129, #133, #134. Deferred (D46): CS-S1 and its follow-ups.
+
+#### Latest exact revision with measured release evidence
+- f98cf626e1b7edf104fecbee1602b2f91cef3a8c (planning-session side lane; artefacts and a runnable commands.ps1 in C:\Users\kivas\AI\sinceai-out\proof-f98cf62\).
+  - Plain search-plan run, measured default and measured `acme`: all RELEASED. Gate 41 pass / 0 n/a / 0 fail; all 18 assertions false; toolRevision = tip.
+  - Both verify tiers pass for all three. Verify (limited) is 37 checked + 4 attested; --full re-ran 41.
+- Scorecards (measured), privacy / utility / composite: 0.1716 / 1 / 0.2752 -> 1 / 0.9283 / 0.9661. Linkage risk 0.5697 -> 0. Attribute inference: not measured.
+- Purpose checks: U2 0.9671, U4 0.7952, U6 0.9462, U7 0.9827, U8 0.9504. There are 3 sacrifices (U4, U6, U8) and 7 residual risks.
+- Person-k: min 5, median 43, below-k 0. This is provisional until #106 merges (test_name is outside k).
+- Integration tip 4ab271e (#118): fast tier exit 0 (2585 passed, 6 skipped), slow tier exit 0 (123 passed); no real-kit run on it.
+
+#### Complete-bundle status
+- At #30 head 2b8ec4b: a COMPLETE D46 bundle was built on the real kit into a throwaway folder (C:\Users\kivas\AI\sinceai-out\29-packager\evidence-2b8ec4bb727acd9f2aa22a3193eb26e315885509). The delivery folder was untouched and nothing was uploaded. The delivery build waits for train 22.
+
+#### Remaining unknowns
+- The pin does not exist yet (#117 round 3).
+- Person-k is provisional until #106 merges.
+- The #32 Mistral run (key file absent); #32 AC3.
+- The default-plan release feeding the packager (#128; the README uses --plan hand until it merges).
+- 5 README-ledger skips (named reasons; not passes).
