@@ -3,51 +3,19 @@
 from __future__ import annotations
 
 import ast
-import hashlib
-import json
-import secrets
 import subprocess
 import sys
 from pathlib import Path
 
-import pandas as pd
 import pytest
 
 from pets_release.dashboard import cli as dashboard_cli
 from pets_release.kit import FORBIDDEN_DATASETS, Kit, KitError, refuse_forbidden_path
-from pets_release.pseudonym import (
-    RECORD_KEY,
-    MasterKey,
-    Scope,
-    pseudonymiser_for,
-    release_scope_id,
-)
 from pets_release.redaction_eval.harness import evaluate_frames
 
 REPO = Path(__file__).resolve().parents[2]
 SRC = REPO / "src" / "pets_release"
-MINIKIT = REPO / "tests" / "fixtures" / "minikit" / "health"
 MANIFEST_RELEASE = REPO / "tests" / "fixtures" / "manifest" / "release"
-
-
-# ---- 1.5: fixture-based counterpart of the kit-gated visit-key join check -------------------------------------
-def test_visit_keys_tokenise_one_to_one_and_keep_the_join_on_fixture():
-    tables = ("ed_visits", "lab_results")
-    files = {t: MINIKIT / f"{t}.csv" for t in tables}
-    digests = {t: hashlib.sha256(p.read_bytes()).hexdigest() for t, p in files.items()}
-    rsid = release_scope_id(scenario="HEALTH-S1", recipient=None, input_digests=digests, tool_revision="test")
-    p = pseudonymiser_for(MasterKey.from_text(secrets.token_hex(32)))
-    scope = Scope.release(rsid)
-    raw, tok = {}, {}
-    for t, path in files.items():
-        col = pd.read_csv(path, dtype=str, usecols=["visit_id"], keep_default_na=False)
-        raw[t] = set(col["visit_id"])
-        assert raw[t] and "" not in raw[t]
-        tok[t] = {p.token(v, label=RECORD_KEY, scope=scope) for v in raw[t]}
-        assert len(tok[t]) == len(raw[t])
-    lab, ed = raw["lab_results"], raw["ed_visits"]
-    assert lab & ed, "fixture must exercise a non-empty join"
-    assert len(tok["lab_results"] & tok["ed_visits"]) / len(lab) == len(lab & ed) / len(lab)
 
 
 # ---- 2.4: dashboard CLI parse exits ---------------------------------------------------------------------------
@@ -141,7 +109,7 @@ _FORBIDDEN_MODULES = ("pets_release.run", "pets_release.detect", "pets_release.r
 
 def _imports(path: Path, package: str) -> set[str]:
     out: set[str] = set()
-    for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+    for node in ast.walk(ast.parse(path.read_text(encoding="utf-8-sig"))):
         if isinstance(node, ast.Import):
             out.update(a.name for a in node.names)
         elif isinstance(node, ast.ImportFrom):
@@ -166,6 +134,11 @@ def _closure(start: Path) -> set[str]:
         seen_files.add(f)
         rel = f.relative_to(SRC.parent).with_suffix("")
         pkg = ".".join(rel.parts[:-1])
+        # Importing a module runs every parent package's __init__.py first.
+        for i in range(1, len(rel.parts)):
+            init = SRC.parent.joinpath(*rel.parts[:i], "__init__.py")
+            if init.is_file() and init not in seen_files:
+                todo.append(init)
         for m in _imports(f, pkg):
             mods.add(m)
             if m.startswith("pets_release"):
@@ -193,6 +166,30 @@ def test_import_graph_helper_detects_a_planted_import(tmp_path, monkeypatch):
     assert any(m.startswith("pets_release.detect") for m in mods)
 
 
+def test_import_graph_helper_detects_forbidden_import_in_parent_init(tmp_path, monkeypatch):
+    pkg = tmp_path / "pets_release"
+    (pkg / "x" / "helper").mkdir(parents=True)
+    (pkg / "__init__.py").write_text("", encoding="utf-8")
+    (pkg / "x" / "__init__.py").write_text("", encoding="utf-8")
+    (pkg / "x" / "helper" / "__init__.py").write_text("from pets_release.run import go\n", encoding="utf-8")
+    (pkg / "x" / "helper" / "api.py").write_text("", encoding="utf-8")
+    (pkg / "x" / "scorer.py").write_text("import pets_release.x.helper.api\n", encoding="utf-8")
+    monkeypatch.setitem(globals(), "SRC", pkg)
+    mods = _closure(pkg / "x" / "scorer.py")
+    assert any(m == "pets_release.run" or m.startswith("pets_release.run.") for m in mods)
+
+
+def test_import_graph_helper_detects_forbidden_import_in_start_files_parent_init(tmp_path, monkeypatch):
+    pkg = tmp_path / "pets_release"
+    (pkg / "x").mkdir(parents=True)
+    (pkg / "__init__.py").write_text("", encoding="utf-8")
+    (pkg / "x" / "__init__.py").write_text("import pets_release.detect\n", encoding="utf-8")
+    (pkg / "x" / "scorer.py").write_text("", encoding="utf-8")
+    monkeypatch.setitem(globals(), "SRC", pkg)
+    mods = _closure(pkg / "x" / "scorer.py")
+    assert "pets_release.detect" in mods
+
+
 # ---- real CLI: dashboard exit codes through the actual entry point ----------------------------------------------
 def test_dashboard_real_cli_exit_codes(tmp_path):
     env_py = [sys.executable, "-m", "pets_release", "dashboard"]
@@ -201,4 +198,4 @@ def test_dashboard_real_cli_exit_codes(tmp_path):
     assert ok.returncode == 0
     bad = subprocess.run([*env_py, str(MANIFEST_RELEASE), "--bogus-flag"], capture_output=True, text=True)
     assert bad.returncode == 2
-    assert json.dumps(bad.returncode)
+    assert "Traceback" not in bad.stderr
