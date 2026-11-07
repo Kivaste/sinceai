@@ -18,21 +18,36 @@ Read `C:\Users\kivas\.config\opencode\skills\implement-spec\SKILL.md` and follow
 - **Integration branch:** `integration/pets-release`, cut from `origin/main` if it does not exist yet. Push it to origin after every merge.
 - **One worktree and one branch per ticket:** branch `ticket/NN-slug`, where NN is the ticket number from tickets.md (not the issue number). Each implementer starts from the integration tip, calls the **`tdd` skill**, merges the integration tip back in before it reports, and pushes its branch to origin.
 - **Merger subagent:** it merges a reviewed, green ticket into the integration branch and **respects Merge after**: a ticket merges only once every ticket named in its Merge after line has merged. Merge after does not block starting work.
-- **Final step:** when every ticket is closed or parked, run the **`code-review` skill** on the integration branch with the reviewers `openai/gpt-6.1-sol` and `claude-agent/sonnet`. Fix the findings in one fresh implementer, then review again.
+- **Final step:** when every ticket is closed or parked, run the **`code-review` skill** on the integration branch with the reviewers `openai/gpt-6.1-sol` and `opencode-go/deepseek-v4.1-flash` (plus `xai/grok-4.7#medium` as a third family, if time allows). Fix the findings in one fresh implementer, then review again.
 - **Skip** any ticket labelled `ready-for-human`.
 
+### Merge and clean up as soon as a ticket is ready (user rule, Sat 02:15)
+
+A ticket is **ready** when both reviews pass on its current head and its tests are green. Do not let ready tickets wait. For each one, immediately:
+
+1. **Merge.** A merger subagent merges the ticket branch into `integration/pets-release`, respecting Merge after. In the integration worktree it then runs the **full** test suite (`pytest -n 8`, with `PYTHONUTF8=1`, `PYTHONDONTWRITEBYTECODE=1`, `TZ=UTC`) on the merged result. If it's green, push. If it's red, don't push: send the failure back to an implementer on that ticket and keep the branch.
+2. **Close** the ticket with its done-report (§3).
+3. **Clean up that ticket only:** `git worktree remove <that ticket's worktree path>` (only if it is clean and its head is reachable from the integration branch; never by glob, never `--force` on a dirty tree), then `git branch -d ticket/NN-slug` (lower-case `-d`, which refuses unmerged branches) and `git push origin --delete ticket/NN-slug`. Log it in the heartbeat note.
+4. **Refill the frontier** right away (§4).
+
+**Integration into `main`:** when #22 (story kit) is closed with the full suite green, and again after the final code-review fixes, merge `integration/pets-release` into `main` with a normal merge commit (never force), run the full suite on `main`, then push. The main worktree is `C:\Users\kivas\AI\sinceai-hackaton`. Pull it with `git pull --ff-only` first, and don't touch its untracked `.scratch/` or `Briefs/`. After the final merge into `main`, delete the integration branch locally and on origin, remove every remaining worktree this run created (one at a time), run `git worktree prune` and `git remote prune origin`, and confirm `git worktree list` shows only the main worktree.
+
 ## 3. Routing (D13)
+
+**Routing changed Sat 02:15 by the user (D13a): Grok was too slow (2–5 min per turn, no code after 12 min while Opus tickets were committing), so `model:grok` tickets now run on Sonnet.**
 
 | Work | Model |
 |---|---|
 | Ticket labelled `model:opus` | `claude-agent/opus` |
-| Ticket labelled `model:grok` | `xai/grok-4.7#high`. If xai errors, use `opencode-go/grok-4.7#high`, then `opencode-go/deepseek-v4-pro#high` |
-| Grunt subtasks (bulk edits, fixture typing, log digging) | `xai/grok-4.7#medium` |
-| Reviewers | `claude-agent/sonnet`, `openai/gpt-6.1-sol`, `opencode-go/deepseek-v4.1-flash` |
+| Ticket labelled `model:grok` | `claude-agent/sonnet`. If Anthropic rate-limits or errors, use `openai/gpt-6.1-sol-fast`, then `xai/grok-4.7#medium` |
+| Grunt subtasks (bulk edits, fixture typing, log digging) | `claude-agent/sonnet` |
+| Ticket reviewers | `openai/gpt-6.1-sol` and `opencode-go/deepseek-v4.1-flash` |
 
 If `claude-agent/opus` is rate-limited or errors, use `openai/gpt-6.1-sol`. Log every model switch in the decision log.
 
-**Reviews:** after each ticket, run **two independent, read-only reviews** from two different families, never the implementer's family. Opus implementer → GPT plus DeepSeek, or Sonnet plus one of those; grok implementer → any two. Give reviewers context pointers only: the ticket issue, the diff range and AGENTS.md. Send any fixes back to an implementer. A new head after fixes gets a **fresh review pass**. You record the reviews in the decision log and in the ticket comment; reviewers do not record their own.
+**Grok tickets already in flight (dispatched 02:01 on `xai/grok-4.7#high`):** when you process this brief, check each one. If its branch has **no commit** yet, interrupt that implementer session (`opencode api post /api/session/<id>/interrupt`), log it, remove only that ticket's worktree, and re-dispatch the ticket on `claude-agent/sonnet` from the integration tip. If it already has commits, let it finish, but re-dispatch it on Sonnet if it has made no new commit for 30 minutes.
+
+**Reviews:** after each ticket, run **two independent, read-only reviews** from two families other than the implementer's. Every implementer is now Claude (Opus or Sonnet), so the two reviewers are **`openai/gpt-6.1-sol` and `opencode-go/deepseek-v4.1-flash`**. Sonnet is the same family as Opus and no longer reviews. Give reviewers context pointers only: the ticket issue, the diff range and AGENTS.md. Send any fixes back to an implementer. A new head after fixes gets a **fresh review pass**. You record the reviews in the decision log and in the ticket comment; reviewers do not record their own.
 
 **Done-report:** before closing a ticket, comment with evidence from a real run (a release folder, gate output or a `pets-eval` scorecard, run with `PYTHONUTF8=1`), plus the head commit and the two review verdicts. Unit tests alone are not enough. Close the ticket as `docs/agents/issue-tracker.md` › Close says: comment first, then `gh issue close`.
 
@@ -59,7 +74,7 @@ If `claude-agent/opus` is rate-limited or errors, use `openai/gpt-6.1-sol`. Log 
   The watchdog checks every 3 minutes. Silence for 25 minutes with no commits counts as a stall, and after that you get nudged or replaced.
 - Append judgment calls to `docs/decision-log.md`: the EET time, the decision, why, and an evidence pointer.
 - **Never block on a human.** Park the ticket instead: `gh issue edit <n> --add-label ready-for-human`, add a comment saying why, and move on.
-- **Commits and pushes:** push ticket branches and `integration/pets-release` to origin. Never force-push `main` and never commit to `main`. The humans merge the integration branch. Before every push, run `git log origin/<base>..HEAD` and confirm every commit belongs to this run.
+- **Commits and pushes:** push ticket branches and `integration/pets-release` to origin. Never force-push anything. The only commits that reach `main` are the integration merges described in §2 ("Integration into `main`"). Before every push, run `git log origin/<base>..HEAD` and confirm every commit belongs to this run.
 - Never send data values to an LLM or a network service. Never commit `Briefs/`, `rowmap_*.csv`, `truth/` or secrets. Commits, comments and logs contain schema names and aggregate metrics only.
 - If your context is getting full, write a heartbeat and a decision-log status entry, so a fresh session can resume from them.
 - When every ticket is closed or parked and the final review is fixed, write a status entry in the decision log, clean up this run's worktrees, and run `heartbeat.ps1 -Phase done -Running none`.
