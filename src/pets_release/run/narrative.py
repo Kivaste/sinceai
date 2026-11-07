@@ -62,13 +62,15 @@ def _lift_text(search) -> str:
 
 
 def build_narrative(*, policy, plan, scenario_ids, suppression: dict, k: int, purpose=None, search=None,
-                    rung_steps=()) -> dict:
+                    rung_steps=(), lift_steps=()) -> dict:
     """``purpose``: the accepted ``run.purpose.PurposeResult``; fills ``measured.utility`` and the sacrifices'
     before/after scores (None leaves them not measured / null).
     ``search`` (ticket 25): {"justifications", "summary", "sacrifices"} from ``run.justify`` and the search
     result; None for the hand plan. Its sacrifice scores are used only when no ``purpose`` result is given.
     ``rung_steps``: adopted enumerated rung sacrifices (``run.pipeline.rung_step``), each recorded as
-    ``rungStep`` on its check's sacrifice entry."""
+    ``rungStep`` on its check's sacrifice entry.
+    ``lift_steps`` (#157 r3): ``run.pipeline.lift_steps`` records, each a sacrifice entry of its own with
+    ``liftStep``, floor = the strict threshold (a recorded cost, never a waiver)."""
     by_key = sorted(plan, key=lambda e: (e["table"], e["column"]))
     inventory = [{"dataset": policy.dataset, "table": e["table"], "column": e["column"],
                   "role": _role(policy, e["table"], e["column"]),
@@ -138,6 +140,20 @@ def build_narrative(*, policy, plan, scenario_ids, suppression: dict, k: int, pu
         if "rungStep" in entry:
             raise ValueError("two rung steps for one sacrifice")
         entry["rungStep"] = {k: v for k, v in st.items() if k != "check"}
+    from pets_release.run.purpose import THRESHOLD
+
+    for ls in lift_steps:  # #157 r3: a record of a purpose cost above the strict floor; never a waiver
+        if ls["check"] in by_check:
+            raise ValueError("lift step for a check that already has a sacrifice entry")
+        sacrifices.append({"check": ls["check"], "floor": THRESHOLD,
+                           "before": scored.get(ls["check"], (None, None))[0],
+                           "after": scored.get(ls["check"], (None, None))[1],
+                           "reason": (f"trade-off, not a waiver: {ls['table']}.{ls['column']} coarsened to hold the "
+                                      f"attribute-lift bound {ls['maxLift']}; the strict floor {THRESHOLD} is "
+                                      f"unchanged; liftStep.atFrom is the check at the finer params"),
+                           "liftStep": {k: v for k, v in ls.items() if k != "check"}})
+        by_check[ls["check"]] = sacrifices[-1]
+    sacrifices.sort(key=lambda s: s["check"])
     checks = ", ".join(policy.purpose_checks)
     fit = [{"scenario": policy.scenario,
             "reason": f"built and gated for {policy.scenario} purpose checks {checks}; per-person k >= {k}"}]

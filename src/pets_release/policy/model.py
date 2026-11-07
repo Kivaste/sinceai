@@ -174,7 +174,15 @@ class ScenarioPolicy:
             if not isinstance(al["attributes"], list) or not al["attributes"]:
                 raise PolicyError("attribute lift bound needs attributes")
             for a in al["attributes"]:
-                _exact(a, {"table", "column", "max_lift"}, "attribute lift attribute")
+                _exact(a, {"table", "column", "max_lift"}, "attribute lift attribute", {"tradeoff"})
+                to = a.get("tradeoff")
+                if to is not None:  # #157 r3: the purpose cost of holding the bound, recorded (never a waiver)
+                    _exact(to, {"check", "rung", "from_params"}, "attribute lift tradeoff")
+                    fl = self.floors.get((a["table"], a["column"]))
+                    if a["max_lift"] is None or to["check"] not in self.purpose_checks or fl is None or \
+                            to["rung"] not in LADDERS[fl.family] or not isinstance(to["from_params"], dict):
+                        raise PolicyError("attribute lift tradeoff needs a bound, a purpose check, a ladder rung "
+                                          "and from_params")
                 if (a["table"], a["column"]) not in cols:
                     raise PolicyError("attribute lift names an unknown column")
                 ml = a["max_lift"]  # None: measured and disclosed, not bounded (D64 option b)

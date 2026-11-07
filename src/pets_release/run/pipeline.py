@@ -178,6 +178,54 @@ def search_step_at_from(policy, fields: dict, rs: dict, *, source, master, scope
     return k_at_from(sup)
 
 
+LIFT_CAUSE = "attribute-lift-bound"
+
+
+def lift_steps(policy, plan, released: dict, *, source, master, scope_id, recipient, root) -> list:
+    """#157 r3: the purpose cost of holding an attribute-lift bound, as manifest ``liftStep`` records (aggregates and
+    schema names only). For each bounded attribute with a policy ``tradeoff`` whose plan entry holds the tradeoff
+    rung at params other than ``from_params``: re-protect the plan with ``from_params`` (the counterfactual
+    release, measured only, never published), re-run the purpose evaluation and the lift there, and the lift on
+    ``released``. A record only: it never waives a check or lowers a floor. One function for ``run`` and
+    ``verify --full``. Fails closed (RunError) when the counterfactual does not exceed the bound or the release
+    does not hold it."""
+    import dataclasses
+
+    from pets_release.ladders import output_column
+    from pets_release.minimiser import attr_lift as AL
+
+    al = policy.attribute_lift
+    out = []
+    for a in (al or {}).get("attributes", []):
+        to = a.get("tradeoff")
+        if to is None:
+            continue
+        key = (a["table"], a["column"])
+        e = next(x for x in plan if (x["table"], x["column"]) == key)
+        if e["rung"] != to["rung"] or e["params"] == to["from_params"]:
+            continue
+        alt = [dict(x, params=dict(to["from_params"])) if (x["table"], x["column"]) == key else x for x in plan]
+        # the counterfactual sits below the policy's minimum by construction: measured under a copy without it
+        cf = dataclasses.replace(policy, param_minimums={k: v for k, v in policy.param_minimums.items() if k != key})
+        try:
+            rel_from, *_ = protect(alt, policy=cf, source=source, master=master, scope_id=scope_id, recipient=recipient)
+            res = evaluate_purpose(policy, source, rel_from, root=root)
+        except RunError:
+            raise
+        except Exception:  # noqa: BLE001 - the message could carry values
+            raise RunError("lift step: counterfactual not measurable") from None
+        score = next((t["after"] for t in res.tasks if t["task"] == to["check"] and t["status"] == "ok"), None)
+        qcols = AL.released_qcols(policy, plan, key[0])
+        lf = AL.measure(rel_from[key[0]], qcols, output_column(alt[plan.index(e)]))["lift"]
+        lt = AL.measure(released[key[0]], qcols, output_column(e))["lift"]
+        if not isinstance(score, float) or lf is None or lt is None or not lf > a["max_lift"] >= lt:
+            raise RunError("lift step: the counterfactual does not exceed the bound or the release does not hold it")
+        out.append({"check": to["check"], "cause": LIFT_CAUSE, "table": key[0], "column": key[1], "rung": e["rung"],
+                    "fromParams": dict(to["from_params"]), "toParams": dict(e["params"]), "maxLift": a["max_lift"],
+                    "atFrom": {"score": score, "lift": lf}, "atTo": {"lift": lt}})
+    return out
+
+
 def _plan_core(plan) -> list:
     return sorted((e["table"], e["column"], e["rung"], canonical_bytes(e["params"]), e["floor"]) for e in plan)
 
@@ -309,6 +357,8 @@ def run_release(*, kit, scenario: dict, created: str, key_text: str, out, plan_n
             (scoring_dir(out) / SEARCH_LOG).write_bytes(search_log_bytes(found.log))
         raise RunRefused("purpose checks failed on the final release: " + ", ".join(purpose.reasons))
 
+    lsteps = lift_steps(policy, plan, ordered, source=source, master=master, scope_id=rsid, recipient=recipient,
+                        root=kit.root)
     search_info, extra = None, {}
     if found is not None:
         try:
@@ -320,7 +370,7 @@ def run_release(*, kit, scenario: dict, created: str, key_text: str, out, plan_n
         extra = {SEARCH_LOG: search_log_bytes(found.log)}
     narrative = build_narrative(policy=policy, plan=plan, scenario_ids=[s["id"] for s in kit.scenarios()],
                                 suppression=sup, k=contract["k"], purpose=purpose, search=search_info,
-                                rung_steps=steps)
+                                rung_steps=steps, lift_steps=lsteps)
     cand = Candidate(
         scenario=scenario_id, recipient=recipient, tables=tuple(tables), contract=contract,
         tool_revision=tool_revision, created=created, narrative=narrative,

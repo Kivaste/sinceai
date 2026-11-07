@@ -15,9 +15,12 @@ Phases, each in fixed (table, column) order; linked columns move as one unit:
 
 Feasibility (#128): a candidate that releases any column of a table but not that table's record key as its
 ``id.pseudonym`` token is never evaluated or adopted, and the final plan is refused if it does.
-Feasibility (D64, #157): with a policy ``attribute_lift`` bound, a move that pushes a bounded attribute's lift
-(``attr_lift``, #139's estimator) over the bound is never adopted, and the final plan is refused if any released
-bounded attribute is over it (or unmeasured) after suppression. Neither the bound nor a purpose floor is relaxed.
+Feasibility (D64, #157): for each attribute with a policy ``attribute_lift`` bound (``attr_lift``, a producer
+population estimator), every adoption path applies one repair rule (``lift_regress``): a candidate whose bounded
+lift is unmeasured is rejected; an attribute under its bound must stay at or under it; an attribute over its bound
+must not rise (a move that lowers it is allowed, so the search can repair it). The final plan is refused if any
+released bounded attribute is over its bound (or unmeasured) after suppression. Attributes without a bound are
+measured and disclosed only. Neither a bound nor a purpose floor is relaxed.
 
 Acceptance: every purpose check status ``ok`` with score >= 0.9. A check below 0.9 is waived only if it is an
 enumerated sacrifice, scored (status ok) at or above its floor score, and the candidate differs from the
@@ -386,9 +389,7 @@ class _Search:
                 continue
             if t not in prot:
                 raise MinimiserRefused(f"attribute lift: table {t} missing from the candidate")
-            qcols = [output_column(by_key[(q["table"], q["column"])]) for q in self.p.qi
-                     if q["table"] == t and not q.get("join_via") and by_key[(q["table"], q["column"])]["rung"] != WITHHELD]
-            out[f"{t}.{c}"] = AL.measure(prot[t], qcols, output_column(e))
+            out[f"{t}.{c}"] = AL.measure(prot[t], AL.released_qcols(self.p, plan, t), output_column(e))
         return out
 
     def bounds(self) -> dict:

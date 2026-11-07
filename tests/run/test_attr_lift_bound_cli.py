@@ -10,6 +10,9 @@ purpose floors stay enforced. Rows, trigger -> result:
       states the bound (residual note) and the final step logs the measured lift
   same, a move that would push a plan under the bound over it (measurement stubbed)  -> the move is rejected
       with reason "attribute lift above bound", the run still releases
+  minikit, stays by triage plus a QI-class offset (search lands on 30-minute bins)  -> exit 0; one H-U2 sacrifice
+      entry with ``liftStep`` (floor = 0.9, a record, never a waiver); verify --full re-derives it; a tampered or
+      dropped figure differs; a planted lower floor is rejected by the manifest validator
 Deleting the final bound check makes the first row release (exit 0); deleting the candidate check adopts the move
 of the third row: each test fails.
 """
@@ -59,6 +62,89 @@ def own_sensitive(folder):
     for c in ("icd10_primary", "los_minutes"):
         df[c] = own[c]
     df.to_csv(p, index=False, encoding="utf-8", lineterminator="\n")
+
+
+def stay_by_group(folder):
+    """grouped_qis, then each stay is 30 x its triage level plus an offset (9, 15 or 21 minutes) fixed by the
+    visit's QI class (person group and arrival month): 10-minute bins reveal the offset from the QIs (lift over the los bound), 30-minute bins hide
+    it (under), and H-U2 (stay by triage) still passes at 30-minute bins. Synthetic rows only."""
+    import pandas as pd
+
+    from run_helpers import GROUPS
+
+    grouped_qis(folder)
+    p = folder / "ed_visits.csv"
+    df = pd.read_csv(p, dtype=str, keep_default_na=False, na_filter=False)
+    persons = sorted(set(df["patient_hetu"]))
+    group = {h: i % GROUPS for i, h in enumerate(persons)}
+    offset = (9, 15, 21)  # one per 10-minute bin of a 30-minute bin, by QI class (group, arrival month)
+    df["los_minutes"] = [str(30 * (int(t) if t.isdigit() else 1) + offset[(group[h] + int(a[5:7])) % 3])
+                         for t, h, a in zip(df["triage"], df["patient_hetu"], df["arrival_ts"])]
+    df.to_csv(p, index=False, encoding="utf-8", lineterminator="\n")
+
+
+def test_the_lift_bound_cost_is_recorded_not_waived(tmp_path):
+    """#157 r3: the CLI search release that holds the los bound with 30-minute bins records the H-U2 cost as a
+    sacrifice ``liftStep`` (floor = the strict threshold, H-U2 still >= it), with H-U2 and the lift at the 10-minute
+    bins it replaced; verify --full re-derives it, and a tampered figure fails verify --full."""
+    from run_helpers import TEST_KEY
+
+    from pets_release.manifest import canonical_bytes
+
+    kit = build_kit(tmp_path / "kit", edit=stay_by_group)
+    out = tmp_path / "rel"
+    p = _run(kit, out)
+    assert p.returncode == 0, p.stdout + p.stderr
+    m = json.loads((out / "privacy_manifest.json").read_text(encoding="utf-8"))
+    hu2 = [s for s in m["sacrifices"] if s["check"] == "H-U2"]
+    assert len(hu2) == 1, [s["check"] for s in m["sacrifices"]]
+    s = hu2[0]
+    st = s["liftStep"]
+    assert s["floor"] == 0.9 and s["after"] >= 0.9 and "rungStep" not in s
+    assert (st["cause"], st["table"], st["column"], st["rung"]) == ("attribute-lift-bound", "ed_visits",
+                                                                    "los_minutes", "num.bin")
+    assert st["fromParams"] == {"width": 10} and st["toParams"] == {"width": 30} and st["maxLift"] == MAX_LIFT
+    assert st["atFrom"]["lift"] > MAX_LIFT >= st["atTo"]["lift"]
+    assert isinstance(st["atFrom"]["score"], float)
+    kv = ("verify", "--full", "--kit", str(kit), str(out))
+    v = cli(*kv, extra={"PETS_HMAC_KEY": TEST_KEY})
+    assert v.returncode == 0, v.stdout + v.stderr
+
+    # the production re-derive on its own (signature aside): equal as signed, differs once a figure is tampered
+    import copy
+
+    from pets_release.kit import Kit
+    from pets_release.manifest.validate import validate_manifest
+    from pets_release.pseudonym import MasterKey
+    from pets_release.verify.core import lift_step_problems
+
+    k, mk = Kit(kit), MasterKey.from_text(TEST_KEY)
+    source = k.load_dataset("health")
+    assert lift_step_problems(m, out, k, source, mk) == []
+    for path, delta in ((("atFrom", "score"), -0.01), (("atFrom", "lift"), 0.5), (("atTo", "lift"), -0.1)):
+        t = copy.deepcopy(m)
+        rec = next(x for x in t["sacrifices"] if x["check"] == "H-U2")["liftStep"]
+        rec[path[0]][path[1]] = round(rec[path[0]][path[1]] + delta, 6)
+        assert lift_step_problems(t, out, k, source, mk) == ["liftStep: re-derive differs from the manifest"], path
+    dropped = copy.deepcopy(m)
+    dropped["sacrifices"] = [x for x in dropped["sacrifices"] if x["check"] != "H-U2"]
+    assert lift_step_problems(dropped, out, k, source, mk) == ["liftStep: re-derive differs from the manifest"]
+
+    # a planted record that would lower the floor (or not stay strict) is rejected by the manifest validator
+    for field, value, code in (("floor", 0.85, "lift-step-floor-not-strict"),
+                               ("after", 0.85, "lift-step-check-not-strict")):
+        t = copy.deepcopy(m)
+        next(x for x in t["sacrifices"] if x["check"] == "H-U2")[field] = value
+        assert any(e.endswith(code) for e in validate_manifest(t)), (field, validate_manifest(t))
+    t = copy.deepcopy(m)
+    next(x for x in t["sacrifices"] if x["check"] == "H-U2")["liftStep"]["extra"] = 1
+    assert validate_manifest(t)  # closed record
+
+    # tamper one recorded figure in the file, re-sign nothing: the CLI --full refuses it
+    st["atFrom"]["score"] = round(st["atFrom"]["score"] - 0.01, 6)
+    (out / "privacy_manifest.json").write_bytes(canonical_bytes(m))
+    v = cli(*kv, extra={"PETS_HMAC_KEY": TEST_KEY})
+    assert v.returncode != 0 and "VERIFY FAILED" in v.stdout, v.stdout + v.stderr
 
 
 def test_lift_over_the_bound_refuses(tmp_path):

@@ -263,6 +263,45 @@ def rung_step_problems(manifest: dict, source: dict, master_key) -> list[str]:
     return out
 
 
+def lift_step_problems(manifest: dict, release: Path, kit: Kit, source: dict, master_key) -> list[str]:
+    """#157 r3, producer-scope re-derive (``--full``): rebuild the released plan from the manifest's rungs (search
+    plan) or the hand plan, run the run's own ``lift_steps`` on the release folder, and require exactly the signed
+    ``liftStep`` records (none missing, none extra, every figure equal). Unknown state fails closed. Content-free."""
+    from pets_release.minimiser import rebuild_plan
+    from pets_release.minimiser.kit import params_from_plan
+    from pets_release.policy import get_policy, hand_plan
+    from pets_release.run.pipeline import lift_steps
+
+    signed = sorted(({"check": s["check"], **s["liftStep"]} for s in manifest["sacrifices"] if "liftStep" in s),
+                    key=lambda r: r["check"])
+    try:
+        scenario = manifest["release"]["scenario"]
+        policy = get_policy(scenario)
+        if policy.attribute_lift is None and not signed:
+            return []
+        fj = {(f["table"], f["column"]): f for f in manifest["fieldJustifications"]}
+        sources = {f["source"] for f in fj.values()}
+        if sources == {"search"} and set(fj) == set(policy.floors):
+            plan = rebuild_plan(policy, params_from_plan(hand_plan(scenario)),
+                                {k: (f["rung"], f["floor"]) for k, f in fj.items()})
+        elif sources == {"hand"}:
+            plan = hand_plan(scenario)
+        else:
+            return ["liftStep: not reproducible (not a hand or search plan)"]
+        released = _released_tables(release, manifest)
+    except Exception:  # noqa: BLE001 - unknown state fails closed, content-free
+        return ["liftStep: not reproducible (policy, plan or released tables unavailable)"]
+    try:
+        fresh = lift_steps(policy, plan, released, source=source, master=master_key,
+                           scope_id=manifest["release"]["releaseScopeId"], recipient=manifest["release"]["recipient"],
+                           root=kit.root)
+    except Exception:  # noqa: BLE001 - the message could carry values
+        return ["liftStep: re-derive failed"]
+    if sorted(fresh, key=lambda r: r["check"]) != signed:
+        return ["liftStep: re-derive differs from the manifest"]
+    return []
+
+
 def verify_release(release_dir, *, full: bool = False, kit=None, master_key=None, checks=None,
                    context: dict | None = None, purpose=None) -> VerifyReport:
     """Verify ``release_dir``. Recipient mode by default; ``full=True`` needs ``kit`` and ``master_key``.
@@ -362,6 +401,7 @@ def verify_release(release_dir, *, full: bool = False, kit=None, master_key=None
         else:
             problems += (purpose or purpose_problems)(manifest, release, kit, run_ctx["source"])
             problems += rung_step_problems(manifest, run_ctx["source"], master_key)
+            problems += lift_step_problems(manifest, release, kit, run_ctx["source"], master_key)
     if result.refused and not problems:  # the runner's own verdict is a floor, never overridden
         problems.append("checks: runner refused")
 

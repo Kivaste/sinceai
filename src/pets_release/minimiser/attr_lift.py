@@ -28,6 +28,8 @@ import re
 
 import pandas as pd
 
+from pets_release.ladders import WITHHELD, output_column
+
 _MASKED = re.compile(r"^[\*x#?\-_]*$", re.IGNORECASE)  # the red team's blank rule (masked cells are blank)
 
 
@@ -44,6 +46,14 @@ def _mode(values) -> str | None:
         if v:
             counts[v] = counts.get(v, 0) + 1
     return min(counts, key=lambda v: (-counts[v], v)) if counts else None
+
+
+def released_qcols(policy, plan, table: str) -> list:
+    """Output names of the policy QIs of ``table`` (not join-derived) that ``plan`` releases: what the attacker
+    knows. One rule for the search and the run's recorded lift step."""
+    by_key = {(e["table"], e["column"]): e for e in plan}
+    return [output_column(by_key[(q["table"], q["column"])]) for q in policy.qi
+            if q["table"] == table and not q.get("join_via") and by_key[(q["table"], q["column"])]["rung"] != WITHHELD]
 
 
 def measure(df: pd.DataFrame, qcols: list, column: str) -> dict:

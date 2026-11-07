@@ -93,7 +93,10 @@ LIFT_NOTE = (f"D64: lift = accuracy guessing from the QIs / base rate. los_minut
              f"sampled attacker, whose rates are the attribute-inference-redteam entries.")
 ATTRIBUTE_LIFT = {"attacker": LIFT_ATTACKER, "reason": LIFT_REASON,
                   "attributes": [{"table": "ed_visits", "column": "icd10_primary", "max_lift": None},
-                                 {"table": "ed_visits", "column": "los_minutes", "max_lift": LOS_MAX_LIFT}]}
+                                 {"table": "ed_visits", "column": "los_minutes", "max_lift": LOS_MAX_LIFT,
+                                  # #157 r3: recorded as a manifest sacrifice liftStep (H-U2 before/after the
+                                  # wider bins); a record only, H-U2's 0.9 floor is unchanged
+                                  "tradeoff": {"check": "H-U2", "rung": "num.bin", "from_params": {"width": 10}}}]}
 # clinical_notes.author_name is a staff direct identifier (floor withheld)
 DIRECT = tuple(sorted(set(DIRECT) | {("clinical_notes", "author_name")}))
 
