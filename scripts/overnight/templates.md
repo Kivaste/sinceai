@@ -98,6 +98,19 @@ Write the full backticked command on every Red/Green line; repeat the command, n
 - none      (or list every skipped / errored / not-run required check — these block the close)
 ```
 
+Every non-`N/A: <why>` **Outcome** requires records under **Artefacts**, not just a path or a green sentence:
+one or more immediate release directories with `privacy_manifest.json` (`bindings.toolRevision` = full Head),
+their paired `<release-directory>.scoring/gate_report.json`, and revision-bound limited verify exit records
+(also full where claimed). Gate check names/versions and records must agree with each manifest; missing, malformed,
+failed, errored or not-run records block closing. Release identity is checked against the input-bound scope ID,
+canonical contract digest and protected-file digests. Output lists pass/not_applicable/fail/error counts and
+names every not_applicable check (not counted as a pass). Log filenames are not identity: each log has one
+`revision=<Head>` header, with `RELEASED: <release-directory> (...)` binding subsequent `verify exit=0` /
+`verify-full exit=0` records to that release (shared logs may separate releases with `== <release-directory>`).
+Python 3.10+ is required by the close gate. Docs/test-only outcomes may start with `N/A: <why>`, but must not
+also claim gate/verify outcomes. Embedded exemptions and keyword-free outcomes cannot skip validation.
+Keep historical reds, mutation reds, and `No red observed: <why>` distinct; never relabel one as another.
+
 ## 5. Merger (merge train, D28/D30)
 
 ```

@@ -63,13 +63,30 @@ if (-not $docsOnly) {
 # Affected tests must have run and passed.
 Need ($b -match '(?mi)affected-tests\.ps1[^\r\n]*(?:\u2192|->)\s*exit\s*0') 'Affected tests: no affected-tests.ps1 run with exit 0'
 
-# Real-run evidence: revision == head and an artefact path that exists, unless explicitly N/A with a reason.
+# Real-run evidence: release claims require machine records, not just prose.
 $rev = Field 'Revision'; $art = Field 'Artefacts'; $outc = Field 'Outcome'
-if ($outc -and $outc -match '^N/A:\s*\S') { }
+$notApplicable = $outc -and $outc -match '^N/A:\s*\S'
+if ($notApplicable) {
+  $claimsOutcome = $outc -match '(?i)\b(?:gate|verify)(?:\s*(?:\((?:limited|full)\)|--full|limited|full))?[\s:=]+(?:\d|exit\b|pass(?:ed)?\b|fail(?:ed)?\b|error\b|success(?:ful(?:ly)?)?\b)'
+  Need (-not $claimsOutcome) 'Real-run evidence: N/A must not claim gate/verify outcomes'
+}
 else {
   Need ($rev -and $head -and $rev.StartsWith($head.Substring(0, [Math]::Min(12, $head.Length)))) 'Real-run evidence: Revision missing or not the reported Head'
-  Need ($art -and (Test-Path -LiteralPath $art)) "Real-run evidence: Artefacts path missing or not found on disk ($art)"
+  Need ($art -and (Test-Path -LiteralPath $art -PathType Container)) "Real-run evidence: Artefacts folder missing or not found on disk ($art)"
   Need ($outc -and $outc -notmatch '(?i)\b(skipp|error|not run|unknown|timeout)') 'Real-run evidence: Outcome missing or reports skipped/errored/not-run checks'
+  if ($art -and (Test-Path -LiteralPath $art -PathType Container)) {
+    try {
+      $evidenceOutput = @(& python (Join-Path $PSScriptRoot 'check-release-evidence.py') $art $head $outc 2>$null)
+      $evidenceExit = $LASTEXITCODE
+      if ($evidenceExit -ne 0) {
+        Need $false 'Real-run evidence: machine-record validation did not pass'
+      }
+      foreach ($line in $evidenceOutput) {
+        if ($line -like 'Real-run evidence:*') { $problems.Add([string]$line) }
+        elseif (-not $Quiet) { [string]$line }
+      }
+    } catch { Need $false 'Real-run evidence: machine-record validation could not run' }
+  }
 }
 
 # Reviews: a Standards APPROVE and a Spec APPROVE on this head, from families other than the implementer's.
