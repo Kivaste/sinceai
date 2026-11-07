@@ -15,7 +15,7 @@ from pets_release.manifest import loads_strict, validate_manifest_file
 from pets_release.offline import child_env
 from pets_release.policy import get_policy
 from pets_release.run.context import SCENARIO_SPEC
-from pets_release.ui.rows import protected_rows
+from pets_release.ui.rows import protected_rows, verified_snapshot
 from pets_release.ui.targets import target_rows
 
 SCENARIOS = ("HEALTH-S1", "CS-S1")
@@ -33,6 +33,42 @@ SCENARIO_DETAILS = {
 def scenarios():
     return [{**get_policy(name).to_json(), **SCENARIO_DETAILS[name], "recipient": RECIPIENTS[name],
              "supported": name in SCENARIO_SPEC} for name in SCENARIOS]
+
+
+def gate_summary(checks):
+    """Only ``pass`` is a pass. ``not_applicable`` is its own number; anything else is neither."""
+    statuses = [c["status"] for c in checks]
+    return {"passed": statuses.count("pass"), "notApplicable": statuses.count("not_applicable"),
+            "total": len(statuses)}
+
+
+def person_k(manifest):
+    """Person-k from the verified manifest only (never the unsigned scoring sidecar).
+
+    ``belowK``/``persons`` come from the producer.person-k record that ``verify --full`` re-ran;
+    ``minK`` only when the manifest's privacy block measured it, else None (not measured).
+    """
+    record = next((c for c in manifest["gate"]["checks"] if c["check"] == "producer.person-k"), None)
+    if record is None:
+        return None
+    components = manifest["measured"].get("privacy", {}).get("components", [])
+    minimum = next((c["after"] for c in components if c["component"] == "person_k.min"), None)
+    return {"belowK": record["hits"] if record["status"] in ("pass", "fail") else None,
+            "persons": record["denominator"]["n"], "minK": minimum, "k": manifest["contract"]["k"]}
+
+
+def proof_summary(scenario, manifest):
+    summary = {
+        "gate": gate_summary(manifest["gate"]["checks"]),
+        "exportAssertions": manifest["exportAssertions"],
+        "assertionEvidence": manifest["assertionEvidence"],
+        "measured": manifest["measured"], "sacrifices": manifest["sacrifices"],
+        "residualRisks": manifest["residualRisks"],
+        **{name: manifest[name] for name in ("inventory", "pets", "fieldJustifications", "fitFor", "notFitFor")},
+        "personK": person_k(manifest),
+    }
+    summary["targets"] = target_rows(scenario, manifest, summary["personK"])
+    return summary
 
 
 class Jobs:
@@ -97,27 +133,15 @@ class Jobs:
             if validate_manifest_file(release):
                 self.update(status="FAILED")
                 return
-            manifest = loads_strict((release / "privacy_manifest.json").read_bytes())
-            checks = manifest["gate"]["checks"]
-            summary = {
-                "gate": {"passed": sum(c["status"] in ("pass", "not_applicable") for c in checks),
-                         "total": len(checks)},
-                "exportAssertions": manifest["exportAssertions"],
-                "assertionEvidence": manifest["assertionEvidence"],
-                "measured": manifest["measured"], "sacrifices": manifest["sacrifices"],
-                "residualRisks": manifest["residualRisks"],
-                **{name: manifest[name] for name in ("inventory", "pets", "fieldJustifications", "fitFor", "notFitFor")},
-            }
-            suppression = release.with_name(release.name + ".scoring") / "suppression_report.json"
-            if suppression.is_file():
-                summary["personK"] = loads_strict(suppression.read_bytes()).get("personKAfter")
-            else:
-                summary["personK"] = None
-            summary["targets"] = target_rows(scenario, manifest, summary["personK"])
-            self.update(**summary)
+            manifest_bytes = (release / "privacy_manifest.json").read_bytes()
             limited = self.command("verify (limited)", ["verify", release])
             full = self.command("verify --full", ["verify", "--full", "--kit", args.kit, release])
-            self.update(status="RELEASED" if limited == full == 0 else "FAILED")
+            # Proof is published only together with RELEASED, and only from the manifest bytes
+            # both tiers just verified. Any failure or change publishes no gate, scores or targets.
+            if limited != 0 or full != 0 or (release / "privacy_manifest.json").read_bytes() != manifest_bytes:
+                self.update(status="FAILED")
+                return
+            self.update(status="RELEASED", **proof_summary(scenario, loads_strict(manifest_bytes)))
         except Exception:  # noqa: BLE001 - unknown is failure; never reflect child output or values
             # Child output, exception strings and paths can contain values or key material.
             self.update(status="FAILED")
@@ -127,9 +151,9 @@ class Jobs:
             if self.state["status"] != "RELEASED":
                 return None
             release = self.release
-        if validate_manifest_file(release):
-            return None
-        manifest = loads_strict((release / "privacy_manifest.json").read_bytes())
+        # Render only the manifest bytes that passed verify --full with the server key just now.
+        manifest_bytes, _ = verified_snapshot(release, self.root, self.env, self.args.kit)
+        manifest = loads_strict(manifest_bytes)
         # The standalone dashboard displays bound digests. Here omit those opaque values so the
         # entire HTTP HTML body can pass the same production identifier scan without exemptions.
         for field in ("files", "inputs", "lexiconDigests"):
@@ -146,7 +170,7 @@ class Jobs:
             if self.state["status"] != "RELEASED":
                 raise ValueError("No verified release")
             release = self.release
-        return protected_rows(release, self.root, self.env, name=name,
+        return protected_rows(release, self.root, self.env, self.args.kit, name=name,
                               limit=self.args.preview_rows if limit is None else limit)
 
     @staticmethod

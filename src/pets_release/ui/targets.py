@@ -13,17 +13,23 @@ def target_rows(scenario, manifest=None, person_k=None):
     records = {c["check"]: c for c in manifest.get("gate", {}).get("checks", [])}
     rows = []
 
-    def add(name, threshold, value=None, passes=None):
-        status = "not measured" if value is None or passes is None else ("met" if passes else "not met")
+    def add(name, threshold, value=None, passes=None, status=None):
+        if status is None:
+            status = "not measured" if value is None or passes is None else ("met" if passes else "not met")
         rows.append({"name": name, "threshold": threshold, "measured": value, "status": status})
 
     for target in policy.privacy_targets:
         kind = target["kind"]
         if kind == "k_anonymity":
-            value = (person_k or {}).get("minK")
-            below = (person_k or {}).get("belowK")
-            add(target["id"], f">= {target['k']}", value,
-                None if value is None or below is None else value >= target["k"] and below == 0)
+            # person_k comes only from the verified manifest (ui.jobs.person_k).
+            pk = person_k or {}
+            below, minimum, k = pk.get("belowK"), pk.get("minK"), pk.get("k")
+            if below is None or k is None or k < target["k"]:
+                add(target["id"], f">= {target['k']}")
+            elif minimum is not None:
+                add(target["id"], f">= {target['k']}", minimum, minimum >= target["k"] and below == 0)
+            else:
+                add(target["id"], f">= {target['k']}", f"{below} persons below k={k}", below == 0)
         elif kind == "text_recall":
             labels = {r["label"]: r for r in measured.get("redaction", {}).get("labels", [])}
             for label in target["labels"]:
@@ -33,9 +39,14 @@ def target_rows(scenario, manifest=None, person_k=None):
                     None if value is None else value >= target["min"])
         elif kind == "health_in_text":
             record = records.get("text.health", {})
-            value = record.get("hits") if record.get("status") == "pass" else None
-            add(target["id"], f"hits <= {target['max_hits']}", value,
-                None if value is None else value <= target["max_hits"])
+            threshold = f"hits <= {target['max_hits']}"
+            if record.get("status") == "not_applicable":
+                add(target["id"], threshold, status="not applicable")
+            else:
+                # A failed check is measured: show its hits as not met. error/not_run stay unknown.
+                value = record.get("hits") if record.get("status") in ("pass", "fail") else None
+                add(target["id"], threshold, value,
+                    None if value is None else record["status"] == "pass" and value <= target["max_hits"])
         elif kind == "timestamp_floor":
             timestamps = [f for key, f in fields.items() if policy.floors[key].family == "timestamp"
                           and f["decision"] == "released"]
@@ -51,10 +62,18 @@ def target_rows(scenario, manifest=None, person_k=None):
         task = tasks.get(check, {})
         value = task.get("after") if task.get("status") == "ok" else None
         add(check, f">= {THRESHOLD}", value, None if value is None else value >= THRESHOLD)
+    adopted = {s["check"] for s in manifest.get("sacrifices", [])}
     for sacrifice in policy.sacrifices:
         task = tasks.get(sacrifice["check"], {})
         value = task.get("after") if task.get("status") == "ok" else None
         floor = sacrifice["floor_score"]
-        add(sacrifice["check"] + " sacrifice floor", f">= {floor}", value,
-            None if value is None else value >= floor)
+        name = sacrifice["check"] + " sacrifice floor"
+        if value is None:
+            add(name, f">= {floor}")
+        elif sacrifice["check"] not in adopted:
+            # No recorded sacrifice: the original threshold row above is the only target.
+            add(name, f">= {floor}", value, status="not adopted")
+        else:
+            # A floor is never the original target met (docs/story/06): label it as accepted.
+            add(name, f">= {floor}", value, status="accepted sacrifice" if value >= floor else "not met")
     return rows

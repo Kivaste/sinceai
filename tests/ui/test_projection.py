@@ -28,8 +28,10 @@ def test_gate_summary_counts_only_pass():
 
 def test_views_never_label_not_applicable_as_passed():
     """Rule: the result card and the jury page print pass/total and not applicable separately."""
-    state = {"status": "RELEASED", "scenario": "HEALTH-S1", "steps": [], "gate": gate_summary(CHECKS),
-             "exportAssertions": {}, "assertionEvidence": {}, "measured": {}, "sacrifices": [],
+    state = {"status": "RELEASED", "scenario": "HEALTH-S1", "steps": [{"name": "run", "exit": 0},
+             {"name": "verify (limited)", "exit": 0}, {"name": "verify --full", "exit": 0}],
+             "gate": gate_summary(CHECKS), "exportAssertions": {}, "assertionEvidence": {},
+             "measured": {"utility": {"status": "not_measured", "reason": "synthetic"}}, "sacrifices": [],
              "residualRisks": [], "personK": None, "targets": []}
     page = result_page(state)
     assert "2/3" in page and "1 not applicable" in page and "3/3" not in page

@@ -67,8 +67,9 @@ class Handler(BaseHTTPRequestHandler):
     def respond(self, status, body, content_type="text/html", *, verified_rows=False):
         shapes = identifier_shape_counts(body)
         if verified_rows:
-            # The manifest-value scanner has no column contract. Fresh limited verify
-            # already ran release.token-hex64, which permits these ONLY in token columns.
+            # The manifest-value scanner has no column contract. A fresh verify --full on these
+            # exact bytes (signature included) already ran release.token-hex64, which permits
+            # these ONLY in token columns.
             # No aggregate or unverified response gets this narrowly typed exception.
             shapes.pop("HEX64_OUTSIDE_TOKEN", None)
         if shapes:
