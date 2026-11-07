@@ -27,6 +27,21 @@ pets-eval check <folder>                           # leftover direct identifiers
 
 Read every CSV with `dtype=str`: phone numbers, postcodes and IDs break when parsed as numbers.
 
+## pets-release
+
+Install the tool into the same venv and set the environment (see the README for the full demo):
+
+```powershell
+python -m pip install -e ".[dev,eval]"
+$env:PETS_KIT = "<path to the kit root>"
+$env:PETS_HMAC_KEY = "<at least 32 characters>"   # from your secret store; never commit or log it
+$env:SOURCE_DATE_EPOCH = "1793000000"             # or pass --created on each run
+```
+
+- Row maps go to `<out>.scoring/`, never inside the release folder and never in the public repo (D15).
+- `verify <release>` is limited (release-scope checks only); `verify --full --kit <path>` needs the key and fails on any check it cannot run (D18).
+- `tests/docs/` runs every command block in the README that can run today; blocks for subcommands not built yet are marked pending and listed as skipped.
+
 ## Verified on the first machine (6 Nov)
 
 - `pets-eval` 1.0.0 installed; the package's 21 tests pass (about 7 minutes; the scorer is slow on large tables).
