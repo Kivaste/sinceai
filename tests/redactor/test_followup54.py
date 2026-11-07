@@ -254,6 +254,72 @@ def test_double_barrelled_name_after_a_short_cue_stem_is_not_a_secret():
     assert [lab for _, lab in spans if lab == "SECRET"] == [], spans
 
 
+# ---- round 4 (review of df43b07): the two-part-name exception applies only to ambiguous short-stem cue
+# matches ('Pinja' read as 'pin'); after an explicit cue the gate's unmodified credential shape is used, in
+# the lookahead too. Failure row: explicit cue + copula + plain word + ordinary word + Title-Title token
+# -> only the plain word was redacted, the Title-Title token stayed and both gate scans stopped early.
+ROUND4 = [
+    ("password is kissa talo Anna-Liisa", "Anna-Liisa"),
+    ("password is kissa talo Anna-Liisa!", "Anna-Liisa"),
+    ("salasana on kissa talo Anna-Liisa", "Anna-Liisa"),
+    ("password Anna-Liisa", "Anna-Liisa"),
+    ("salasana taitaa olla Anna-Liisa", "Anna-Liisa"),
+]
+
+
+@pytest.mark.parametrize("text,value", ROUND4, ids=[r[0] for r in ROUND4])
+def test_round4_title_title_credential_after_explicit_cue_is_redacted(text, value):
+    spans, redacted = labelled(text)
+    # a trailing '!' may be part of the password and is redacted with it
+    assert any(lab == "SECRET" and v.rstrip("!") == value for v, lab in spans), spans
+    assert value not in redacted
+    assert not any(gate_hits(redacted).values()), gate_hits(redacted)
+
+
+_SIX = ("rescan.secrets", "rescan.usernames", "rescan.phones", "text.secrets", "text.usernames", "text.phones")
+
+
+def _run_six(run_checks, rows, folder):
+    """Statuses of the six secret/username/phone checks via the production runner on one text column."""
+    import csv
+
+    from pets_release.checks import all_checks
+
+    folder.mkdir(parents=True)
+    with open(folder / "turns.csv", "w", encoding="utf-8", newline="") as fh:
+        w = csv.writer(fh)
+        w.writerow(["turn_id", "conversation_id", "seq", "speaker", "text"])
+        w.writerows([[f"T{n + 1}", f"C{n + 1}", "1", "customer", t] for n, t in enumerate(rows)])
+    contract = {
+        "files": {"turns.csv": {"required": ["turn_id", "conversation_id", "seq", "text"], "columns": {
+            "turn_id": {"form": "^T[0-9]+$", "params": {}},
+            "conversation_id": {"form": "^C[0-9]+$", "params": {}},
+            "seq": {"form": "integer", "params": {}},
+            "speaker": {"form": "enum", "params": {"values": ["customer", "agent"]}},
+            "text": {"form": "text", "params": {"conversation": "conversation_id", "order": "seq"}},
+        }}},
+        "qi": [], "tokens": [], "healthInTextRequired": True,
+    }
+    checks = [c for c in all_checks() if c.name in _SIX]
+    assert len(checks) == len(_SIX)
+    res = run_checks(folder, contract, {"phase": "gate"}, checks=checks)
+    by = {r.check: r for r in res.records}
+    assert sorted(by) == sorted(_SIX)
+    return {n: by[n].status for n in _SIX}
+
+
+def test_round4_title_title_credential_release_checks_are_clean(tmp_path):
+    """The production run_checks on a redacted text column finds no secret; on the raw rows it does."""
+    from pets_release.checks import run_checks
+
+    raw = _run_six(run_checks, [t for t, _ in ROUND4], tmp_path / "raw")
+    assert raw["text.secrets"] == "fail" and raw["rescan.secrets"] == "fail", raw
+    rows = [labelled(t)[1] for t, _ in ROUND4]
+    assert all(v not in r for (_, v), r in zip(ROUND4, rows))
+    red = _run_six(run_checks, rows, tmp_path / "red")
+    assert all(s == "pass" for s in red.values()), red
+
+
 def test_plain_word_after_copula_and_a_later_credential_are_both_redacted():
     text = "salasana on kissa ja Koira2024"
     spans, redacted = labelled(text)

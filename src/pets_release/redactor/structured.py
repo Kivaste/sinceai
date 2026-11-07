@@ -307,6 +307,7 @@ class StructuredPass:
             w = text[s:e].lower().strip(_TRAIL_PUNCT + "!")
             nxt = text[spans[idx + 1][0]:spans[idx + 1][1]].lower().strip(_TRAIL_PUNCT) if idx + 1 < len(spans) else ""
             label = None
+            pair = True  # a phrase or two-word cue is explicit
             if any(c.isdigit() for c in w) and w.startswith(GLUED_SECRET_CUES) and _credential_shaped(w):
                 # a cue word with digits glued on is itself a credential ('salasana123', 'pin1234')
                 ve = _strip_trailing(text, s, e, _TRAIL_PUNCT + "!")
@@ -320,8 +321,10 @@ class StructuredPass:
             elif w in CODE_QUALIFIERS and nxt in CODE_WORDS and text[s:e][-1] not in _SENTENCE_END:
                 label = "SECRET"  # 'verification code', 'sms code' (the pair is the cue)
             elif _has_cue([w], SECRET_CUES):
-                label = "SECRET"
-            elif _has_cue([w], USERNAME_CUES) or (
+                label, pair = "SECRET", False
+            elif _has_cue([w], USERNAME_CUES):
+                label, pair = "USERNAME", False
+            elif (
                 w == "user" and idx + 1 < len(spans) and text[spans[idx + 1][0]:spans[idx + 1][1]].lower() in ("name", "id")
             ):
                 label = "USERNAME"
@@ -348,13 +351,15 @@ class StructuredPass:
                 prev = [text[a:b].lower().strip(_TRAIL_PUNCT) for a, b in spans[start:j]]
                 # every cue word of the phrase counts ('wifi password is X': 'password' is the strong one)
                 cue_words = [w] + [x for x in prev if _has_cue([x], SECRET_CUES + USERNAME_CUES)]
+                # a double-barrelled name is protected only after an ambiguous short-stem match ('Pinja')
+                ambiguous = not pair and not _explicit_cue(cue_words, SECRET_CUES + USERNAME_CUES)
                 if intervening:
-                    ok = len(val) >= 5 and _credential_shaped(val)
+                    ok = len(val) >= 5 and _credential_shaped(val, ambiguous)
                 else:
                     # a digit, or the gate's credential shape (mixed case, inner symbol, long), with or without
                     # a copula ('password HunterTwo')
                     ok = (any(c.isdigit() for c in val) or (label == "USERNAME" and "@" in val)
-                          or _credential_shaped(val))
+                          or _credential_shaped(val, ambiguous))
                     if not ok and _alpha_credential(val, finnish=_has_cue(cue_words, FINNISH_CUES)):
                         # a plain word right after "<cue> <copula> [hedges]" is the value wherever the clause
                         # ends ('password is sunflower today'); network-key cues ('wifi is X') only when it ends
@@ -366,7 +371,7 @@ class StructuredPass:
                             ok = copula and _clause_end(text, ve, spans, j, masks)
                         if ok:
                             # a credential-shaped token later in the same clause is the value, not this word
-                            k = _credential_ahead(text, spans, j, start + CUE_SCAN_TOKENS, masks)
+                            k = _credential_ahead(text, spans, j, start + CUE_SCAN_TOKENS, masks, ambiguous)
                             if k is not None:
                                 # the plain word right after the copula is redacted too (the gate's rule counts
                                 # it); the credential-shaped token is the value proper
@@ -660,14 +665,28 @@ _APIKEY_RE = re.compile(
     r"|AKIA[0-9A-Z]{16}|xox[abprs]-[A-Za-z0-9-]{10,}|eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,})(?![\w-])")
 
 
-def _credential_shaped(val: str) -> bool:
+def _credential_shaped(val: str, ambiguous_cue: bool = False) -> bool:
     """One token the gate counts as a credential: the gate's own definition (a digit, a letter with an inner
-    symbol, mixed case, or 20+ alphanumerics; not a date or clock time), shared rather than copied."""
+    symbol, mixed case, or 20+ alphanumerics; not a date or clock time), shared rather than copied. Only after
+    an ambiguous cue match (a short stem read inside a longer word, 'Pinja') is a double-barrelled name
+    ('Anna-Liisa') not a credential; after an explicit cue the gate's shape is used unmodified."""
     from pets_release.checks.cells._validators import _credential_shaped as gate_credential_shaped
 
-    if re.search(r"\s", val) or _DOUBLE_NAME.fullmatch(val.rstrip(_TRAIL_PUNCT + "!")):
-        return False  # a double-barrelled name ('Anna-Liisa') is mixed case but not a credential
+    if re.search(r"\s", val):
+        return False
+    if ambiguous_cue and _DOUBLE_NAME.fullmatch(val.rstrip(_TRAIL_PUNCT + "!")):
+        return False
     return gate_credential_shaped(val)
+
+
+def _explicit_cue(words: Iterable[str], cues: tuple[str, ...]) -> bool:
+    """A word matches a cue stem exactly, or a stem longer than 4 letters; a short stem matched only as the
+    start of a longer word ('pinja' for 'pin') is ambiguous."""
+    for w in words:
+        for c in cues:
+            if w == c or (w.startswith(c) and (len(c) > 4 or not w[len(c)].isalpha())):
+                return True  # 'pin-koodi', 'wpa2' are explicit too
+    return False
 
 
 _DOUBLE_NAME = re.compile(r"[A-ZÅÄÖ][a-zåäöé]+(?:-[A-ZÅÄÖ][a-zåäöé]+)+")
@@ -698,7 +717,8 @@ def _phrase_cue(text: str, spans: list[tuple[int, int]], idx: int) -> int:
     return 0
 
 
-def _credential_ahead(text: str, spans: list[tuple[int, int]], j: int, stop: int, masks=()) -> int | None:
+def _credential_ahead(text: str, spans: list[tuple[int, int]], j: int, stop: int, masks=(),
+                      ambiguous_cue: bool = False) -> int | None:
     """Index of a credential-shaped token (letters with digits/symbols/mixed case) after token ``j`` in the same
     clause and scan window, or None."""
     for k in range(j + 1, min(stop, len(spans))):
@@ -707,7 +727,7 @@ def _credential_ahead(text: str, spans: list[tuple[int, int]], j: int, stop: int
         if any(spans[k][0] < b and a < spans[k][1] for a, b in masks):
             return None  # another identifier (e-mail, URL) ends the clause
         tok = text[spans[k][0]:_strip_trailing(text, spans[k][0], spans[k][1])]
-        if any(c.isalpha() for c in tok) and _credential_shaped(tok):
+        if any(c.isalpha() for c in tok) and _credential_shaped(tok, ambiguous_cue):
             return k
     return None
 
