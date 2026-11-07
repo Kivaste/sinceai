@@ -1,4 +1,4 @@
-"""#90 L2: retain disposition because purpose checks exclude cancelled duplicates.
+﻿"""#90 L2: retain disposition because purpose checks exclude cancelled duplicates.
 
 Seams: real CLI release/manifest and the production purpose-check adapter.
 Rows (trigger -> result):
@@ -32,7 +32,7 @@ def test_disposition_is_needed_to_exclude_cancelled_duplicates():
 def test_cli_retains_disposition_with_its_actual_purpose_justification(released):
     _, out, proc = released
     assert proc.returncode == 0, proc.stdout + proc.stderr
-    visits = pd.read_csv(out / "ed_visits.csv", dtype=str, keep_default_na=False)
+    visits = pd.read_csv(out / "ed_visits.csv", dtype=str, keep_default_na=False, na_filter=False)
     assert "disposition" in visits.columns
     manifest = json.loads((out / "privacy_manifest.json").read_text(encoding="utf-8"))
     field = next(f for f in manifest["fieldJustifications"]

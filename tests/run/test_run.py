@@ -1,4 +1,4 @@
-"""`pets-release run` on the synthetic minikit, through the real CLI and the production checks.
+﻿"""`pets-release run` on the synthetic minikit, through the real CLI and the production checks.
 
 Rows (trigger -> result):
   hand plan on a kit where k is reachable          -> exit 0, release + scoring folder, gate all pass
@@ -53,8 +53,8 @@ def test_release_passes_gate_and_both_verify_tiers(released):
 def test_visit_pseudonyms_identical_across_tables(released):
     _, out, proc = released
     assert proc.returncode == 0
-    ed = pd.read_csv(out / "ed_visits.csv", dtype=str, keep_default_na=False)
-    lab = pd.read_csv(out / "lab_results.csv", dtype=str, keep_default_na=False)
+    ed = pd.read_csv(out / "ed_visits.csv", dtype=str, keep_default_na=False, na_filter=False)
+    lab = pd.read_csv(out / "lab_results.csv", dtype=str, keep_default_na=False, na_filter=False)
     assert ed["visit_id"].map(lambda v: bool(HEX64.match(v))).all()
     assert len(lab) > 0 and set(lab["visit_id"]) <= set(ed["visit_id"])
 

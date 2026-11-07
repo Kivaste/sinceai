@@ -1,4 +1,4 @@
-"""The shipped redactor as an evaluation predictor (follow-up #67).
+﻿"""The shipped redactor as an evaluation predictor (follow-up #67).
 
 The evaluator calls ``pets_release.redactor.redact_conversation`` once per conversation, turns in
 ``seq`` order, so cross-turn behaviour (split values, speaker-aware cues, lexicon passes) is measured.
@@ -60,8 +60,8 @@ def controller_gazetteer(kit_root):
     from pets_release.redactor.lexicon import Gazetteer
 
     root = Path(kit_root)
-    cust = pd.read_csv(root / "data/customer_service/customers.csv", dtype=str, keep_default_na=False)
-    convs = pd.read_csv(root / "data/customer_service/conversations.csv", dtype=str, keep_default_na=False)
+    cust = pd.read_csv(root / "data/customer_service/customers.csv", dtype=str, keep_default_na=False, na_filter=False)
+    convs = pd.read_csv(root / "data/customer_service/conversations.csv", dtype=str, keep_default_na=False, na_filter=False)
     name_of = dict(zip(cust["customer_id"], cust["full_name"]))
     parties = {}
     for cid, cu, ag in zip(convs["conversation_id"], convs["customer_id"], convs["agent_name"]):
