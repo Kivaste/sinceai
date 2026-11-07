@@ -29,15 +29,16 @@ def _inside(child: Path, parent: Path) -> bool:
 MANIFEST = "privacy_manifest.json"
 
 
-def _scan_release(protected_dir: Path) -> None:
-    """The release folder holds the protected tables and the manifest, nothing else: a planted row map
-    or scoring file is refused even when no caller passed it."""
+def _scan_release(protected_dir: Path, orig_files: dict) -> None:
+    """The release folder holds exactly the protected table files (named like original tables) and
+    the manifest. Anything else, including files the evaluator would silently ignore (`_x.csv`), is
+    refused: the scan and the scoring share this one allowlist."""
+    allowed = {f"{name}.csv" for name in orig_files} | {MANIFEST}
     for entry in sorted(protected_dir.iterdir()):
         if entry.name.startswith("rowmap_"):
             raise RowMapRejected("rowmap_in_release")
-        if entry.is_dir() or not (entry.name == MANIFEST or entry.suffix == ".csv"):
+        if entry.is_dir() or entry.name not in allowed:
             raise ScorecardRejected("release_extra_file")
-
 
 def _expected_sections(root: Path, dataset: str, scen: dict, catalog, tables: dict,
                        release: dict) -> dict:
@@ -94,8 +95,9 @@ def run_scorecard(original_dir, protected_dir, *, scenario: str, root, rowmaps: 
     if not scen or scen.get("dataset") != original_dir.name:
         raise ScorecardRejected("scenario")
 
-    _scan_release(protected_dir)
-    orig_files, prot_files = _tables(original_dir), _tables(protected_dir)
+    orig_files = _tables(original_dir)
+    _scan_release(protected_dir, orig_files)
+    prot_files = _tables(protected_dir)
     catalog = kit_io.load_catalog(root)
     catalog = catalog[catalog.dataset == original_dir.name]
     for name, pfile in prot_files.items():
@@ -136,6 +138,7 @@ def run_scorecard(original_dir, protected_dir, *, scenario: str, root, rowmaps: 
                            tables=orig_files, expected_sections=_expected_sections(
                                root, original_dir.name, scen, catalog, orig_files,
                                {n: pd.read_csv(p, dtype=str, nrows=0).columns for n, p in prot_files.items()}))
+
 
 
 

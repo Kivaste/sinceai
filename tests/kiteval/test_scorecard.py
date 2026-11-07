@@ -203,3 +203,10 @@ def test_subfolder_in_the_release_is_refused(kit, release):
 def test_manifest_alone_is_allowed_next_to_the_tables(kit, release):
     (release[0] / "privacy_manifest.json").write_text("{}", encoding="utf-8")
     assert _run(kit, release)["tasks"][0]["status"] == "ok"
+
+
+@pytest.mark.parametrize("name", ["_private.csv", "_.csv", "rowmap_other.csv", "Extra.CSV", "x.parquet"])
+def test_underscore_and_other_files_the_evaluator_ignores_are_still_refused(kit, release, name):
+    (release[0] / name).write_text("a,b\n1,2\n", encoding="utf-8")
+    with pytest.raises((ScorecardRejected, RowMapRejected)):
+        _run(kit, release)

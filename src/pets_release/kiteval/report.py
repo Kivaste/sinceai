@@ -162,6 +162,50 @@ def _check_expected_linkage(tr: dict, linkage_expectation) -> None:
         raise ScorecardRejected("missing_section")
 
 
+def _evaluated(res) -> bool:
+    """Every result record must say explicitly whether it was evaluated: a bool, nothing inferred."""
+    if not isinstance(res, dict) or not isinstance(res.get("evaluated"), bool):
+        raise ScorecardRejected("structure")
+    return res["evaluated"]
+
+
+def _check_results(name: str, tr: dict, expected: dict, found: list) -> None:
+    """One rule for every result section (free text, linkage, trajectory, hash attack): an explicit
+    `evaluated` bool; True needs its positive denominator; False was already restricted to the
+    allowlisted not_applicable reasons by _scan_nested."""
+    cols = set(expected.get("columns", ()))
+    for res in (tr.get("free_text") or {}).values():
+        if _evaluated(res) and res.get("status") != "withheld" and not _positive(res.get("n_values")):
+            raise ScorecardRejected("zero_denominator")
+    for key, res in (tr.get("linkage") or {}).items():
+        if key == "note":
+            if not isinstance(res, str):
+                raise ScorecardRejected("structure")
+            continue
+        if _evaluated(res):
+            if "n_targets_in_data" not in res:
+                raise ScorecardRejected("structure")
+            n = res["n_targets_in_data"]
+            if n is None:
+                if res.get("qis_used") != []:
+                    raise ScorecardRejected("structure")
+            elif not _positive(n):
+                raise ScorecardRejected("zero_denominator")
+    for user, res in (tr.get("trajectory_unicity") or {}).items():
+        if _evaluated(res):
+            if "n_users_tested" in res:
+                if not _positive(res["n_users_tested"]):
+                    raise ScorecardRejected("zero_denominator")
+            elif res.get("note") == f"{user} removed: traces cannot be linked" and user not in cols:
+                found.append({"table": name, "section": "trajectory_unicity", "key": user,
+                              "code": "trajectory_user_removed"})
+            else:
+                raise ScorecardRejected("structure")
+    for res in (tr.get("hash_attack") or {}).values():
+        if _evaluated(res) and not _positive(res.get("n_hashes")):
+            raise ScorecardRejected("zero_denominator")
+
+
 def _check_released(name: str, tr: dict, expected: dict, found: list) -> None:
     for section in BASELINE_SECTIONS:
         if section not in tr:
@@ -175,18 +219,6 @@ def _check_released(name: str, tr: dict, expected: dict, found: list) -> None:
     for user in expected.get("trajectories") or {}:
         if not isinstance(trajectories.get(user), dict):
             raise ScorecardRejected("missing_section")
-    cols = set(expected.get("columns", ()))
-    for user, res in trajectories.items():
-        if isinstance(res, dict) and res.get("evaluated") is True:
-            if "n_users_tested" in res:
-                if not _positive(res["n_users_tested"]):
-                    raise ScorecardRejected("zero_denominator")
-            elif (isinstance(res.get("note"), str) and res["note"] == f"{user} removed: traces cannot be linked"
-                    and user not in cols):
-                found.append({"table": name, "section": "trajectory_unicity", "key": user,
-                              "code": "trajectory_user_removed"})
-            else:
-                raise ScorecardRejected("structure")
     if not _int(tr.get("rows_original")) or not _int(tr.get("rows_protected")):
         raise ScorecardRejected("structure")
     if tr["rows_original"] <= 0 or tr["rows_protected"] <= 0:
@@ -202,23 +234,7 @@ def _check_released(name: str, tr: dict, expected: dict, found: list) -> None:
             raise ScorecardRejected("zero_denominator")
     elif not isinstance(k.get("note"), str):
         raise ScorecardRejected("structure")
-    for col in (tr.get("free_text") or {}).values():
-        if not isinstance(col, dict) or "evaluated" not in col:
-            raise ScorecardRejected("structure")
-        if col["evaluated"] is True and col.get("status") != "withheld" and not _positive(col.get("n_values")):
-            raise ScorecardRejected("zero_denominator")
-    for res in (tr.get("linkage") or {}).values():
-        if not isinstance(res, dict) or "evaluated" not in res:
-            continue  # table-level note; nested notes are scanned separately
-        if res["evaluated"] is True:
-            if "n_targets_in_data" not in res:
-                raise ScorecardRejected("structure")
-            n = res["n_targets_in_data"]
-            if n is None:
-                if res.get("qis_used") != []:
-                    raise ScorecardRejected("structure")
-            elif not _positive(n):
-                raise ScorecardRejected("zero_denominator")
+    _check_results(name, tr, expected, found)
 
 
 def _check_table(name: str, tr: dict, expected: dict, found: list) -> dict:
@@ -287,6 +303,7 @@ def validate_report(report: dict, *, scenario: str, required_tasks: Iterable[str
         "tables": exported_tables,
         "not_applicable": found,
     }
+
 
 
 

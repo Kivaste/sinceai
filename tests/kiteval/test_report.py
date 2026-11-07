@@ -484,3 +484,72 @@ def test_trajectory_user_removed_is_accepted_only_when_the_column_is_really_abse
 
 def test_missing_expected_trajectory_section_is_a_fail():
     _rejected(_passing_report(), {**TRAJ, "columns": ["card_id", "ts", "stop_id"]}, "missing_section")
+
+
+# ---- review round 4: every result record carries an explicit evaluated flag --
+
+_COLS = {**TRAJ, "columns": ["card_id", "ts", "stop_id"]}
+SECTION_SLOTS = [
+    ("free_text", "chief_complaint"),
+    ("linkage", "news_clips_health"),
+    ("trajectory_unicity", "card_id"),
+    ("hash_attack", "patient_hash"),
+]
+BAD_RECORDS = [{}, {"n_values": 3, "n_targets_in_data": 3, "n_users_tested": 3, "n_hashes": 3},
+               {"evaluated": "yes"}, {"evaluated": None}, {"evaluated": 1}]
+
+
+def _with_record(section, key, record):
+    report = _passing_report()
+    _ed(report)["trajectory_unicity"] = {"card_id": GOOD["trajectory_unicity"]}  # expected by _COLS
+    _ed(report).setdefault(section, {})[key] = record
+    return report
+
+
+@pytest.mark.parametrize(("section", "key"), SECTION_SLOTS)
+@pytest.mark.parametrize("record", BAD_RECORDS)
+def test_result_record_without_an_explicit_evaluated_bool_is_a_fail(section, key, record):
+    _rejected(_with_record(section, key, record), _COLS, "structure")
+
+
+GOOD = {
+    "free_text": {"evaluated": True, "n_values": 3, "identifying_leakage_rate": 0.0},
+    "linkage": {"evaluated": True, "n_targets_in_data": 3, "reidentification_rate": 0.0},
+    "trajectory_unicity": {"evaluated": True, "unicity": 0.1, "n_users_tested": 3},
+    "hash_attack": {"evaluated": True, "n_hashes": 3, "share_values_reversed": 0.0},
+}
+
+
+@pytest.mark.parametrize(("section", "key"), SECTION_SLOTS)
+def test_complete_record_passes_in_every_section(section, key):
+    _expecting(_with_record(section, key, GOOD[section]), _COLS)
+
+
+@pytest.mark.parametrize(("section", "key"), SECTION_SLOTS)
+def test_evaluated_record_with_zero_denominator_is_a_fail_in_every_section(section, key):
+    field = {"free_text": "n_values", "linkage": "n_targets_in_data", "trajectory_unicity": "n_users_tested",
+             "hash_attack": "n_hashes"}[section]
+    _rejected(_with_record(section, key, {**GOOD[section], field: 0}), _COLS, "zero_denominator")
+
+
+@pytest.mark.parametrize(("section", "key"), SECTION_SLOTS)
+def test_evaluated_record_without_its_denominator_is_a_fail_in_every_section(section, key):
+    field = {"free_text": "n_values", "linkage": "n_targets_in_data", "trajectory_unicity": "n_users_tested",
+             "hash_attack": "n_hashes"}[section]
+    record = {k: v for k, v in GOOD[section].items() if k != field}
+    with pytest.raises(ScorecardRejected) as caught:
+        _expecting(_with_record(section, key, record), _COLS)
+    assert caught.value.reason in {"structure", "zero_denominator"}
+
+
+@pytest.mark.parametrize(("section", "key"), SECTION_SLOTS)
+def test_unavailable_record_with_unknown_reason_is_a_fail_in_every_section(section, key):
+    record = {"evaluated": False, "reason": "unlisted MARKER_SHOULD_NOT_EXPORT"}
+    _rejected(_with_record(section, key, record), _COLS, "not_evaluated")
+
+
+def test_expected_attack_given_as_empty_dict_is_a_fail():
+    report = _passing_report()
+    _ed(report)["linkage"]["public_directory"] = {}
+    _rejected(report, {"linkage": {"attacks": ["news_clips_health", "public_directory"]}}, "structure")
+
