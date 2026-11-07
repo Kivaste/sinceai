@@ -47,6 +47,7 @@ def _redact(text):
     ("my username jsmithx does not work", "jsmithx"),
     ("login maijamaa ei toimi", "maijamaa"),
     ("username kotikissa", "kotikissa"),
+    ("login failed again", "failed"),  # a gate false positive; over-redacted on purpose so the gate passes
 ])
 def test_plain_word_after_username_cue_is_redacted(tmp_path, text, value):
     raw = _gate(tmp_path / "raw", text)

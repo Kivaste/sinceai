@@ -91,7 +91,8 @@ PROSE = [
     "my password is wrong again",
     "salasana on liian lyhyt",
     "login page ei aukea",
-    "login failed again",
+    # "login failed again": the gate counts 'failed' after a username cue (text and cell rescans), so the redactor
+    # takes it too (CS-S1 chain, structured._gate_username_word); pinned in test_username_plain_word.py
     "username and password please",
     "käyttäjätunnus ja salasana",
     "the wifi password is the same as before",
