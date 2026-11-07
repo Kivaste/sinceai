@@ -1,7 +1,8 @@
 """Producer-side attribute-inference lift (D64, #157): the bound the search enforces on bounded sensitive attributes.
 
 The release tool never imports the attacker (#138: it runs only as a child via the pinned launcher), so this is a
-producer-side implementation of #139's red-team estimator (``pets_attacker.redteam.attribute_inference``):
+producer-side implementation of #139's red-team attribute-inference estimator (the attacker package's
+``redteam.attribute_inference``; named here without importing it):
 
   targets     the released rows with a non-blank value of the attribute, a seeded sample (seed 0) of at most 3000,
               as the red team's sampling frame;
@@ -25,7 +26,7 @@ import re
 import numpy as np
 import pandas as pd
 
-MAX_SAMPLE = 3000  # the red team's sampling frame (pets_attacker.personas.MAX_SAMPLE)
+MAX_SAMPLE = 3000  # the red team's sampling frame (the attacker's personas.MAX_SAMPLE)
 SEED = 0
 _MASKED = re.compile(r"^[\*x#?\-_]*$", re.IGNORECASE)  # the red team's blank rule (masked cells are blank)
 
@@ -55,7 +56,7 @@ def _sample(n: int) -> np.ndarray:
 def measure(df: pd.DataFrame, qcols: list, column: str) -> dict:
     """``{n_targets, inference_rate, baseline_rate, lift}`` for ``column`` of the released table ``df`` against an
     attacker who knows ``qcols``. ``lift`` is None when it cannot be measured (no target, or a zero base rate with a
-    non-zero inference rate is ``inf``); callers treat None as over the bound (fail closed)."""
+    non-zero inference rate); callers treat None as over the bound (fail closed)."""
     df = df.reset_index(drop=True)
     cells = [_cell(v) for v in df[column].tolist()]
     if qcols:
@@ -69,15 +70,15 @@ def measure(df: pd.DataFrame, qcols: list, column: str) -> dict:
     base = _mode(cells)
     n = ok = b = 0
     for r in _sample(len(df)):
-        truth = cells[r]
-        if not truth:
+        actual = cells[r]
+        if not actual:
             continue
         n += 1
-        ok += guess[keys[r]] == truth
-        b += base == truth
+        ok += guess[keys[r]] == actual
+        b += base == actual
     if n == 0:
         return {"n_targets": 0, "inference_rate": None, "baseline_rate": None, "lift": None}
-    inf, bas = ok / n, b / n
-    lift = (inf / bas) if bas > 0 else (math.inf if inf > 0 else 1.0)
-    return {"n_targets": n, "inference_rate": round(inf, 6), "baseline_rate": round(bas, 6),
-            "lift": round(lift, 6) if math.isfinite(lift) else None}
+    rate, bas = ok / n, b / n
+    # a zero base rate with any inference has no finite lift: None, which the search counts as over the bound
+    lift = round(rate / bas, 6) if bas > 0 else (None if rate > 0 else 1.0)
+    return {"n_targets": n, "inference_rate": round(rate, 6), "baseline_rate": round(bas, 6), "lift": lift}

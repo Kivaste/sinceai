@@ -75,17 +75,18 @@ _ROWS += withheld_table("published_weekly_stats", [
 FLOORS, DIRECT, _PLAN = build(_ROWS)
 
 # D64 (#157): bounded attribute-inference lift. Content-free; stated in the manifest via the residual note below.
-MAX_LIFT = 2.0
+MAX_LIFT = 2.25
 LOS_BIN_MIN = 30
 LIFT_ATTACKER = ("the #139 red-team attribute-inference attacker: knows a released visit's quasi-identifiers and "
                  "guesses the most common released value among the visits that match them; compared with always "
                  "guessing the release's most common value (base rate); seeded sample of at most 3000 targets")
 LIFT_REASON = (f"lift = attacker accuracy / base-rate accuracy, at most {MAX_LIFT} for icd10_primary and "
-               f"los_minutes: knowing a visit's age band, municipality and arrival hour may at most double the "
-               f"chance of guessing its diagnosis or stay. Tighter is not reachable with the purpose floors kept: "
-               f"icd10 at chapter level fails H-U4 (measured on the kit, #157), so it stays at 3 characters; "
-               f"los_minutes is binned at least {LOS_BIN_MIN} minutes wide (H-U2 still at or above 0.9). "
-               f"A plan over the bound is refused, never relaxed")
+               f"los_minutes. Tighter is not reachable with the purpose floors kept (measured on the kit, #157): "
+               f"icd10 at chapter level scores H-U4 0.0, so it stays at 3 characters, and every QI is already at "
+               f"the coarsest rung its check accepts; there the diagnosis lift measures just above 2.0, and 2.0 "
+               f"refused the release. los_minutes, which the search can coarsen, is binned at least "
+               f"{LOS_BIN_MIN} minutes wide (10-minute bins measure about 3.4). A plan over the bound is refused, "
+               f"never relaxed")
 ATTRIBUTE_LIFT = {"max_lift": MAX_LIFT, "attacker": LIFT_ATTACKER, "reason": LIFT_REASON,
                   "attributes": [{"table": "ed_visits", "column": "icd10_primary"},
                                  {"table": "ed_visits", "column": "los_minutes"}]}

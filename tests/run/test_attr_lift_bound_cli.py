@@ -8,13 +8,18 @@ purpose floors stay enforced. Rows, trigger -> result:
       final step names the attributes over the bound; nothing published
   minikit, diagnosis and stay carry no information beyond the base rate  -> exit 0, released; the manifest
       states the bound (residual note) and the final step logs the measured lift
-Deleting the final bound check makes the first row release (exit 0): the test fails.
+  same, a move that would push a plan under the bound over it (measurement stubbed)  -> the move is rejected
+      with reason "attribute lift above bound", the run still releases
+Deleting the final bound check makes the first row release (exit 0); deleting the candidate check adopts the move
+of the third row: each test fails.
 """
 from __future__ import annotations
 
 import json
 
 from run_helpers import CREATED, MINIKIT, build_kit, cli, grouped_qis
+
+from pets_release.policy.health_s1 import MAX_LIFT
 
 ARGS = ("--scenario", "HEALTH-S1", "--created", CREATED)
 
@@ -75,6 +80,39 @@ def test_lift_over_the_bound_refuses(tmp_path):
     assert report["reasons"] == ["search:no-acceptable-plan"]
 
 
+def test_a_move_over_the_bound_is_never_adopted(tmp_path, monkeypatch):
+    """In-search feasibility (production run_release, search): a coarsening move whose lift goes over the bound
+    from a plan under it is rejected even though every purpose check passes. The measurement is stubbed only to
+    put 3-character diagnoses over the bound (the flat kit's one diagnosis has a 4th character, so the floor plan
+    is under it); deleting the candidate check adopts the move and the final check refuses."""
+    from run_helpers import TEST_KEY, run_args
+
+    from pets_release.cli import resolve_run_context
+    from pets_release.minimiser import attr_lift
+    from pets_release.run.pipeline import run_release
+    from pets_release.verify import current_tool_revision
+
+    real = attr_lift.measure
+
+    def chars3_over(df, qcols, column):
+        m = real(df, qcols, column)
+        if column == "icd10_primary" and not df[column].astype(str).str.contains(".", regex=False).any():
+            return {**m, "lift": MAX_LIFT * 2}
+        return m
+
+    monkeypatch.setattr(attr_lift, "measure", chars3_over)
+    monkeypatch.setenv("PETS_HMAC_KEY", TEST_KEY)
+    kit = build_kit(tmp_path / "kit", edit=flat_sensitive)
+    out = tmp_path / "rel"
+    ctx = resolve_run_context(run_args(kit, out)[1:])
+    res = run_release(kit=ctx.kit, scenario=ctx.scenario, created=ctx.created, key_text=ctx.key, out=out,
+                      plan_name=None, tool_revision=current_tool_revision())
+    assert res.status == "released"
+    reasons = [e["reason"] for e in _log(out)]
+    assert ("coarsen ed_visits.icd10_primary to icd.3: rejected (attribute lift above bound: "
+            "ed_visits.icd10_primary)" in reasons), " | ".join(r[:120] for r in reasons if "icd10_primary" in r)
+
+
 def test_lift_under_the_bound_releases_and_states_the_bound(tmp_path):
     kit = build_kit(tmp_path / "kit", edit=flat_sensitive)
     out = tmp_path / "rel"
@@ -82,8 +120,9 @@ def test_lift_under_the_bound_releases_and_states_the_bound(tmp_path):
     assert p.returncode == 0, p.stdout + p.stderr
     m = json.loads((out / "privacy_manifest.json").read_text(encoding="utf-8"))
     note = next(r for r in m["residualRisks"] if r["risk"] == "attribute-lift-bound")
-    assert "at most 2.0 for icd10_primary and los_minutes" in note["description"]
+    assert f"at most {MAX_LIFT} for icd10_primary and los_minutes" in note["description"]
     assert "refused" in note["description"]
     final = [e for e in _log(out) if e["step"] == "final"][0]
     assert final["accepted"] is True
-    assert "attribute lift (bound 2.0): ed_visits.icd10_primary 1.000, ed_visits.los_minutes 1.000" in final["reason"]
+    assert (f"attribute lift (bound {MAX_LIFT}): ed_visits.icd10_primary 1.000, ed_visits.los_minutes 1.000"
+            in final["reason"])
