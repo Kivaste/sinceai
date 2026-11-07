@@ -23,6 +23,8 @@ renamed column, ``derived_from`` (the source column). Withheld columns and table
 A released ``text.redacted`` column also carries ``conversation`` and ``order`` (release names of
 its table's conversation and order columns, from ``_CONVERSATIONS``), so the gate's text checks
 stitch turns per conversation; no binding, or a bound column withheld, refuses generation (#63).
+Operative numeric parameters are closed and validated: rounding ``unit``, binning ``width`` and
+effective ``origin`` (including default zero), and top-N grouping ``n`` (#69).
 """
 
 from __future__ import annotations
@@ -31,6 +33,7 @@ import re
 from collections.abc import Mapping, Sequence
 from typing import Any
 
+from pets_release.contract.numeric import numeric_params, validate_numeric_spec
 from pets_release.ladders import (
     VALIDATOR_FORMS,
     LadderError,
@@ -96,6 +99,10 @@ def generate(policy: Any, plan: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
         if name in spec:
             raise ContractError(f"{table}.{name}: duplicate release name")
         params: dict[str, Any] = {**body["params"], "rung": entry["rung"]}
+        try:
+            params.update(numeric_params(entry["rung"], entry["params"]))
+        except ValueError:
+            raise ContractError(f"{table}.{column}: numeric parameters invalid") from None
         if name != column or entry["rung"].startswith("age."):
             params["derived_from"] = column
         spec[name] = {"form": body["form"], "params": dict(sorted(params.items()))}
@@ -312,6 +319,10 @@ def _validate_contract(contract: Mapping[str, Any]) -> None:
                 raise ContractError(f"{name}.{column}: form invalid")
             if not isinstance(body["params"], Mapping):
                 raise ContractError(f"{name}.{column}: params")
+            try:
+                validate_numeric_spec(body["form"], body["params"])
+            except ValueError:
+                raise ContractError(f"{name}.{column}: numeric parameters invalid") from None
             _check_binding(name, column, body["params"], cols, required)
     for label, keys in (("qi", _QI_KEYS), ("tokens", _TOKEN_KEYS)):
         rows = contract[label]

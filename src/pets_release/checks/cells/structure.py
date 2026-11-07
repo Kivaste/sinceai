@@ -6,6 +6,7 @@ import re
 import numpy as np
 
 from pets_release.checks.cells._common import column_label, contract_files, file_label
+from pets_release.checks.cells._numeric_forms import numeric_form
 from pets_release.checks.records import Outcome, Violation, locations
 from pets_release.checks.registry import register
 from pets_release.checks.release import MANIFEST
@@ -87,6 +88,9 @@ _VALIDATORS = {
 
 
 def _form_fn(form: str, params: dict):
+    numeric = numeric_form(form, params)
+    if numeric is not None:
+        return numeric
     if form == "enum":
         values = params["values"]
         if not isinstance(values, list):
@@ -121,6 +125,9 @@ def contract_forms_check(release, contract, context):
             if not len(t.frame):
                 continue
             codes, uniques = release.factorized(f, idx)
+            if params.get("rung") == "geo.topn" and sum(u not in ("", "other") for u in uniques) > params["n"]:
+                rows = np.nonzero(np.array([u != "" for u in uniques], dtype=bool)[codes])[0]
+                out.append(Violation("contract.forms", "cardinalityMismatch", "high", f, col, len(rows), locations(rows)))
             bad = np.array([not ((u == "" and nullable) or (u != "" and ok(u))) for u in uniques], dtype=bool)
             if bad.any():
                 rows = np.nonzero(bad[codes])[0]

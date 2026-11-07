@@ -53,7 +53,7 @@ def test_rung_finer_than_policy_floor_is_rejected() -> None:
     policy, plan = _build([_entry("ed_visits", "municipality", "geo.full", floor="geo.topn")])
     with pytest.raises(ContractError, match="municipality: rung finer than floor"):
         generate(policy, plan)
-    policy, plan = _build([_entry("ed_visits", "municipality", "geo.topn", floor="geo.topn")])
+    policy, plan = _build([_entry("ed_visits", "municipality", "geo.topn", {"n": 8}, floor="geo.topn")])
     assert "municipality" in generate(policy, plan)["files"]["ed_visits.csv"]["columns"]
     policy, plan = _build([_entry("ed_visits", "municipality", "withheld", floor="geo.topn")])
     with pytest.raises(ContractError, match="no released files"):
@@ -64,7 +64,7 @@ def test_rung_finer_than_policy_floor_is_rejected() -> None:
 
 
 def test_plan_floor_must_equal_policy_floor() -> None:
-    policy, plan = _build([_entry("ed_visits", "municipality", "geo.topn", floor="geo.topn")])
+    policy, plan = _build([_entry("ed_visits", "municipality", "geo.topn", {"n": 8}, floor="geo.topn")])
     plan[0]["floor"] = "geo.full"
     with pytest.raises(ContractError, match="municipality: plan floor differs from policy floor"):
         generate(policy, plan)

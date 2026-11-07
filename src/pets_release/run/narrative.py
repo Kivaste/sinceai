@@ -5,6 +5,7 @@ schema's ``not_measured`` value until the measurer is wired (ticket 22).
 """
 from __future__ import annotations
 
+from pets_release.contract.numeric import numeric_params
 from pets_release.ladders import WITHHELD, output_column
 from pets_release.manifest import not_measured
 
@@ -41,11 +42,11 @@ def _pet(entry) -> tuple[str, dict]:
     if rung == "text.redacted":
         return "text_redaction", {"placeholders": "typed, numbered per conversation"}
     if rung == "geo.topn":
-        return "top_n_grouping", {"topN": params["n"]}
+        return "top_n_grouping", {"topN": numeric_params(rung, params)["n"]}
     if rung == "num.round":
-        return "rounding", {"rung": rung}
+        return "rounding", {"rung": rung, **numeric_params(rung, params)}
     if rung == "num.bin":
-        return "binning", {"rung": rung}
+        return "binning", {"rung": rung, **numeric_params(rung, params)}
     if rung in ("keep", "num.exact", "geo.full", "icd.full", "ts.exact"):
         return "none", {}
     return "generalisation", {"rung": rung}

@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import dataclasses
+import json
 import subprocess
 import sys
 
+import pandas as pd
 import pytest
 
 from pets_release.contract import ContractError, digest, generate
 from pets_release.contract import __main__ as cli
+from pets_release.ladders import apply
 from pets_release.policy import get_policy, hand_plan
 
 
@@ -48,6 +51,38 @@ def test_cli_prints_both_contracts(tmp_path) -> None:
     assert done.returncode == 0, done.stderr
     assert "scenario HEALTH-S1" in done.stdout and "scenario CS-S1" in done.stdout
     assert (tmp_path / "HEALTH-S1.contract.json").is_file() and (tmp_path / "contracts.txt").is_file()
+
+
+def test_health_cli_contract_preserves_and_enforces_operative_topn(tmp_path) -> None:
+    """Rule: the HEALTH hand plan declares n=8; a planted ninth non-other group refuses.
+
+    Seams: real contract/checks CLIs and production transformation (synthetic rows only).
+    """
+    done = subprocess.run([sys.executable, "-m", "pets_release.contract", str(tmp_path)],
+                          capture_output=True, text=True, check=False)
+    assert done.returncode == 0, done.stderr
+    path = tmp_path / "HEALTH-S1.contract.json"
+    contract = json.loads(path.read_bytes())
+    assert contract["files"]["ed_visits.csv"]["columns"]["municipality"]["params"] == {
+        "nullable": True, "rung": "geo.topn", "n": 8,
+    }
+    candidate = tmp_path / "candidate"
+    candidate.mkdir()
+    entry = next(e for e in hand_plan("HEALTH-S1") if e["column"] == "municipality")
+    source = pd.DataFrame({"municipality": [f"group_{i}" for i in range(10)]})
+    transformed = apply([entry], {"ed_visits": source}, None)
+    transformed["ed_visits"].to_csv(candidate / "ed_visits.csv", index=False)
+
+    def check():
+        return subprocess.run([sys.executable, "-m", "pets_release.checks", "--contract", str(path),
+                               "--check", "contract.forms", str(candidate)],
+                              capture_output=True, text=True, check=False)
+
+    assert check().returncode == 0
+    source.to_csv(candidate / "ed_visits.csv", index=False)
+    bad = check()
+    assert bad.returncode == 1, bad.stdout + bad.stderr
+    assert '"label":"cardinalityMismatch"' in bad.stdout
 
 
 def test_cli_writes_nothing_when_a_scenario_is_rejected(tmp_path, monkeypatch) -> None:
