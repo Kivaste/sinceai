@@ -249,9 +249,56 @@ def test_check_version_not_bound_is_invalid(m):
     invalid(m, "$.bindings.checkVersions: gate-mismatch")
 
 
-def test_gate_check_not_passed_is_invalid(m):
-    m["gate"]["checks"][0]["status"] = "not_run"
-    invalid(m, "status: const")
+# --- not_applicable gate records (ticket 04 runner): allowed in the gate list, never as evidence ------------------
+
+def _make_not_applicable(rec):
+    rec["status"] = "not_applicable"
+    rec["denominator"]["n"] = 0
+    rec["hits"] = 0
+
+
+def test_not_applicable_gate_record_for_a_non_assertion_check_is_valid(m):
+    _make_not_applicable(_gate_record(m, "release.token-hex64"))
+    assert validate_manifest(m) == []
+
+
+@pytest.mark.parametrize("field,value,code", [
+    (("denominator", "n"), 3, "n: const"),
+    (("hits",), 1, "hits: const"),
+])
+def test_not_applicable_gate_record_must_have_zero_denominator_and_hits(m, field, value, code):
+    rec = _gate_record(m, "release.token-hex64")
+    _make_not_applicable(rec)
+    target = rec
+    for f in field[:-1]:
+        target = target[f]
+    target[field[-1]] = value
+    invalid(m, code)
+
+
+def test_pass_gate_record_with_zero_denominator_is_invalid(m):
+    _gate_record(m, "release.token-hex64")["denominator"]["n"] = 0
+    invalid(m, "n: minimum")
+
+
+@pytest.mark.parametrize("name", HEALTH)
+def test_not_applicable_record_cannot_back_an_assertion(m, name):
+    ev = m["assertionEvidence"][name]
+    _make_not_applicable(_gate_record(m, ev["check"]))
+    # evidence left as "pass": disagrees with the gate record
+    assert f"$.assertionEvidence.{name}: gate-mismatch" in validate_manifest(m)
+    # evidence copied from the not_applicable gate record: the evidence schema rejects it
+    m["assertionEvidence"][name] = {**_gate_record(m, ev["check"]),
+                                    "denominator": dict(_gate_record(m, ev["check"])["denominator"])}
+    errs = validate_manifest(m)
+    assert f"$.assertionEvidence.{name}.status: const" in errs
+    assert f"$.assertionEvidence.{name}.denominator.n: minimum" in errs
+
+
+@pytest.mark.parametrize("status", ["not_run", "error", "fail", None])
+def test_gate_check_not_passed_is_invalid(m, status):
+    m["gate"]["checks"][0]["status"] = status
+    invalid(m, "$.gate.checks[0].status: enum")
 
 
 # --- closed at every level ---------------------------------------------------------------------------------------
