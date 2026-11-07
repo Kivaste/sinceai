@@ -36,9 +36,18 @@ ACCOUNT_CUES = ("asiakas", "lasku", "sopimus", "tilaus", "viite", "customer", "i
                 "kundnum", "kundnr", "faktur", "avtal", "referen", "account", "konto", "asiakkuu", "tilin")
 SECRET_CUES = ("tunnussana", "lösen", "passkod", "api", "apikey", "api-key", "token", "access", "secret",
                "salainen", "avain", "key", "pin", "puk", "salasan", "password", "passw", "lösenord", "koodi", "tunnusluku", "wifi", "wlan",
-               "verkkoavain", "passcode", "kod", "nyckel")
+               "verkkoavain", "passcode", "kod", "nyckel",
+               # one-time and card-verification codes, short forms (general fi/sv/en vocabulary)
+               "pwd", "wi-fi", "wpa", "otp", "passphrase", "vahvistuskoodi", "varmennuskoodi", "kertakäyttö",
+               "tekstiviestikoodi", "engångskod", "engångslösen", "verifieringskod", "bekräftelsekod", "cvv", "cvc",
+               "cvn", "turvakoodi", "turvanumero", "säkerhetskod")
+# "<qualifier> code" is a secret cue as a pair ('verification code', 'sms code'); the qualifier alone is not
+CODE_QUALIFIERS = frozenset({"verification", "confirmation", "auth", "authentication", "sms", "login", "access",
+                             "security", "one-time", "onetime", "2fa", "mfa"})
+CODE_WORDS = frozenset({"code", "codes", "passcode", "pin"})
 DEVICE_CUES = ("imei", "iccid", "sim", "sarjanumer", "serial", "serienummer", "laitetunnus", "laitteen")
-USERNAME_CUES = ("käyttäjätunnu", "käyttäjänim", "username", "användarnamn", "login", "kirjautumistunnu")
+USERNAME_CUES = ("käyttäjätunnu", "käyttäjänim", "username", "användarnamn", "login", "kirjautumistunnu",
+                 "tunnukseni", "tunnuksella", "tunnukseen", "userid", "user-id", "user_id", "användar-id", "användarid")
 HETU_CUES = ("hetu", "henkilötunnu", "henkilötunnukse", "personbeteckning", "personnummer", "personnumret", "identity",
              "personal", "sotu", "loppuosa", "tarkiste")
 NUMBER_CUES = ("numero", "number", "nummer", "nro", "numret")
@@ -54,6 +63,8 @@ _TRAIL_PUNCT = ".,;:?)]}'\"»”"
 
 _URL_RE = re.compile(r"(?i)\b(?:https?://|www\.)[^\s<>\"']+")
 _EMAIL_RE = re.compile(r"(?<![\w.+-])[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
+# a bare @handle (not an e-mail: nothing before the '@', no '.tld' after it)
+_HANDLE_RE = re.compile(r"(?<![\w.@+-])@[A-Za-z][A-Za-z0-9_.]{2,29}(?![\w@-])(?!\.[A-Za-z]{2,})")
 _IPV4_RE = re.compile(r"(?<![\w.])\d{1,3}(?:\.\d{1,3}){3}(?![\w]|\.\d)")
 # IPv6 candidates incl. compressed '::' forms; validity is decided by ipaddress, not the regex
 _IPV6_RE = re.compile(r"(?<![\w:])[0-9A-Fa-f]{0,4}(?::[0-9A-Fa-f]{0,4}){2,7}(?![\w:])")
@@ -191,6 +202,12 @@ class StructuredPass:
             claim(s, e)
             label = "USERNAME" if _has_cue(_context(view, i, s, 3), USERNAME_CUES) else "EMAIL"
             out.append(_Hit(i, s, e, label, PRIORITY_VALIDATED, "email\x00" + text[s:e].lower()))
+        for m in _HANDLE_RE.finditer(text):
+            s, e = m.start(), _strip_trailing(text, m.start(), m.end(), "._")
+            if e - s < 4 or any(s < b and a < e for a, b in masks):
+                continue
+            claim(s, e)
+            out.append(_Hit(i, s, e, "USERNAME", PRIORITY_CUE, "user\x00" + text[s:e].lower()))
         for m in _IPV4_RE.finditer(text):
             claim(m.start(), m.end())
             ip = m.group()
@@ -288,19 +305,32 @@ class StructuredPass:
         spans = [(m.start(), m.end()) for m in re.finditer(r"\S+", text)]
         for idx, (s, e) in enumerate(spans):
             w = text[s:e].lower().strip(_TRAIL_PUNCT + "!")
+            nxt = text[spans[idx + 1][0]:spans[idx + 1][1]].lower().strip(_TRAIL_PUNCT) if idx + 1 < len(spans) else ""
             label = None
-            if _has_cue([w], SECRET_CUES):
+            if any(c.isdigit() for c in w) and w.startswith(GLUED_SECRET_CUES) and _credential_shaped(w):
+                # a cue word with digits glued on is itself a credential ('salasana123', 'pin1234')
+                ve = _strip_trailing(text, s, e, _TRAIL_PUNCT + "!")
+                if not any(s < b and a < ve for a, b in masks):
+                    out.append(_Hit(i, s, ve, "SECRET", PRIORITY_CUE, None))
+                continue
+            start = idx + 1  # first token scanned for the value
+            phrase = _phrase_cue(text, spans, idx)
+            if phrase:
+                label, start = "SECRET", idx + phrase  # 'one time code', 'personal identification number'
+            elif w in CODE_QUALIFIERS and nxt in CODE_WORDS and text[s:e][-1] not in _SENTENCE_END:
+                label = "SECRET"  # 'verification code', 'sms code' (the pair is the cue)
+            elif _has_cue([w], SECRET_CUES):
                 label = "SECRET"
             elif _has_cue([w], USERNAME_CUES) or (
                 w == "user" and idx + 1 < len(spans) and text[spans[idx + 1][0]:spans[idx + 1][1]].lower() in ("name", "id")
             ):
                 label = "USERNAME"
-            if label is None or text[s:e][-1] in _SENTENCE_END:
+            if label is None or text[spans[start - 1][0]:spans[start - 1][1]][-1] in _SENTENCE_END:
                 continue
             # skip filler words and further cue words, take the next value token; ordinary words may sit
             # between cue and value ('salasana taitaa olla X'), then only a credential-shaped token counts
             intervening = 0
-            for j in range(idx + 1, min(idx + 1 + CUE_SCAN_TOKENS, len(spans))):
+            for j in range(start, min(start + CUE_SCAN_TOKENS, len(spans))):
                 vs, ve = spans[j]
                 raw = text[vs:ve]
                 low = raw.lower().strip(_TRAIL_PUNCT)
@@ -315,21 +345,41 @@ class StructuredPass:
                 val = text[vs:ve]
                 if any(vs < b and a < ve for a, b in masks):
                     break
+                prev = [text[a:b].lower().strip(_TRAIL_PUNCT) for a, b in spans[start:j]]
+                # every cue word of the phrase counts ('wifi password is X': 'password' is the strong one)
+                cue_words = [w] + [x for x in prev if _has_cue([x], SECRET_CUES + USERNAME_CUES)]
                 if intervening:
                     ok = len(val) >= 5 and _credential_shaped(val)
                 else:
-                    ok = any(c.isdigit() for c in val) or (label == "USERNAME" and "@" in val)
-                    if not ok and _alpha_credential(val):
-                        # alphabetic values only as "<password-type cue> <copula> [hedge] VALUE<end of clause>"
-                        prev = [text[a:b].lower().strip(_TRAIL_PUNCT) for a, b in spans[idx + 1:j]]
-                        strong = label == "USERNAME" or _has_cue([w], STRONG_SECRET_CUES)
-                        copula = (not prev and text[s:e].endswith(":")) or bool(prev) and (
-                            prev[-1] in COPULAS or (len(prev) >= 2 and prev[-1] in HEDGES and prev[-2] in COPULAS))
-                        rest = text[ve:]
-                        clause_end = rest.strip() == "" or rest.lstrip()[:1] in ".,;!?)\"'"
-                        ok = strong and copula and clause_end
-                    if label == "SECRET" and val.isdigit() and not (4 <= len(val) <= 8):
-                        ok = False
+                    # a digit, or the gate's credential shape (mixed case, inner symbol, long), with or without
+                    # a copula ('password HunterTwo')
+                    ok = (any(c.isdigit() for c in val) or (label == "USERNAME" and "@" in val)
+                          or _credential_shaped(val))
+                    if not ok and _alpha_credential(val, finnish=_has_cue(cue_words, FINNISH_CUES)):
+                        # a plain word right after "<cue> <copula> [hedges]" is the value wherever the clause
+                        # ends ('password is sunflower today'); network-key cues ('wifi is X') only when it ends
+                        # the clause: mid-clause words after them are prose on the labelled train split
+                        copula = _copula_then_hedges(text[s:e], [text[a:b] for a, b in spans[start:j]])
+                        if label == "USERNAME" or _has_cue(cue_words, STRONG_SECRET_CUES):
+                            ok = copula
+                        elif _has_cue(cue_words, NETWORK_KEY_CUES):
+                            ok = copula and _clause_end(text, ve, spans, j, masks)
+                        if ok:
+                            # a credential-shaped token later in the same clause is the value, not this word
+                            k = _credential_ahead(text, spans, j, start + CUE_SCAN_TOKENS, masks)
+                            if k is not None:
+                                # the plain word right after the copula is redacted too (the gate's rule counts
+                                # it); the credential-shaped token is the value proper
+                                out.append(_Hit(i, vs, ve, label, PRIORITY_CUE, None))
+                                vs, ve = spans[k][0], _strip_trailing(text, spans[k][0], spans[k][1])
+                                val = text[vs:ve]
+                                if any(vs < b and a < ve for a, b in masks):
+                                    break
+                    if label == "SECRET" and val.isdigit():
+                        # a PIN/code is 3-8 digits; a password-type cue takes any digit string ('salasana 482')
+                        strong_digits = _has_cue(cue_words, PASSWORD_TYPE_CUES)
+                        if len(val) < 3 or (len(val) > 8 and not strong_digits):
+                            ok = False
                 if ok and len(val) >= 3:
                     # not masked: a validated identifier at the same place (HETU, phone) must still be found
                     # and outranks this cue-only reading in the pipeline's overlap resolution
@@ -389,7 +439,7 @@ class StructuredPass:
             # a line break inside the run (house number above, phone number on its own line): when the
             # part after the break is a phone by itself, it is not glued to the digits above it
             for q in range(a + 1, b):
-                if owner[q] != owner[q - 1] or s[q] not in "0+" or s[q - 1] == "-":
+                if owner[q] != owner[q - 1] or s[q] not in "0+":
                     continue
                 gap = view.turns[chain[owner[q]].turn_index].text[syms[q - 1].end:syms[q].start]
                 if "\n" not in gap:
@@ -517,7 +567,7 @@ def _value_key(label: str, digits: str, plus: bool) -> str:
     if label == "PHONE":
         from pets_release.pseudonym import normalise as pseudo_normalise
 
-        if digits.startswith("00358"):  # international call prefix written as 00
+        if digits.startswith("00") and len(digits) >= 10 and not plus:  # international call prefix written as 00
             digits, plus = digits[2:], True
 
         return "phone\x00" + pseudo_normalise(("+" if plus or digits.startswith("358") else "") + digits, "PHONE")
@@ -554,6 +604,8 @@ def _sub_segment_ok(res: tuple[str, int], syms: list[Sym], ctx: list[str]) -> bo
 
 def _classify_digits(d: str, plus: bool, ctx: list[str]) -> tuple[str, int] | None:
     n = len(d)
+    if plus and 8 <= n <= 15:
+        return "PHONE", PRIORITY_VALIDATED  # '+' + country code: E.164 is at most 15 digits
     device = _has_cue(ctx, DEVICE_CUES)
     if 13 <= n <= 19 and V.luhn_valid(d):
         if device or (n == 15 and d[:2] not in ("34", "37")) or (n >= 18 and d.startswith("89")):
@@ -568,6 +620,8 @@ def _classify_digits(d: str, plus: bool, ctx: list[str]) -> tuple[str, int] | No
         return "PHONE", PRIORITY_VALIDATED
     if d.startswith("0") and 7 <= n <= 11 and not plus:
         return "PHONE", PRIORITY_VALIDATED
+    if d.startswith("00") and d[2:3] != "0" and 10 <= n <= 15 and not plus:
+        return "PHONE", PRIORITY_VALIDATED  # international call prefix 00 + country code
     account = _has_cue(ctx, ACCOUNT_CUES)
     if account and 6 <= n <= 12:
         return "ACCOUNT_NUMBER", PRIORITY_CUE
@@ -607,31 +661,120 @@ _APIKEY_RE = re.compile(
 
 
 def _credential_shaped(val: str) -> bool:
-    """One token mixing letters with digits or symbols ('Kissa2024', 'x9!Lm', a hex key)."""
-    if re.search(r"\s", val):
-        return False
-    has_l = bool(re.search(r"[^\W\d_]", val))
-    has_d = any(c.isdigit() for c in val)
-    has_sym = bool(re.search(r"[!#$%&*+=?@_~^-]", val))
-    return (has_l and has_d) or (has_sym and (has_l or has_d))
-STRONG_SECRET_CUES = ("salasan", "password", "passw", "lösenord", "passphrase", "verkkoavain", "tunnuslause")
+    """One token the gate counts as a credential: the gate's own definition (a digit, a letter with an inner
+    symbol, mixed case, or 20+ alphanumerics; not a date or clock time), shared rather than copied."""
+    from pets_release.checks.cells._validators import _credential_shaped as gate_credential_shaped
+
+    if re.search(r"\s", val) or _DOUBLE_NAME.fullmatch(val.rstrip(_TRAIL_PUNCT + "!")):
+        return False  # a double-barrelled name ('Anna-Liisa') is mixed case but not a credential
+    return gate_credential_shaped(val)
+
+
+_DOUBLE_NAME = re.compile(r"[A-ZÅÄÖ][a-zåäöé]+(?:-[A-ZÅÄÖ][a-zåäöé]+)+")
+
+
+STRONG_SECRET_CUES = ("salasan", "password", "passw", "lösenord", "passphrase", "verkkoavain", "tunnuslause",
+                      # every gate secret-type cue whose copula + plain word counts (text and cell rescans)
+                      "pwd", "passcode", "tunnussana", "token", "api", "apikey", "api-key")
+# network-key cues: a plain word after '<cue> <copula>' only when it ends the clause ('wifi is sunflower.');
+# mid-clause words after them ('wifi is slow in the evening') are prose on the labelled train split
+NETWORK_KEY_CUES = ("wifi", "wi-fi", "wlan", "wpa")
+# Finnish cues: the Finnish past-participle endings ('vaihdettu', 'unohtunut') mark prose only after these
+FINNISH_CUES = ("salasan", "tunnus", "käyttäjä", "kirjautumis", "verkkoavain", "wlan-avain", "koodi")
+# multi-word cues; the scan for the value starts after the whole phrase
+PHRASE_CUES = (("one", "time", "code"), ("one", "time", "password"), ("one", "time", "passcode"),
+               ("one", "time", "pin"), ("personal", "identification", "number"), ("card", "verification", "value"),
+               ("card", "verification", "code"), ("card", "security", "code"))
+
+
+def _phrase_cue(text: str, spans: list[tuple[int, int]], idx: int) -> int:
+    """Length in tokens of a multi-word cue starting at token ``idx`` (0 if none)."""
+    for ph in PHRASE_CUES:
+        if idx + len(ph) > len(spans):
+            continue
+        words = [text[a:b].lower().strip(_TRAIL_PUNCT + "!") for a, b in spans[idx:idx + len(ph)]]
+        if tuple(words) == ph and not any(text[b - 1] in _SENTENCE_END for _a, b in spans[idx:idx + len(ph) - 1]):
+            return len(ph)
+    return 0
+
+
+def _credential_ahead(text: str, spans: list[tuple[int, int]], j: int, stop: int, masks=()) -> int | None:
+    """Index of a credential-shaped token (letters with digits/symbols/mixed case) after token ``j`` in the same
+    clause and scan window, or None."""
+    for k in range(j + 1, min(stop, len(spans))):
+        if text[spans[k - 1][1] - 1] in _SENTENCE_END + ",;":
+            return None
+        if any(spans[k][0] < b and a < spans[k][1] for a, b in masks):
+            return None  # another identifier (e-mail, URL) ends the clause
+        tok = text[spans[k][0]:_strip_trailing(text, spans[k][0], spans[k][1])]
+        if any(c.isalpha() for c in tok) and _credential_shaped(tok):
+            return k
+    return None
+
+
+def _copula_then_hedges(cue_tok: str, between: list[str]) -> bool:
+    """A copula or colon between cue and value, followed by nothing but hedges ('password is probably X');
+    any other word after the copula ('is the X', 'is not X') makes the plain word a description."""
+    words = [t.lower().strip(_TRAIL_PUNCT) for t in between]
+    raw = [t for t in between]
+    cop = [k for k, (wd, r) in enumerate(zip(words, raw)) if wd in COPULAS or r.endswith(":") or r in (":", "=")]
+    if not cop:
+        return cue_tok.endswith(":") and all(wd in HEDGES for wd in words)
+    return all(wd in HEDGES for wd in words[cop[-1] + 1:])
+GLUED_SECRET_CUES = STRONG_SECRET_CUES + ("pin", "puk", "salasana")
+# password-type and network-key cues: a digit value after one may be longer than a PIN ('salasana 48213579')
+PASSWORD_TYPE_CUES = STRONG_SECRET_CUES + ("pwd", "lösen", "tunnussana", "wifi", "wi-fi", "wlan", "wpa")
 COPULAS = frozenset({"on", "oli", "is", "was", "är", "var", ":", "="})
 HEDGES = frozenset({"varmaan", "kai", "luultavasti", "ehkä", "probably", "maybe", "still", "edelleen", "nog",
                     "kanske", "typ", "fortfarande", "nyt", "now", "nu"})
 # Words that commonly follow "password is / salasana on / lösenordet är" as prose, not as the value
 # (general-language list, not derived from the kit).
-CREDENTIAL_PROSE = frozenset(["not", "no", "none", "never", "ei", "eikä", "inte", "icke", "wrong", "incorrect", "invalid", "expired", "changed", "correct", "right", "ok", "okay", "fine", "working", "broken", "locked", "blocked", "lost", "forgotten", "unknown", "new", "old", "same", "different", "too", "very", "still", "also", "just", "really", "väärä", "oikea", "vanha", "uusi", "sama", "eri", "liian", "tosi", "vielä", "edelleen", "myös", "vain", "hukassa", "lukossa", "voimassa", "vanhentunut", "vaihdettu", "unohtunut", "kadonnut", "estetty", "jotain", "mikä", "mitä", "tämä", "tuo", "sinun", "teidän", "minun", "hyvä", "huono", "pitkä", "lyhyt", "fel", "rätt", "gammal", "gamla", "ny", "nya", "samma", "annan", "för", "mycket", "fortfarande", "också", "bara", "glömt", "ändrat", "borta", "låst", "spärrat", "något", "vad", "detta", "det", "din", "ditt", "er", "bra", "dålig", "lång", "kort", "the", "a", "an", "my", "your", "this", "that", "what", "something", "required", "needed"])
+CREDENTIAL_PROSE = frozenset(["not", "no", "none", "never", "ei", "eikä", "inte", "icke", "wrong", "incorrect", "invalid", "expired", "changed", "correct", "right", "ok", "okay", "fine", "working", "broken", "locked", "blocked", "lost", "forgotten", "unknown", "new", "old", "same", "different", "too", "very", "still", "also", "just", "really", "väärä", "oikea", "vanha", "uusi", "sama", "eri", "liian", "tosi", "vielä", "edelleen", "myös", "vain", "hukassa", "lukossa", "voimassa", "vanhentunut", "vaihdettu", "unohtunut", "kadonnut", "estetty", "jotain", "mikä", "mitä", "tämä", "tuo", "sinun", "teidän", "minun", "hyvä", "huono", "pitkä", "lyhyt", "fel", "rätt", "gammal", "gamla", "ny", "nya", "samma", "annan", "för", "mycket", "fortfarande", "också", "bara", "glömt", "ändrat", "borta", "låst", "spärrat", "något", "vad", "detta", "det", "din", "ditt", "er", "bra", "dålig", "lång", "kort", "the", "a", "an", "my", "your", "this", "that", "what", "something", "required", "needed",
+    # function words and service-desk prose that follow a cue without being its value (general fi/sv/en)
+    "with", "from", "into", "about", "after", "before", "again", "when", "where", "which", "while", "here",
+    "there", "please", "thanks", "thank", "have", "does", "doesn", "didn", "isn", "wasn", "should", "would",
+    "could", "will", "cannot", "also", "only", "even", "then", "than", "page", "screen", "field", "details",
+    "info", "information", "problem", "problems", "issue", "issues", "reset", "change", "link", "account",
+    "service", "portal", "login", "user", "name", "username", "password", "code", "number", "missing",
+    "kanssa", "jolla", "joka", "jota", "jonka", "mutta", "koska", "että", "vielä", "taas", "uudelleen", "toimi",
+    "toimii", "toimiva", "sivu", "sivulle", "sivulla", "kenttä", "kenttään", "ongelma", "ongelmia", "nollaus",
+    "vaihto", "tili", "tilin", "palvelu", "palveluun", "tunnus", "tunnukset", "salasana", "sekä",
+    "till", "från", "eller", "fungerar", "sidan", "problem", "kontot", "tjänsten", "användarnamn", "lösenord"])
 
 
-def _alpha_credential(val: str) -> bool:
-    """An alphabetic credential right after an explicit cue: one token of 4-32 characters that is not a
-    common prose word and not a Finnish past participle ('vaihdettu', 'unohtunut')."""
+def _clause_end(text: str, ve: int, spans: list[tuple[int, int]], j: int, masks) -> bool:
+    """The value ends its clause: end of turn, closing punctuation, or the next token is itself an identifier
+    the redactor claims (a masked literal, an e-mail, or a number). A next token mixing letters and digits is
+    not a clause end: it is the more likely value ('password is now-ish Kissa2024')."""
+    rest = text[ve:]
+    if rest.strip() == "" or rest.lstrip()[:1] in ".,;!?)\"'":
+        return True
+    if j + 1 >= len(spans):
+        return True
+    ns, ne = spans[j + 1]
+    nxt = text[ns:ne].strip(_TRAIL_PUNCT)
+    if any(ns < b and a < ne for a, b in masks) or "@" in nxt:
+        return True
+    return bool(nxt) and re.fullmatch(r"\+?[\d\s()-]+", nxt) is not None
+
+
+def _alpha_credential(val: str, finnish: bool = False) -> bool:
+    """A plain-word credential after a cue: one token of 3-32 characters that is not a prose word (the
+    redactor's list plus the gate's shared list, ``checks._cues.PROSE_WORDS``) and, after a Finnish cue, not
+    a Finnish past participle ('vaihdettu', 'unohtunut'). No English suffix guess: 'alfred' is a name."""
+    from pets_release.checks._cues import PROSE_WORDS as GATE_PROSE
+
     low = val.lower()
-    if not (4 <= len(val) <= 32) or not re.fullmatch(r"[^\W\d_][\w!#$%&*+\-.@]*", val):
+    if not (3 <= len(val) <= 32) or not re.fullmatch(r"[^\W\d_][\w!#$%&*+\-.@]*", val):
         return False
-    if low in CREDENTIAL_PROSE or low in FILLER:
+    if low in CREDENTIAL_PROSE or low in FILLER or low in GATE_PROSE or low in _PROSE_EXTRA:
         return False
-    return not re.search(r"(?:ttu|tty|nut|nyt|ttiin|tetty|tettu)$", low)
+    return not (finnish and re.search(r"(?:ttu|tty|nut|nyt|ttiin|tetty|tettu)$", low))
+
+
+# Whole words (no suffix rules) that follow 'password was ...' as prose: adverbs and English participles
+_PROSE_EXTRA = frozenset(["last", "already", "updated", "sent", "saved", "stored", "encrypted", "hidden",
+                          "shared", "case-sensitive"])
 
 
 def _email_tokens(text: str, masks) -> list[Token]:
