@@ -135,6 +135,14 @@ output, measured privacy and utility, and scenario and limitations. The targets 
 keeps strict utility thresholds separate from allowed sacrifice floors. Missing scores
 are **not measured**, never assumed met.
 
+Add `--measured` to the server launch to opt in to the slower production
+`pets_release.measure.wire` path instead of plain `run`. View 4 then shows measured
+privacy components, and attacker linkage rates when available, from the signed manifest
+only after both verification tiers pass. Plain mode keeps privacy **not measured**.
+Aggregate utility/composite are not in the signed manifest and remain explicitly
+unavailable; purpose-check scores are shown separately. Changed release bytes withdraw
+the proof. This mode inherits the same offline guard and server-environment key.
+
 The protected-rows view shows the first 10 released rows per table (`--preview-rows N`,
 1–25). Every display re-runs limited verification on the release and an exact-byte
 snapshot, and checks manifest-listed file digests. No raw input, row maps, `truth/`,

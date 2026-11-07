@@ -71,7 +71,7 @@ with response:
 @contextmanager
 def running(tmp_path, *, extra_env=None, edit=coarse_qis, probe=False, verifier_unavailable=False,
             remove_refusal_report=False, record_commands=False, launch_extra=(), measured_kit=False,
-            swap_during_verify=False):
+            swap_during_verify=False, remove_source_before_full=False):
     kit = build_kit(tmp_path / "kit", edit)
     if measured_kit:
         prepare_measured_kit(kit)
@@ -101,7 +101,7 @@ sys.argv = {command[2:]!r}
 runpy.run_module("pets_release.ui", run_name="__main__")
 '''
         command = [sys.executable, "-c", code]
-    if verifier_unavailable or remove_refusal_report or record_commands or swap_during_verify:
+    if verifier_unavailable or remove_refusal_report or record_commands or swap_during_verify or remove_source_before_full:
         # Fault only at the external-process boundary, after a real successful run.
         # Never replace a production check with a passing stub.
         code = f'''
@@ -110,6 +110,8 @@ original = subprocess.run
 manifest_path = pathlib.Path({str(tmp_path / 'out' / 'run-1' / 'privacy_manifest.json')!r})
 swap = {{}}
 def external_process(command, *args, **kwargs):
+    if {remove_source_before_full!r} and len(command) > 4 and command[3:5] == ["verify", "--full"]:
+        pathlib.Path({str(kit / 'data' / 'health' / 'ed_visits.csv')!r}).unlink()
     if {record_commands!r}:
         with pathlib.Path({str(tmp_path / 'commands.jsonl')!r}).open("a") as handle:
             handle.write(json.dumps(command) + "\\n")
@@ -294,6 +296,21 @@ def test_measured_mode_matches_wire_bytes_and_shows_privacy(tmp_path):
         assert proc.returncode == 0, "reference measured CLI failed"
         assert {p.name: p.read_bytes() for p in (out / "run-1").iterdir()} == {
             p.name: p.read_bytes() for p in reference.iterdir()}
+        # #151 applies unchanged to measured proof: even a schema-valid planted claim
+        # withdraws every score, not just rows/dashboard access.
+        manifest_path = out / "run-1" / "privacy_manifest.json"
+        manifest = json.loads(manifest_path.read_bytes())
+        manifest["residualRisks"][0]["description"] = "Synthetic planted measured claim"
+        manifest_path.write_bytes(canonical_bytes(manifest))
+        changed = json.loads(request(url, "/api/result")[1])
+        assert changed["status"] == "CHANGED"
+        for field in ("measured", "gate", "targets", "residualRisks", "verification"):
+            assert field not in changed, field
+        assert not any(s["name"].startswith("verify") for s in changed["steps"])
+        page = request(url, "/demo/measurements")[1]
+        assert "Synthetic planted measured claim" not in page
+        assert f'<tr><td>privacy</td><td>{privacy["before"]}</td><td>{privacy["after"]}</td></tr>' not in page
+        assert request(url, "/dashboard")[0] == 422
 
 
 def test_explicit_hand_plan_matches_cli_bytes(tmp_path):
@@ -510,21 +527,15 @@ def test_refusal_without_report_is_explicit(tmp_path):
         assert "No refusal report available" in page
 
 
-def test_failed_full_verification_is_not_pending(tmp_path):
+@pytest.mark.parametrize("measured", [False, True], ids=["plain", "measured"])
+def test_failed_full_verification_is_not_pending(tmp_path, measured):
     """HTTP + CLI seam: source disappears after run -> real full verify fails visibly."""
-    with running(tmp_path) as (_, url, kit, _):
+    with running(tmp_path, measured_kit=measured, launch_extra=("--measured",) if measured else (),
+                 remove_source_before_full=True) as (_, url, _, _):
         assert request(url, "/api/run", data={"scenario": "HEALTH-S1"})[0] == 202
-        deadline = time.monotonic() + 120
-        while time.monotonic() < deadline:
-            state = json.loads(request(url, "/api/result")[1])
-            if len(state["steps"]) >= 2:
-                break
-            time.sleep(0.02)
-        else:
-            raise AssertionError("limited verification never started")
-        (kit / "data" / "health" / "ed_visits.csv").unlink()
         report = result(url)
         assert report["status"] == "FAILED"
+        assert report["steps"][1] == {"name": "verify (limited)", "exit": 0}
         assert report["steps"][2]["exit"] != 0
         # A release that failed a verify tier publishes no proof: no gate, assertions, scores or met targets.
         for field in ("gate", "exportAssertions", "assertionEvidence", "measured", "personK", "sacrifices"):
