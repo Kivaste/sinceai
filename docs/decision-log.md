@@ -522,3 +522,19 @@ CS-S1 chain done-report + 4 reviews (23 + #53/#54/#56/#92) -> merge -> #63 -> 25
 - **Decision:** The two entries above headed "14:28-14:52" and "14:52 - STATUS" were written at 14:37 EET. The orchestrator misread the clock. The #120 close comment's "14:50 EET" is also 14:37 EET. The content is unchanged.
 - **Why:** The log is append-only, so the times are corrected in a new entry.
 - **Evidence:** heartbeat timestamp 2026-11-07T12:37:35Z.
+
+### Sat 14:45 - D45 relayed with a recall conflict; utilization nudge (12:38Z) handled; #129 filed
+
+- **When:** Sat 14:40-14:45 EET
+- **Decision:**
+  1. D45 (human, 14:39) was relayed to the CS-S1 owner (ses_e4aac068) by steer. Conflict logged: D45 cites held-out SECRET recall 15/17, but the owner reported 17/17 at 59c4652 after e47bedb changed the redactor in response to Sol r1 Spec findings about the held-out misses. The steer requires both figures in the manifest target notes and residualRisks, with counts and denominators, and states that the post-change figure is optimistic (held-out contamination). The 0.98 target stays and is reported as not shown met on untouched data. No further recall tuning. The rest of the D38 window goes to the `_shape()` alternation/repeat fail-open (high), red first, then head-bound real-kit evidence and Sol delta reviews.
+  2. Nudge items that cannot be dispatched:
+     - ticket/23-cs-s1: owner live (ses_e4aac068).
+     - fu53, fu54, fu92: superseded leftovers; their fixes are on ticket/23-cs-s1 (D29). Native blocked-by #24 added.
+     - #121: approved; native blocked-by #117 added.
+     - fu63, fu65, fu66, fu69: built on ticket/23-cs-s1, with existing native #24 edges.
+     - #94: the code merged; it closes on the final-SHA proof (close-gate head binding).
+     Commented on each issue.
+  3. The monitor ignores native blockers on branch items. This is the second occurrence (13:28, 14:38), filed as #129 (Sol). It is blocked by #125, because #125+#126 edit the same script.
+- **Why:** AGENTS.md: a defect class found twice becomes an automated check. Single owner for the CS-S1 chain (D29). Transparency on unmet targets (D40, D45).
+- **Evidence:** steer message msg_1b605012 to ses_e4aac068; issue comments on #53, #54, #63, #65, #66, #69, #92, #94, #121; #129.
