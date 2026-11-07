@@ -167,13 +167,47 @@ def test_release_runs_both_verify_tiers_dashboard_and_checks_aggregates(smoke_ch
     assert "run" in record["scenarios"]["CS-S1"]["steps"]
 
 
+def test_default_smoke_does_not_require_measured_delivery(smoke_checkout):
+    """Rule: D34 defaults run only plain HEALTH-S1 and unsupported CS-S1 (CLI seam)."""
+    (smoke_checkout.path / "src/pets_release/measure/wire.py").unlink()
+    sha = smoke_checkout.commit()
+    result = smoke_checkout.run(smoke_checkout.kit())
+    record = smoke_checkout.record(sha)
+    assert record["scenarios"]["HEALTH-S1"]["pass"] is True
+    assert record["scenarios"]["CS-S1"]["steps"]["run"]["exitCode"] == 2
+    assert record["scenarios"]["CS-S1"]["pass"] is True
+    assert record["delivery"]["HEALTH-S1"] == {"status": "not-requested", "pass": None}
+    assert smoke_checkout.validate(record) == 0
+    for invalid_verdict in (True, False):
+        forged = deepcopy(record)
+        forged["delivery"]["HEALTH-S1"]["pass"] = invalid_verdict
+        assert smoke_checkout.validate(forged) == 1
+    assert not list((smoke_checkout.output / sha).glob("attempt-*/measured"))
+    assert record["pass"] is True
+    assert result.returncode == 0
+
+
+def test_default_timeout_has_margin_beyond_observed_d34_runtime(smoke_checkout):
+    """Rule: the default budget covers the observed 713-second D34 path with margin (CLI seam)."""
+    sha = smoke_checkout.commit()
+    result = smoke_checkout.run(smoke_checkout.kit(), fault="advance-clock-800")
+    assert smoke_checkout.observation() == {"advancedSeconds": 800}
+    record = smoke_checkout.record(sha)
+    health = record["scenarios"]["HEALTH-S1"]
+    assert health["steps"]["run"]["status"] == "completed"
+    assert all(step["exitCode"] == 0 for step in health["steps"].values())
+    assert record["pass"] is True
+    assert result.returncode == 0
+
+
 def test_cli_generated_record_is_canonical_and_closed_at_every_level(smoke_checkout):
     """Rule: content-free records reject unknown keys, including nested ones (CLI seam)."""
     sha = smoke_checkout.commit()
     smoke_checkout.run(smoke_checkout.kit())
     record = smoke_checkout.record(sha)
     assert smoke_checkout.validate(record) == 0  # actual producer, not a hand-built writer/reader pair
-    paths = [(), ("scenarios", "HEALTH-S1"), ("scenarios", "HEALTH-S1", "steps", "run"),
+    paths = [(), ("delivery", "HEALTH-S1"), ("scenarios", "HEALTH-S1"),
+             ("scenarios", "HEALTH-S1", "steps", "run"),
              ("scenarios", "HEALTH-S1", "gate"), ("scenarios", "HEALTH-S1", "personK"),
              ("scenarios", "HEALTH-S1", "purpose", "H-U2")]
     outcomes = []
@@ -237,7 +271,7 @@ def test_requested_revision_must_match_actual_head(smoke_checkout):
 def test_head_change_during_run_invalidates_every_lane(smoke_checkout):
     """Rule: completion must recheck HEAD, even after a real passing release (CLI seam)."""
     sha = smoke_checkout.commit()
-    result = smoke_checkout.run(smoke_checkout.kit(), fault="head-drift")
+    result = smoke_checkout.run(smoke_checkout.kit(), "--measured-delivery", fault="head-drift")
     assert smoke_checkout.observation() == {}
     assert smoke_checkout.git("rev-parse", "HEAD") != sha
     record = smoke_checkout.record(sha)
@@ -256,9 +290,9 @@ def test_interruption_leaves_atomically_invalidated_evidence(smoke_checkout):
     """Rule: replace stale evidence atomically before work, even on abrupt exit (CLI seam)."""
     sha = smoke_checkout.commit()
     kit = smoke_checkout.kit()
-    smoke_checkout.run(kit)
+    smoke_checkout.run(kit, "--measured-delivery")
     assert smoke_checkout.record(sha)["scenarios"]["HEALTH-S1"]["pass"] is True
-    result = smoke_checkout.run(kit, fault="interrupt-after-invalidation")
+    result = smoke_checkout.run(kit, "--measured-delivery", fault="interrupt-after-invalidation")
     assert result.returncode == 86
     record = smoke_checkout.record(sha)
     assert record["pass"] is False
@@ -319,11 +353,12 @@ def test_measured_delivery_is_required_even_when_plain_release_passes(smoke_chec
     if missing:
         (smoke_checkout.path / "src/pets_release/measure/wire.py").unlink()
     sha = smoke_checkout.commit()
-    result = smoke_checkout.run(smoke_checkout.kit())
+    result = smoke_checkout.run(smoke_checkout.kit(), "--measured-delivery")
     record = smoke_checkout.record(sha)
     assert record["scenarios"]["HEALTH-S1"]["pass"] is True
     assert "delivery" in record, "the measured delivery CLI must actually run"
     delivery = record["delivery"]["HEALTH-S1"]
+    assert delivery.get("status") != "not-requested", "requested measured delivery must execute"
     assert delivery["steps"]["run"]["status"] == "completed"
     assert delivery["steps"]["run"]["exitCode"] == (1 if missing else 2)
     assert delivery["pass"] is False

@@ -9,6 +9,7 @@ import runpy
 import shlex
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 
@@ -42,6 +43,12 @@ def main():
                 os._exit(86)  # Abrupt exit: no finally block or final evidence write.
         if state["fired"]:
             return
+        if (fault == "advance-clock-800" and command
+                and "run" in command and "HEALTH-S1" in command):
+            state["fired"] = True
+            original_clock = time.monotonic
+            time.monotonic = lambda: original_clock() + 800
+            observation.write_text('{"advancedSeconds":800}', encoding="utf-8")
         if command and "run" in command and "CS-S1" in command:
             if fault == "cs-process-error":
                 state["fired"] = True

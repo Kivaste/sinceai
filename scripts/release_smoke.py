@@ -56,7 +56,14 @@ def validate_record(record):
         for name, digest in inputs.items():
             if not re.fullmatch(r"[a-z][a-z0-9_]*", name) or not re.fullmatch(r"[0-9a-f]{64}", digest):
                 raise ValueError("invalid input digest")
-    results = [*record["scenarios"].values(), *record["delivery"].values()]
+    results = list(record["scenarios"].values())
+    delivery = record["delivery"]["HEALTH-S1"]
+    if isinstance(delivery, dict) and delivery.get("status") == "not-requested":
+        exact(delivery, "status pass")
+        if delivery["pass"] is not None:
+            raise ValueError("unrequested delivery cannot have a verdict")
+    else:
+        results.append(delivery)
     for scenario in results:
         exact(scenario, "expected steps gate failures personK purpose dashboardWritten pass error")
         if scenario["expected"] not in (None, "released", "refused"):
@@ -265,7 +272,9 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--kit", type=Path, default=None)
     parser.add_argument("--out-root", type=Path, default=DEFAULT_OUTPUT)
-    parser.add_argument("--timeout", type=float, default=720, help="total CLI time budget in seconds")
+    parser.add_argument("--timeout", type=float, default=900, help="total CLI time budget in seconds (default: 900)")
+    parser.add_argument("--measured-delivery", action="store_true",
+                        help="also require measured HEALTH-S1 delivery (not part of the default D34 lanes)")
     parser.add_argument("--sha", help="require this exact full Git HEAD")
     parser.add_argument("--validate-record", type=Path, help="check record format only; never reruns the smoke")
     args = parser.parse_args()
@@ -293,7 +302,8 @@ def main():
     evidence.mkdir(parents=True, exist_ok=True)
     record = {"sha": sha, "toolRevision": sha, "metadataDigest": None,
               "inputs": {s: {} for s in SCENARIOS}, "scenarios": {s: new_result(None) for s in SCENARIOS},
-              "delivery": {"HEALTH-S1": new_result("released")},
+              "delivery": {"HEALTH-S1": new_result("released") if args.measured_delivery
+                           else {"status": "not-requested", "pass": None}},
               "pass": False}
     path = evidence / "smoke.json"
     write_record(path, record)
@@ -324,24 +334,27 @@ def main():
         record["metadataDigest"], record["inputs"] = input_bindings(kit)
         folder = Path(tempfile.mkdtemp(prefix="attempt-", dir=evidence))
         deadline = time.monotonic() + args.timeout
-        # Delivery and plain release are independent CLI lanes. Both are mandatory; neither can hide the other.
+        # Only D34 lanes run by default. Explicitly requested delivery is additionally mandatory.
         with ThreadPoolExecutor(max_workers=2) as pool:
-            measured = pool.submit(scenario_smoke, "HEALTH-S1", "released", kit, folder / "measured", sha,
-                                   record["inputs"]["HEALTH-S1"], env, deadline, measured=True)
+            if args.measured_delivery:
+                measured = pool.submit(scenario_smoke, "HEALTH-S1", "released", kit, folder / "measured", sha,
+                                       record["inputs"]["HEALTH-S1"], env, deadline, measured=True)
             for scenario in SCENARIOS:
                 record["scenarios"][scenario] = scenario_smoke(scenario, expectations[scenario], kit, folder,
                                                              sha, record["inputs"][scenario], env, deadline)
-            record["delivery"]["HEALTH-S1"] = measured.result()
+            if args.measured_delivery:
+                record["delivery"]["HEALTH-S1"] = measured.result()
         error = "identity-changed"
         if (git("rev-parse", "HEAD") != sha or git("status", "--porcelain=v1", "--untracked-files=all")
                 or input_bindings(kit) != (record["metadataDigest"], record["inputs"])):
             raise ValueError("identity changed")
         error = None
     except Exception:  # noqa: BLE001 - even a path/catalogue error may contain source values.
-        for scenario in [*record["scenarios"].values(), *record["delivery"].values()]:
+        for scenario in [*record["scenarios"].values(),
+                         *([record["delivery"]["HEALTH-S1"]] if args.measured_delivery else [])]:
             scenario.update({"pass": False, "error": error})
     record["pass"] = error is None and all(s["pass"] for s in [*record["scenarios"].values(),
-                                                              *record["delivery"].values()])
+                                       *([record["delivery"]["HEALTH-S1"]] if args.measured_delivery else [])])
     try:
         write_record(path, record)
     except Exception:  # noqa: BLE001 - retain the initial failed record, never echo contents.
