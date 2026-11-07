@@ -11,6 +11,7 @@ Rows (trigger -> result):
                                                    entries; one point per non-final entry; accepted counts match
   same release                                  -> the plan is the search's (the logged moves), not the hand plan
   run --plan bogus                              -> exit 2, no output folders
+  run --scenario CS-S1 (with or without --plan)  -> exit 2, message names ticket 23 and follow-up #96, no folders
   search finds no acceptable plan                -> exit 1, no release folder; refusal report + search log
   two runs without --plan                        -> byte-identical release folders and search logs
 """
@@ -125,6 +126,19 @@ def test_unknown_plan_is_a_usage_error(tmp_path):
     out = tmp_path / "out" / "rel"
     proc = cli(*search_args(kit, out, "--plan", "bogus"))
     assert proc.returncode == 2, proc.stdout + proc.stderr
+    assert not out.exists() and not (tmp_path / "out" / "rel.scoring").exists()
+
+
+@pytest.mark.parametrize("extra", [(), ("--plan", "hand")])
+def test_cs_s1_refuses_cleanly_naming_the_follow_up(tmp_path, extra):
+    """CS-S1 (release: ticket 23; search: follow-up #96) is not wired in this build: fail closed, say why."""
+    kit = build_kit(tmp_path / "kit", grouped_qis)
+    out = tmp_path / "out" / "rel"
+    args = ["run", "--scenario", "CS-S1", "--kit", str(kit), "--out", str(out), "--created", CREATED, *extra]
+    proc = cli(*args)
+    assert proc.returncode == 2, proc.stdout + proc.stderr
+    assert "CS-S1" in proc.stderr and "#96" in proc.stderr and "ticket 23" in proc.stderr
+    assert "RELEASED" not in proc.stdout
     assert not out.exists() and not (tmp_path / "out" / "rel.scoring").exists()
 
 

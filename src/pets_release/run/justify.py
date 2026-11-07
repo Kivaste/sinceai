@@ -70,7 +70,11 @@ def justify(plan: list, log: list, policy) -> list[dict]:
         else:
             rejected = [s for s in touching if not s["accepted"]]
             floor_reason = policy.floors[key].reason
-            if e["rung"] == WITHHELD:
+            if e["rung"] == WITHHELD and rejected:
+                lr = rejected[-1]
+                text = (f"search step {lr['step']}: withheld at the policy floor; {_describe(lr, key)}, "
+                        f"{_why(lr)} ({floor_reason})")
+            elif e["rung"] == WITHHELD:
                 text = f"search step 0: withheld at the policy floor ({floor_reason})"
             elif rejected:
                 lr = rejected[-1]

@@ -72,8 +72,8 @@ def check_search_privacy(final, policy) -> None:
 
     Releasable only when ``privacy_status`` is ``pass`` and ``privacy_targets`` lists exactly the policy's
     declared targets (by id and kind), each ``pass``; or ``not_applicable`` with no declared target and an
-    empty list. Anything else not ``pass`` refuses (RunRefused); a malformed or self-contradicting result is an
-    unknown state (RunError)."""
+    empty list. Anything else not ``pass`` refuses (RunRefused); a malformed or self-contradicting result
+    (including ``not_applicable`` with a non-empty target list) is an unknown state (RunError)."""
     if not isinstance(final, dict) or "privacy_status" not in final or "privacy_targets" not in final:
         raise RunError("search result has no privacy re-check")
     status, targets = final["privacy_status"], final["privacy_targets"]
@@ -81,7 +81,9 @@ def check_search_privacy(final, policy) -> None:
         raise RunError("search privacy targets malformed")
     declared = sorted((str(t.get("id")), str(t.get("kind"))) for t in policy.privacy_targets)
     if status == "not_applicable":
-        if declared or targets:
+        if targets:
+            raise RunError("search privacy re-check not applicable yet lists targets")
+        if declared:
             raise RunRefused("search privacy re-check not applicable although the policy declares targets")
         return
     if status != "pass":
@@ -115,7 +117,8 @@ def run_release(*, kit, scenario: dict, created: str, key_text: str, out, plan_n
                 tool_revision: str, recipient: str | None = None) -> RunOutcome:
     scenario_id = scenario.get("id")
     if scenario_id not in SCENARIO_SPEC:
-        raise RunError("run supports only HEALTH-S1 in this build")
+        raise RunError("run supports only HEALTH-S1 in this build; the CS-S1 release needs ticket 23 and its "
+                       "search is follow-up #96")
     if plan_name not in (None, "hand"):
         raise RunError("unknown --plan: only 'hand' (or no --plan, the search) is supported")
     policy = get_policy(scenario_id)

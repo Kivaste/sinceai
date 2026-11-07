@@ -20,6 +20,7 @@ from pathlib import Path
 from pets_release.cli import UsageError, resolve_run_context
 from pets_release.measure import MeasureRejected, measure, person_k_components
 from pets_release.offline import entry_point
+from pets_release.recipient import RecipientError, validate_recipient_id
 from pets_release.run import pipeline
 from pets_release.run.context import SCENARIO_SPEC
 from pets_release.writer import load_lineage, scoring_dir
@@ -30,7 +31,7 @@ def _digests(folder: Path) -> dict:
 
 
 def run_measured(*, kit, scenario: dict, created: str, key_text: str, out, plan_name: str,
-                 tool_revision: str):
+                 tool_revision: str, recipient: str | None = None):
     """Returns the final ``RunOutcome``. Raises RunError/RunRefused (21) or MeasureRejected (19)."""
     out = Path(out).absolute()
     work = out.with_name(out.name + ".measure")
@@ -40,7 +41,7 @@ def run_measured(*, kit, scenario: dict, created: str, key_text: str, out, plan_
     scid = scenario["id"]
     scratch = work / "pass1"
     first = pipeline.run_release(kit=kit, scenario=scenario, created=created, key_text=key_text, out=scratch,
-                                 plan_name=plan_name, tool_revision=tool_revision)
+                                 plan_name=plan_name, tool_revision=tool_revision, recipient=recipient)
     if first.status != "released":
         return first
     sc = first.scoring
@@ -65,7 +66,7 @@ def run_measured(*, kit, scenario: dict, created: str, key_text: str, out, plan_
     pipeline.build_narrative = with_measured
     try:
         final = pipeline.run_release(kit=kit, scenario=scenario, created=created, key_text=key_text, out=out,
-                                     plan_name=plan_name, tool_revision=tool_revision)
+                                     plan_name=plan_name, tool_revision=tool_revision, recipient=recipient)
     finally:
         pipeline.build_narrative = original
     if final.status == "released" and _digests(final.out) != _digests(scratch):
@@ -112,9 +113,18 @@ def main(argv: list[str]) -> int:
         print("measure.wire: tool revision unavailable (git HEAD)", file=sys.stderr)
         return 2
     a = ctx.args
+    if a.recipient is not None:
+        try:
+            validate_recipient_id(a.recipient)
+        except RecipientError as e:
+            print(f"measure.wire: {e}", file=sys.stderr)
+            return 2
     try:
         res = run_measured(kit=ctx.kit, scenario=ctx.scenario, created=ctx.created, key_text=ctx.key,
-                           out=a.out, plan_name=a.plan or "hand", tool_revision=rev)
+                           out=a.out, plan_name=a.plan, tool_revision=rev, recipient=a.recipient)
+    except pipeline.RunRefused as e:  # a refusal is exit 1, as in `pets-release run`; our own content-free message
+        print(f"REFUSED: {str(e)[:200]}")
+        return 1
     except Exception as e:  # noqa: BLE001  content-free: class name and our own short messages only
         own = isinstance(e, (pipeline.RunError, MeasureRejected))  # only our own content-free messages
         print(f"measure.wire: {type(e).__name__}" + (f": {str(e)[:200]}" if own else ""), file=sys.stderr)
