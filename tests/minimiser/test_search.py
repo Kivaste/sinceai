@@ -32,6 +32,7 @@ Round-1 review fix (final privacy re-check covers every declared privacy target,
       floor on the ladder (alternative floor counted)           -> test_suppression_waiver_needs_via_coarser_on_ladder
   F21 sacrifice score_before is the start score, not the score
       just before the sacrifice took effect                     -> test_score_before_is_pre_suppression_score
+  F22 no QI released and a blank person id: hand rule passes k  -> test_no_qi_unidentified_record_suppressed_or_refused
 """
 
 from __future__ import annotations
@@ -449,3 +450,26 @@ def test_score_before_is_pre_suppression_score(syn):
     got = {x["check"]: x for x in res.sacrifices}
     assert got["U-FLAG"]["score_before"] == 0.95 and got["U-FLAG"]["score_after"] == 0.85
     assert got["U-TOWN"]["score_before"] == 1.0
+
+
+def _blank_person(syn):
+    tables = {t: df.copy() for t, df in syn.tables.items()}
+    tables["visits"].loc[0, "pid"] = ""  # one unidentified record
+    return tables
+
+
+def test_no_qi_unidentified_record_suppressed_or_refused(syn):
+    # no QI released: the production person-k check still runs (one class); an unidentified record is always
+    # a hit, so suppression drops it, and without suppression the plan is refused
+    tables = _blank_person(syn)
+    res = search(syn.policy(), tables, syn.keys, purpose=_all_ok, params=syn.params, kspec=syn.kspec)
+    assert res.suppressed["visits"] and 0 in res.suppressed["visits"]
+    assert res.final["privacy_status"] == "pass"
+    recs = {r["check"]: r for r in res.final["privacy"]["records"]}
+    assert recs["producer.person-k"]["status"] == "pass" and recs["producer.person-k"]["hits"] == 0
+    assert "vacuous" not in res.final["privacy"]
+    pol = syn.policy()
+    pol = type(pol)(**{**pol.__dict__, "suppression": None})
+    with pytest.raises(MinimiserRefused) as ei:
+        search(pol, tables, syn.keys, purpose=_all_ok, params=syn.params, kspec=syn.kspec)
+    assert "qi-k" in ei.value.reason

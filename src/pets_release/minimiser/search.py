@@ -9,7 +9,7 @@ Phases, each in fixed (table, column) order; linked columns move as one unit:
                columns and retry joint moves, accepting a policy-enumerated sacrifice at or above its floor
   final        local suppression to reach k, then an uncached re-check of every purpose check and every
                privacy target the policy declares on the full data. k_anonymity (persons) runs ticket 11's k
-               checks through 04's runner (no QI released: k holds iff at least k units remain); any other
+               checks through 04's runner (no QI released: person-k on one class, unidentified records hit); any other
                kind is unsupported and refuses the plan, as do a raising, refused or incomplete check run.
                A policy declaring no target records privacy ``not_applicable``, never ``pass``
 
@@ -146,6 +146,7 @@ class _Search:
         self.sacr = {s["check"]: s for s in policy.sacrifices}
         self.via_all = {(v["table"], v["column"]) for s in policy.sacrifices for v in s["via"]}
         self.floor_rung = {key: f.rung for key, f in policy.floors.items()}
+        self.start_ev = self.base_ev = None  # set by run() once the start and the strict phases are adopted
         self._units()
         self._check_inputs()
 
@@ -265,6 +266,14 @@ class _Search:
                 out[t] = pd.DataFrame(cols, index=src.index)
         return out
 
+    def k_view(self, prot) -> dict:
+        """Protected tables for the k checks: the person table is always present (rows only, if none of its
+        columns is released), so person-k sees every released person and unidentified record."""
+        pt = self.kspec["person"]["table"] if self.kspec else None
+        if pt is None or pt in prot:
+            return prot
+        return {**prot, pt: pd.DataFrame(index=self.src[pt].index)}
+
     def _col_digester(self, cand):
         by_out = {}
         for (t, c), (rung, pj, _) in cand.items():
@@ -303,7 +312,7 @@ class _Search:
                 results[chk] = r
                 self.stats["cache_misses"] += 1
         plan = self.plan_of(cand)
-        rv, pk = R.risk_vector(self.p, plan, prot, self.src, self.kspec, self.k)
+        rv, pk = R.risk_vector(self.p, plan, self.k_view(prot), self.src, self.kspec, self.k)
         if self.risk_extra is not None:
             extra = self.risk_extra(plan, prot)
             for c in self.p.risk_vector:
@@ -589,12 +598,13 @@ class _Search:
         bound = (f"; bound of {self.budget} candidates reached, best accepted candidate kept"
                  if self.stats["bound_reached"] else "")
         full = self.protected(cur)
-        suppressed, sup_persons, persons = self.suppress(full, plan)
+        suppressed, sup_persons, persons = self.suppress(self.k_view(full), plan)
         budget = (self.p.suppression or {}).get("max_share")
         prot = apply_suppression(full, suppressed)
+        kprot = apply_suppression(self.k_view(full), suppressed)
         results = self._final_purpose(prot)
-        priv, targets, pstatus = self._final_privacy(prot, plan, suppressed)
-        rv, _ = R.risk_vector(self.p, plan, prot, self.src, self.kspec, self.k)
+        priv, targets, pstatus = self._final_privacy(kprot, plan)
+        rv, _ = R.risk_vector(self.p, plan, kprot, self.src, self.kspec, self.k)
         if self.risk_extra is not None:
             ex = self.risk_extra(plan, prot)
             rv.update({c: float(ex[c]) for c in self.p.risk_vector if c not in rv and c in ex})
@@ -648,7 +658,7 @@ class _Search:
         return SearchResult(plan=plan, log=self.log, suppressed=suppressed, final=final, sacrifices=sacrifices,
                             stats=dict(self.stats), summary=summary)
 
-    def _final_privacy(self, prot, plan, suppressed):
+    def _final_privacy(self, kprot, plan):
         """Re-check every privacy target the policy declares, failing closed.
 
         Returns (k gate summary or None, [{id, kind, status}] sorted by id, overall status). A target passes only
@@ -659,32 +669,27 @@ class _Search:
         for t in sorted(self.p.privacy_targets, key=lambda x: str(x.get("id"))):
             kind = t.get("kind")
             if kind == "k_anonymity" and t.get("unit") == "persons":
-                status, priv = self._final_k(prot, plan, suppressed)
+                status, priv = self._final_k(kprot, plan)
             else:
                 status = "unsupported"
             out.append({"id": t.get("id"), "kind": kind, "status": status})
         overall = "not_applicable" if not out else ("pass" if all(r["status"] == "pass" for r in out) else "fail")
         return priv, out, overall
 
-    def _final_k(self, prot, plan, suppressed):
+    def _final_k(self, kprot, plan):
+        """Production k checks through 04's runner on the suppressed candidate (person table always present).
+        Required: person-k, plus row-k when a QI is released (``R.k_checks_for``); each must be ``pass``."""
         if self.k is None or self.kspec is None:
             return "error", None
-        if not R.contract_for(self.p, plan, self.k)["qi"]:
-            # no QI released: every unit remaining shares one class, so k holds iff there are at least k units
-            pt = self.kspec["person"]["table"]
-            gone = set(suppressed.get(pt, ()))
-            rows = [i for i in self.src[pt].index if i not in gone]
-            n = _units(self.src[pt][self.kspec["person"]["column"]], rows)
-            return ("pass" if n >= self.k else "fail"), {"refused": False, "registryError": None, "records": [],
-                                                          "vacuous": True, "units": n}
+        names = R.k_checks_for(R.contract_for(self.p, plan, self.k))
         try:
-            priv = R.gate_k(prot, plan, self.p, self.src, self.kspec, self.k)
+            priv = R.gate_k(kprot, plan, self.p, self.src, self.kspec, self.k)
         except Exception:  # noqa: BLE001 - the message could carry values
             return "error", None
         if not isinstance(priv, Mapping) or priv.get("refused") is not False or priv.get("registryError") is not None:
             return "error", (dict(priv) if isinstance(priv, Mapping) else None)
         recs = {r.get("check"): r.get("status") for r in priv.get("records") or [] if isinstance(r, Mapping)}
-        got = [recs.get(name) for name in ("producer.person-k", "producer.row-k")]
+        got = [recs.get(name) for name in names]
         if all(s == "pass" for s in got):
             return "pass", dict(priv)
         return ("fail" if all(s in ("pass", "fail") for s in got) else "error"), dict(priv)
