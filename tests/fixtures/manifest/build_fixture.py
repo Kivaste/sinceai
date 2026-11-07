@@ -149,6 +149,7 @@ SHA = "^[0-9a-f]{64}$"
 
 def contract() -> dict:
     return {
+        "k": 5,
         "files": {
             "ed_visits.csv": {
                 "required": ["age_band", "arrival_ts", "visit_id"],
