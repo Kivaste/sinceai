@@ -62,7 +62,7 @@ POLICY = ScenarioPolicy(
         {"id": "text-recall", "kind": "text_recall", "min": 0.98,
          "labels": ["NATIONAL_ID", "PAYMENT_CARD", "IBAN", "SECRET"]},
         {"id": "no-health-in-text", "kind": "health_in_text", "max_hits": 0},
-        {"id": "timestamps-hour", "kind": "timestamp_floor", "rung": "hour"},
+        {"id": "timestamps-hour", "kind": "timestamp_floor", "rung": "ts.hour"},
     ),
     floors=FLOORS,
     direct_identifiers=DIRECT,
