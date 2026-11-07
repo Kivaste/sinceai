@@ -6,7 +6,7 @@
 (b) Runtime: in a clean subprocess, import every ``pets_release`` module (walk_packages)
     and require that ``pets_attacker`` never entered ``sys.modules`` and that no file
     under the kit's truth/ directory was opened (audit hook on ``open``). The hook fails closed:
-    an ``open`` it cannot resolve to a path (an int fd, or any error inside the hook) is refused,
+    an ``open`` it cannot resolve (unknown target type, or any error inside the hook) is refused,
     recorded as ``hook-error``, and makes the child exit non-zero (``runtime-check-failed``).
 
 Residual risk: import names or paths computed at runtime are covered by (b) only for
@@ -89,8 +89,12 @@ hook_errors = []
 def hook(event, args):
     if event != "open":
         return
-    # Fail closed: an open the hook cannot resolve to a path (int fd, decode/resolve error) is refused.
+    # Fail closed: an open the hook cannot resolve (unknown target type, decode/resolve error) is refused.
+    # An int fd opens no new path: it wraps a pipe/socket or an fd from an os.open whose path was already
+    # audited here, so it is allowed (subprocess pipes at import time use it).
     try:
+        if args and type(args[0]) is int:
+            return
         if not args or not isinstance(args[0], (str, bytes, os.PathLike)):
             raise TypeError("unresolvable open target")
         p = os.path.normcase(os.path.realpath(os.fsdecode(args[0])))

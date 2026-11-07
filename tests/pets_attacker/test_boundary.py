@@ -165,7 +165,7 @@ def test_main_entry_modules_are_not_executed_by_the_runtime_walk(tmp_path: Path)
 
 
 # --- follow-up #77: the audit hook fails closed --------------------------------------------------------
-# Rule: any error inside the hook, and any `open` it cannot resolve to a path (an int fd), is a violation,
+# Rule: any error inside the hook, and any `open` target that is neither a path nor an int fd, is a violation,
 # blocks that open, and makes the child exit non-zero. Rows: hook error -> open refused -> import error ->
 # hook-error recorded -> child exit != 0 -> runtime-check-failed.
 _SABOTAGE = (
@@ -187,14 +187,30 @@ def test_runtime_hook_error_fails_closed_and_blocks_the_open(tmp_path: Path):
     assert "runtime-check-failed" in v  # the child exited non-zero
 
 
-def test_runtime_open_on_an_int_fd_is_a_violation(tmp_path: Path):
+def test_runtime_truth_opened_via_os_open_then_fd_is_caught(tmp_path: Path):
+    """The fd route: os.open is audited with its path, so wrapping the fd later cannot hide a truth read."""
+    truth = _truth(tmp_path)
+    p = str(truth / "health__ed_visits.csv")
+    code = f"import os\nfd = os.open({p!r}, os.O_RDONLY)\nopen(fd, encoding='utf-8').read()\n"
+    src = _tree(tmp_path, {"pets_release/fd.py": code})
+    assert "truth-opened" in runtime_violations(src, truth)
+
+
+def test_runtime_int_fd_of_a_non_truth_file_is_allowed(tmp_path: Path):
+    """Int fds wrap pipes (subprocess at import time) or already-audited opens; they are not violations."""
     other = tmp_path / "other.txt"
     other.write_text("x\n", encoding="utf-8")
     code = f"import os\nfd = os.open({str(other)!r}, os.O_RDONLY)\nopen(fd, encoding='utf-8').close()\n"
     src = _tree(tmp_path, {"pets_release/fd.py": code})
+    assert runtime_violations(src, _truth(tmp_path)) == []
+
+
+def test_runtime_unknown_open_target_type_is_a_hook_error(tmp_path: Path):
+    """An open event whose target is neither a path nor an int fd cannot be resolved: refused."""
+    code = "import sys\nsys.audit('open', 1.5, 'r', 0)\n"
+    src = _tree(tmp_path, {"pets_release/odd.py": code})
     v = runtime_violations(src, _truth(tmp_path))
-    assert "hook-error" in v
-    assert "runtime-check-failed" in v
+    assert "hook-error" in v and "runtime-check-failed" in v
 
 
 def test_kit_module_is_exempt_from_the_truth_scan_only(tmp_path: Path):
