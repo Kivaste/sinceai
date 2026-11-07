@@ -4,7 +4,8 @@ Rules / failure rows (the issue's agreed seam is print mode and real -Run):
 * A fixture change selects tests as ONE argument, not its individual characters.
 * A package-only change selects its mapped directory as ONE argument.
 * A changed test file remains ONE argument; a slow test is not executed.
-* A linked script checkout without a venv uses its shared checkout's interpreter.
+* A linked script checkout ignores planted Python and uses Git's shared checkout.
+* A missing shared interpreter fails closed even when a linked interpreter exists.
 * Pytest failure and empty collection keep their nonzero exit status.
 """
 
@@ -12,6 +13,8 @@ from __future__ import annotations
 
 import os
 import subprocess
+import sysconfig
+import venv
 from pathlib import Path
 
 import pytest
@@ -52,12 +55,14 @@ def repo(tmp_path: Path) -> Path:
     return repo
 
 
-def invoke(repo: Path, *, run: bool = False) -> subprocess.CompletedProcess[str]:
+def invoke(
+    repo: Path, *, run: bool = False, script: Path = SCRIPT,
+) -> subprocess.CompletedProcess[str]:
     env = dict(os.environ, PYTHONUTF8="1", TZ="UTC")
     env["PYTHONPYCACHEPREFIX"] = str(Path(env["LOCALAPPDATA"]) / "sinceai-pycache")
     return subprocess.run(
         [
-            "powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(SCRIPT),
+            "powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script),
             "-Worktree", str(repo), "-Base", "HEAD", *(["-Run"] if run else []),
         ],
         cwd=ROOT, env=env, capture_output=True, text=True, encoding="utf-8", timeout=90,
@@ -122,3 +127,55 @@ def test_pytest_nonzero_status_is_preserved(
     ran = invoke(repo, run=True)
     assert ran.returncode == exit_code, ran.stdout + ran.stderr
     assert summary in ran.stdout
+
+
+@pytest.fixture
+def linked_script_repo(repo: Path, tmp_path: Path) -> tuple[Path, Path]:
+    write(repo, "scripts/overnight/affected-tests.ps1", SCRIPT.read_text(encoding="utf-8"))
+    commit(repo)
+    linked = tmp_path / "linked worktree"
+    git(repo, "worktree", "add", "--detach", str(linked), "HEAD")
+    planted = linked / ".venv" / "Scripts" / "python.exe"
+    planted.parent.mkdir(parents=True)
+    # A real executable that exits successfully without importing or running pytest.
+    subprocess.run(
+        [
+            "powershell", "-NoProfile", "-Command",
+            "Add-Type -TypeDefinition 'public class FakePython { "
+            "public static int Main(string[] args) { return 0; } }' "
+            "-OutputType ConsoleApplication -OutputAssembly $env:PLANTED_PYTHON",
+        ],
+        env=dict(os.environ, PLANTED_PYTHON=str(planted)),
+        check=True, capture_output=True, text=True, timeout=60,
+    )
+    return repo, linked
+
+
+def test_linked_worktree_ignores_planted_interpreter(
+    linked_script_repo: tuple[Path, Path],
+) -> None:
+    """Rule: Git identity wins; planted exit-0 Python must not suppress pytest."""
+    shared, linked = linked_script_repo
+    shared_venv = shared / ".venv"
+    venv.EnvBuilder(with_pip=False).create(shared_venv)
+    # Reuse installed dependencies without installing anything into either venv.
+    write(shared_venv, "Lib/site-packages/shared.pth", sysconfig.get_path("purelib") + "\n")
+    ran = invoke(linked, run=True, script=linked / "scripts/overnight/affected-tests.ps1")
+    assert ran.returncode == 0, ran.stdout + ran.stderr
+    assert "1 passed" in ran.stdout, ran.stdout + ran.stderr
+    assert f"interpreter: {shared_venv / 'Scripts' / 'python.exe'}" in ran.stdout
+    main = invoke(shared, run=True, script=shared / "scripts/overnight/affected-tests.ps1")
+    assert main.returncode == 0, main.stdout + main.stderr
+    assert "1 passed" in main.stdout, main.stdout + main.stderr
+    assert f"interpreter: {shared_venv / 'Scripts' / 'python.exe'}" in main.stdout
+
+
+def test_missing_shared_interpreter_does_not_use_planted_fallback(
+    linked_script_repo: tuple[Path, Path],
+) -> None:
+    """Rule: missing identity-selected Python is failure, never fallback success."""
+    shared, linked = linked_script_repo
+    ran = invoke(linked, run=True, script=linked / "scripts/overnight/affected-tests.ps1")
+    assert ran.returncode != 0, ran.stdout + ran.stderr
+    assert f"interpreter: {shared / '.venv' / 'Scripts' / 'python.exe'}" in ran.stdout
+    assert "1 passed" not in ran.stdout
