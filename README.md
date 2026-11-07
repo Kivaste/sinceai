@@ -11,13 +11,18 @@ Team project for the **TrustED PETs Transformer** challenge at Since AI Hackatho
 
 Requirements: Python 3.10 or newer on `PATH` as `python` (the project uses 3.14), and the challenge kit. The kit is never committed: it lives in `Briefs/` (gitignored) or wherever you unpacked it.
 
+Use the venv executables directly: no activation or execution-policy change is needed,
+even under PowerShell's default `Restricted` policy.
+
 <!-- docs-test: skip reason=environment-setup -->
 ```powershell
 python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install -e ".[dev,eval]"
-python -m pip install -e "Briefs\TRUSTED_PETS_PROVING_GROUND_2026 (1)\TRUSTED_PETS_PROVING_GROUND_2026\toolkit"
+.\.venv\Scripts\python.exe -c "import sys; print(sys.executable)"
+.\.venv\Scripts\python.exe -m pip install -e ".[dev,eval]"
+.\.venv\Scripts\python.exe -m pip install -e "Briefs\TRUSTED_PETS_PROVING_GROUND_2026 (1)\TRUSTED_PETS_PROVING_GROUND_2026\toolkit"
 ```
+
+The interpreter check must print this clone's `.venv\Scripts\python.exe`, not a system Python.
 
 Settings come from the environment. Nothing is read from a file, and nothing is written back.
 
@@ -39,9 +44,12 @@ Check that the install works and that the kit is readable (these print table nam
 
 <!-- docs-test: run -->
 ```powershell
-pets-release --help
-pets-release kit-info --dataset health --kit "$env:PETS_KIT"
+.\.venv\Scripts\pets-release.exe --help
+.\.venv\Scripts\pets-release.exe kit-info --dataset health --kit "$env:PETS_KIT"
 ```
+
+In the later examples, use `.\.venv\Scripts\pets-release.exe` wherever they say
+`pets-release`; activation is not required.
 
 Exit codes: `0` success; `1` refusal or verify failure; `2` usage error or unknown state. Unknown counts as failure.
 
