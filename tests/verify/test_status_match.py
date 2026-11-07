@@ -58,7 +58,9 @@ def _full_checks(tb, bed, na_name=None):
 def _full(tb, bed, kit, checks):
     from pets_release.verify import verify_release
 
-    return verify_release(bed, full=True, kit=kit, master_key=MasterKey.from_text(tb.KEY), checks=checks)
+    # fixture rows are not a run of the kit: purpose re-run stubbed (real CLI coverage: tests/run/test_purpose_gate.py)
+    return verify_release(bed, full=True, kit=kit, master_key=MasterKey.from_text(tb.KEY), checks=checks,
+                          purpose=lambda *a: [])
 
 
 def _mismatch(rep):
@@ -124,6 +126,35 @@ def test_full_release_check_not_applicable_rerun_pass_fails(bed, kit, tb):
     assert _mismatch(rep), rep.lines
 
 
-def test_full_matching_statuses_still_pass(bed, kit, tb):
-    rep = _full(tb, bed, kit, _full_checks(tb, bed))
+def test_full_matching_statuses_still_pass(real_bed):
+    """#71: real registry and producer context (no stubs) on a real run release: attested == re-run."""
+    from pets_release.kit import Kit
+    from pets_release.run.context import verify_context
+    from pets_release.verify import verify_release
+
+    master = MasterKey.from_text(real_bed.KEY)
+    rep = verify_release(real_bed.release, full=True, kit=real_bed.kit, master_key=master,
+                         context=verify_context(Kit(real_bed.kit), master, real_bed.release))
     assert rep.ok, rep.lines
+    assert not _mismatch(rep)
+    assert {r.check for r in rep.records if r.scope == "producer"} >= {
+        "producer.key-material", "producer.original-values", "producer.person-k", "producer.unkeyed-hashes"}
+
+
+def test_full_attested_status_mismatch_on_real_bed_fails(real_bed, tb):
+    """#71: on the real bed, a producer record attested not_applicable while the real check passes -> mismatch."""
+    from pets_release.kit import Kit
+    from pets_release.run.context import verify_context
+    from pets_release.verify import verify_release
+
+    m = tb.load(real_bed.release)
+    for rec in m["gate"]["checks"]:
+        if rec["check"] == "producer.original-values":
+            rec.update(status="not_applicable", hits=0)
+            rec["denominator"]["n"] = 0
+    real_bed.resign(m)
+    master = MasterKey.from_text(real_bed.KEY)
+    rep = verify_release(real_bed.release, full=True, kit=real_bed.kit, master_key=master,
+                         context=verify_context(Kit(real_bed.kit), master, real_bed.release))
+    assert not rep.ok
+    assert any("producer.original-values" in x and "status mismatch" in x for x in rep.lines), rep.lines

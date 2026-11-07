@@ -132,6 +132,9 @@ def parse_interval(s: pd.Series, rung: str):
         for raw in _cells(s):
             if raw and not re.fullmatch(form, raw):
                 raise RungError("cell does not fit its declared rung")
+            m = _MONTH_HOUR.fullmatch(raw) if raw and rung == "ts.month_hour" else None
+            if m and not (1 <= int(m.group(2)) <= 12 and int(m.group(3)) <= 23):
+                raise RungError("cell does not fit its declared rung")
         return start, end
     cache: dict = {}
     for i, raw in enumerate(_cells(s)):
@@ -192,6 +195,8 @@ def _age_interval(s: pd.Series, rung: str):
             if not re.fullmatch(form, raw):
                 raise RungError("cell does not fit its declared rung")
             cache[raw] = _age_one(raw, rung)
+            if cache[raw][1] <= 0.0 or cache[raw][0] > AGE_MAX:  # wholly outside [0, AGE_MAX], as for adversary ages
+                raise RungError("protected age value outside a plausible age range")
         lo[i], hi[i] = cache[raw]
     return lo, hi
 
@@ -199,12 +204,16 @@ def _age_interval(s: pd.Series, rung: str):
 def _age_one(raw: str, rung: str):
     if rung.startswith("dob."):
         a, b = _interval_one(raw)
+        if a is None or b is None:  # fits the form but is not a real date (e.g. day 30 of February)
+            raise RungError("cell does not fit its declared rung")
         a, b = pd.Timestamp(a), pd.Timestamp(b)
         return (REF - b).days / 365.25, (REF - a).days / 365.25 + 1e-9
     if rung == "age.years":
         return float(raw), float(raw) + 1
     m = re.fullmatch(r"(\d+)-(\d+)", raw)
     if m:
+        if int(m.group(1)) > int(m.group(2)):  # inverted band
+            raise RungError("cell does not fit its declared rung")
         return float(m.group(1)), float(m.group(2)) + 1
     return float(raw[:-1]), 130.0  # "90+"
 
@@ -227,6 +236,8 @@ def _hod_keys(col: pd.Series) -> np.ndarray:
     out = np.full(len(col), -1, dtype=np.int64)
     for i, raw in enumerate(col.fillna("").astype(str).str.strip().tolist()):
         if raw:
+            if not re.fullmatch(_TIME_FORMS["ts.hour_of_day"], raw):
+                raise RungError("cell does not fit its declared rung")
             out[i] = int(raw[:2])
     return out
 

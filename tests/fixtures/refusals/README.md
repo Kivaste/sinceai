@@ -1,6 +1,8 @@
 # Refusal fixtures (ticket 04)
 
-Hand-made synthetic releases; no values come from the challenge kit. `contract.json` is shared by every case.
+Hand-made synthetic releases; no values come from the challenge kit. Everything here except this README and
+`.gitattributes` is written by `python scripts/gen_fixtures.py --all` (`generate_refusals`); a test fails if the
+committed files drift from the generator, so edit the generator, not the files. `contract.json` is shared by every case.
 Each `<case>/release/` is a candidate release folder; `<case>/expected.json` names the checks that must fail,
 with the expected file, column, count and row locations of each high-severity violation.
 

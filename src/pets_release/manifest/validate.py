@@ -60,12 +60,19 @@ def compute_signature(manifest: dict, signing_key: Any) -> str:
     return digest.hex()
 
 
+def _flagged(part: str) -> bool:
+    from pets_release.checks.cells._shape import flagged
+
+    return flagged(part)
+
+
 def _fmt(path) -> str:
     out = "$"
     for part in path:
         if isinstance(part, int):
             out += f"[{part}]"
-        elif _SAFE_KEY.match(part) and not _DIGIT_RUN.search(part):
+        elif _SAFE_KEY.match(part) and not _DIGIT_RUN.search(part) and not _flagged(part):
+            # a key the identifier detectors flag is masked in every diagnostic (round-2 review, #61)
             out += "." + part
         else:
             out += ".<key>"
@@ -84,6 +91,35 @@ def _order(errs: list[str], path: str, items: list, key) -> None:
     keys = [key(i) for i in items]
     if any(a >= b for a, b in itertools.pairwise(keys)):
         errs.append(f"{path}: order")
+
+
+def _rung_step_errors(m: dict) -> list[str]:
+    """#89: a released sacrifice-only rung needs exactly one sacrifice ``rungStep`` for that column and rung,
+    whose measured k at ``from`` exceeds the budget and whose check still scores >= 0.9 (fail closed); every
+    ``rungStep`` must match a released field at its ``to`` rung."""
+    from pets_release.ladders import SACRIFICE_ONLY_RUNGS
+    from pets_release.run.purpose import THRESHOLD
+
+    errs = []
+    steps = [(i, s) for i, s in enumerate(m["sacrifices"]) if "rungStep" in s]
+    released = {(f["table"], f["column"]): f["rung"] for f in m["fieldJustifications"] if f["decision"] == "released"}
+    for (t, c), rung in sorted(released.items()):
+        if rung not in SACRIFICE_ONLY_RUNGS:
+            continue
+        match = [s for _, s in steps if (s["rungStep"]["table"], s["rungStep"]["column"], s["rungStep"]["to"])
+                 == (t, c, rung)]
+        if len(match) != 1:
+            errs.append(f"{_fmt(['fieldJustifications'])}: {t}.{c}: rung-sacrifice-missing")
+    for i, s in steps:
+        st = s["rungStep"]
+        at = st["atFrom"]
+        if released.get((st["table"], st["column"])) != st["to"] or st["from"] == st["to"]:
+            errs.append(f"{_fmt(['sacrifices', i, 'rungStep'])}: field-mismatch")
+        if not at["share"] > at["maxShare"] or at["unitsSuppressed"] > at["unitsBefore"]:
+            errs.append(f"{_fmt(['sacrifices', i, 'rungStep', 'atFrom'])}: budget-not-exceeded")
+        if not isinstance(s["after"], (int, float)) or isinstance(s["after"], bool) or not s["after"] >= THRESHOLD:
+            errs.append(f"{_fmt(['sacrifices', i, 'after'])}: rung-sacrifice-check-not-strict")
+    return errs
 
 
 def _cross_field_errors(m: dict) -> list[str]:
@@ -130,6 +166,7 @@ def _cross_field_errors(m: dict) -> list[str]:
             errs.append(f"{_fmt(['contract', 'files', f, 'required'])}: not-in-columns")
     _order(errs, "$.gate.checks", m["gate"]["checks"], tk("check"))
     _order(errs, "$.sacrifices", m["sacrifices"], tk("check"))
+    errs += _rung_step_errors(m)
     _order(errs, "$.residualRisks", m["residualRisks"], tk("risk"))
     _order(errs, "$.fitFor", m["fitFor"], tk("scenario"))
     _order(errs, "$.notFitFor", m["notFitFor"], tk("scenario"))
@@ -137,6 +174,17 @@ def _cross_field_errors(m: dict) -> list[str]:
         errs.append("$.notFitFor: overlaps-fitFor")
     if m["release"]["scenario"] not in {f["scenario"] for f in m["fitFor"]}:
         errs.append("$.fitFor: missing-release-scenario")
+
+    # the pinned scenario policy fixes the k target and the released QI set (#62)
+    from pets_release.policy import contract_policy_problems
+
+    errs += [f"$.{p}" for p in contract_policy_problems(m["release"]["scenario"], m["contract"],
+                                                                   m["fieldJustifications"])]
+
+    # identifier-shaped text anywhere outside the pinned digest/signature metadata (#61)
+    from pets_release.manifest.value_scan import identifier_shape_errors
+
+    errs += identifier_shape_errors(m, _fmt)
 
     meas = m["measured"]
     lists = {"utility": ("tasks", tk("task")), "privacy": ("components", tk("component")),

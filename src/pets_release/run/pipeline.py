@@ -2,7 +2,7 @@
 
 Steps: load the scenario's dataset (01's ``Kit``, dtype=str) -> validate the hand plan (09) -> ``ladders.apply``
 (07) with release-scope keyed pseudonyms (06) -> local suppression of below-k persons (policy field, here) ->
-contract (10) -> producer context (``context.producer_context``, the same function ``verify --full`` uses) ->
+contract (10) -> full re-check of every purpose check (``run.purpose``; failing refuses, scores go in the manifest) -> producer context (``context.producer_context``, the same function ``verify --full`` uses) ->
 ``write_release`` (16: gate, manifest, signature, self-scan, atomic rename, ``<out>.scoring/``).
 """
 from __future__ import annotations
@@ -18,8 +18,10 @@ from pets_release.ladders import apply as apply_plan
 from pets_release.manifest import canonical_bytes, release_scope_id
 from pets_release.policy import get_policy, hand_plan, validate_plan
 from pets_release.pseudonym import MasterKey
+from pets_release.recipient import RecipientError, validate_recipient_id
 from pets_release.run.context import DEFAULT_RECIPIENT, SCENARIO_SPEC, producer_context, token_keys
 from pets_release.run.narrative import build_narrative
+from pets_release.run.purpose import evaluate as evaluate_purpose
 from pets_release.run.suppress import apply_suppression
 from pets_release.writer import Candidate, ProtectedTable, scoring_dir, write_release
 
@@ -51,8 +53,69 @@ def _sorted_like_writer(df: pd.DataFrame, final: list[str]) -> tuple[pd.DataFram
     return df.iloc[order].reset_index(drop=True), [final[i] for i in order]
 
 
+def _refuse(out: Path, report: dict) -> None:
+    sc = scoring_dir(out)
+    sc.mkdir(parents=True)
+    (sc / "refusal_report.json").write_bytes(canonical_bytes(report))
+
+
+_AT_FROM = ("unitsBefore", "unitsSuppressed", "share", "maxShare", "withinBound")
+
+
+def protect(plan, *, policy, source, master, scope_id, recipient):
+    """Plan -> (released, finals, suppressed, suppression report, contract): apply with release-scope pseudonyms,
+    contract, local suppression. One function for ``run`` and the ``verify --full`` re-measure of a rung step."""
+    released = apply_plan(plan, source, token_keys(master, scope_id, recipient))
+    spec = SCENARIO_SPEC[policy.scenario]
+    finals = {}
+    for stem, df in released.items():
+        rk = spec["record_keys"][stem]
+        finals[stem] = source[stem].loc[df.index, rk].tolist()  # apply keeps the source index
+        released[stem] = df.reset_index(drop=True).astype(str)
+    contract = generate_contract(policy, plan)
+    base = producer_context(scenario_id=policy.scenario, policy=policy, source=source, master=master,
+                            scope_id=scope_id, recipient=recipient, contract=contract, released=None)
+    released, finals, suppressed, sup = apply_suppression(released, finals, policy=policy, contract=contract,
+                                                          base_ctx=base)
+    return released, finals, suppressed, sup, contract
+
+
+def k_at_from(sup: dict) -> dict:
+    """The measured k result that justifies a rung sacrifice: suppression needed at `from` beyond the budget.
+    Fails closed (RunError) when any figure is missing or does not show the budget exceeded."""
+    if any(k not in sup for k in _AT_FROM):
+        raise RunError("rung sacrifice: k at the from rung not measured")
+    at = {k: sup[k] for k in _AT_FROM}
+    if at["withinBound"] is not False or not at["share"] > at["maxShare"] or not at["unitsBefore"] > 0:
+        raise RunError("rung sacrifice: k at the from rung does not exceed the suppression budget")
+    return at
+
+
+def rung_step(policy, rs: dict, contract: dict, at_from: dict) -> dict:
+    """Manifest ``rungStep`` record for an adopted rung sacrifice (aggregates and schema names only)."""
+    target = next(t["id"] for t in policy.privacy_targets if t["kind"] == "k_anonymity")
+    return {"check": rs["check"], "table": rs["table"], "column": rs["column"], "from": rs["from"], "to": rs["to"],
+            "privacyTarget": target, "k": contract["k"], "atFrom": dict(at_from)}
+
+
+def require_strict(purpose, steps):
+    """A rung sacrifice holds only if its check still passes strictly (status ok, score >= threshold) at `to`."""
+    from pets_release.run.purpose import THRESHOLD, PurposeResult
+
+    by = {t["task"]: t for t in purpose.tasks}
+    extra = []
+    for s in steps:
+        t = by.get(s["check"])
+        a = None if t is None else t["after"]
+        if t is None or t["status"] != "ok" or not isinstance(a, float) or not a >= THRESHOLD:
+            extra.append(f"purpose:{s['check']}:rung-sacrifice-not-strict")
+    if not extra:
+        return purpose
+    return PurposeResult(purpose.tasks, tuple(sorted(set(purpose.reasons) | set(extra))))
+
+
 def run_release(*, kit, scenario: dict, created: str, key_text: str, out, plan_name: str,
-                tool_revision: str) -> RunOutcome:
+                tool_revision: str, recipient: str | None = None) -> RunOutcome:
     scenario_id = scenario.get("id")
     if scenario_id not in SCENARIO_SPEC:
         raise RunError("run supports only HEALTH-S1 in this build")
@@ -70,28 +133,34 @@ def run_release(*, kit, scenario: dict, created: str, key_text: str, out, plan_n
     source = kit.load_dataset(policy.dataset)
     inputs = kit.input_digests(policy.dataset)
     master = MasterKey.from_text(key_text)
-    recipient = DEFAULT_RECIPIENT
+    if recipient is None:
+        recipient = DEFAULT_RECIPIENT
+    else:  # recipient-scoped keys (ticket 28): HKDF key + recipient-bound scope ID; manifest records the ID
+        try:
+            validate_recipient_id(recipient)
+        except RecipientError as e:
+            raise RunError(str(e)) from None
     rsid = release_scope_id(scenario=scenario_id, recipient=recipient, inputs=inputs, tool_revision=tool_revision)
 
-    released = apply_plan(plan, source, token_keys(master, rsid, recipient))
-    spec = SCENARIO_SPEC[scenario_id]
-    finals = {}
-    for stem, df in released.items():
-        rk = spec["record_keys"][stem]
-        finals[stem] = source[stem].loc[df.index, rk].tolist()  # apply keeps the source index
-        released[stem] = df.reset_index(drop=True).astype(str)
-    contract = generate_contract(policy, plan)
-
-    base = producer_context(scenario_id=scenario_id, policy=policy, source=source, master=master, scope_id=rsid,
-                            recipient=recipient, contract=contract, released=None)
-    released, finals, suppressed, sup = apply_suppression(released, finals, policy=policy, contract=contract,
-                                                          base_ctx=base)
+    released, finals, suppressed, sup, contract = protect(plan, policy=policy, source=source, master=master,
+                                                          scope_id=rsid, recipient=recipient)
+    # Enumerated rung sacrifices (#89): measured k at `from` beyond the suppression budget is the only trigger.
+    steps = []
+    for rs in policy.rung_sacrifices:
+        key = (rs["table"], rs["column"])
+        entry = next(e for e in plan if (e["table"], e["column"]) == key)
+        if entry["rung"] != rs["from"] or sup.get("withinBound", True):
+            continue
+        at_from = k_at_from(sup)
+        plan = [dict(e, rung=rs["to"], params={}, reason=rs["reason"][:500]) if (e["table"], e["column"]) == key
+                else e for e in plan]
+        validate_plan(plan, policy)
+        released, finals, suppressed, sup, contract = protect(plan, policy=policy, source=source, master=master,
+                                                              scope_id=rsid, recipient=recipient)
+        steps.append(rung_step(policy, rs, contract, at_from))
     if not sup.get("withinBound", True):
-        sc = scoring_dir(out)
-        sc.mkdir(parents=True)
-        (sc / "refusal_report.json").write_bytes(canonical_bytes(
-            {"status": "refused", "scenario": scenario_id, "reasons": ["suppression:share-above-max"],
-             "suppression": sup}))
+        _refuse(out, {"status": "refused", "scenario": scenario_id, "reasons": ["suppression:share-above-max"],
+                      "suppression": sup})
         raise RunRefused("suppression share above the policy bound")
 
     tables = []
@@ -108,8 +177,16 @@ def run_release(*, kit, scenario: dict, created: str, key_text: str, out, plan_n
         if rm["original_record_id"].tolist() != finals[stem]:
             raise RunError("row-map reconstruction disagrees with lineage")
 
+    # Full re-check of every purpose check on full data after suppression: a publication prerequisite.
+    purpose = evaluate_purpose(policy, source, ordered, root=kit.root)
+    purpose = require_strict(purpose, steps)
+    if not purpose.ok:
+        _refuse(out, {"status": "refused", "scenario": scenario_id, "reasons": list(purpose.reasons),
+                      "suppression": sup, "purpose": [dict(t) for t in purpose.tasks]})
+        raise RunRefused("purpose checks failed on the final release: " + ", ".join(purpose.reasons))
+
     narrative = build_narrative(policy=policy, plan=plan, scenario_ids=[s["id"] for s in kit.scenarios()],
-                                suppression=sup, k=contract["k"])
+                                suppression=sup, k=contract["k"], purpose=purpose, rung_steps=steps)
     cand = Candidate(
         scenario=scenario_id, recipient=recipient, tables=tuple(tables), contract=contract,
         tool_revision=tool_revision, created=created, narrative=narrative,

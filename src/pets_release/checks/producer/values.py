@@ -1,6 +1,6 @@
 """Producer-scope value checks: original identifier survival, unkeyed hashes, key material.
 
-Each scans every cell of every released CSV and every string in the manifest.
+Each scans every cell of every released CSV and every string and number (as its JSON text) in the\nmanifest; a non-finite constant or other unsupported scalar there is an error. Violation records name a\nfile or column only if the contract declares it, else a positional label (file#i, column#j).
 
 Original-value survival is a hit when any of these holds for a cell:
   - whole-cell equality (case-folded, whitespace collapsed) with an original value, any length;
@@ -15,13 +15,15 @@ Shorter originals inside longer text are not hits; that floor is deliberate (fal
 Key material: every supplied key must be at least MIN_KEY_FORM (16) characters/bytes, so every
 form (raw, hex, base64 std/url, padded or not) is scannable; a shorter key is an error.
 Originals and hash sets are built in memory from the source data and never
-leave this module; records carry only schema names, counts and row indices.
+leave this module; records carry only declared schema names, positional labels, counts and row indices.
 
 Context:
   source:       {table: DataFrame (dtype=str)}
   identifiers:  [{table, column}] source columns whose values are identifiers
                 (direct identifiers; hashing also covers technical identifiers listed here)
-  keys:         [str | bytes] key material (master and derived keys)
+  keys:         [key object | str | bytes] key material (master and derived keys). A key object exposes
+                ``scannable_forms() -> (exact, lowercase-hex)`` (pseudonym.keys.SecretKey); its raw bytes
+                are never read outside the keys module (#84)
 """
 
 from __future__ import annotations
@@ -78,38 +80,65 @@ def _whole(s: str) -> str:
     return " ".join(s.casefold().split())
 
 
-def _cells(release):
-    """Yield (file, column, location, text) for every released cell and manifest string.
+def _declared(contract) -> dict[str, set]:
+    """Contract-declared released file -> declared column names (schema names only)."""
+    files = (contract or {}).get("files") if isinstance(contract, dict) else None
+    out: dict[str, set] = {}
+    if isinstance(files, dict):
+        for name, spec in files.items():
+            cols = spec.get("columns") if isinstance(spec, dict) else None
+            out[str(name)] = {str(c) for c in cols} if isinstance(cols, dict) else set()
+    return out
 
-    Unique values per column are yielded once with all their row indices.
+
+def _cells(release, contract):
+    """Return (n, [(file label, column label, {text: [row indices]})]) over every released cell and manifest scalar.
+
+    Records carry content-free labels only: a file or column name appears as itself only when the contract
+    declares it (or it is the fixed manifest name); otherwise it is ``file#<i>`` (index in the sorted file
+    list) or ``column#<j>`` (header position), so a value planted in a name never reaches a record.
+    Unique values per column are listed once with all their row indices.
     """
     root = release_dir(release)
     files = sorted(p for p in root.iterdir() if p.is_file())
     if not files:
         raise CheckError("release folder is empty")
+    declared = _declared(contract)
     n = 0
     out = []
-    for p in files:
+    for fi, p in enumerate(files):
+        flabel = p.name if (p.name in declared or p.name == MANIFEST) else f"file#{fi}"
+        dcols = declared.get(p.name, set())
         if p.suffix.lower() == ".csv":
             df = read_csv(p)
-            for col in df.columns:
+            for j, col in enumerate(df.columns):
                 n += len(df)
                 rows = defaultdict(list)
                 for i, v in enumerate(df[col].tolist()):
                     if v:
                         rows[v].append(i)
-                out.append((p.name, col, rows))
-            out.append((p.name, "<header>", {c: [] for c in df.columns}))
+                out.append((flabel, col if col in dcols else f"column#{j}", rows))
+            out.append((flabel, "<header>", {c: [] for c in df.columns}))
         elif p.name == MANIFEST:
             strings: dict[str, list] = defaultdict(list)
-            _walk(json.loads(p.read_text(encoding="utf-8")), strings)
+            _walk(_load_manifest(p), strings)
             n += sum(len(v) for v in strings.values())
-            out.append((p.name, "", strings))
+            out.append((flabel, "", strings))
         else:
             # any other file is scanned as text; the gate refuses it elsewhere
             n += 1
-            out.append((p.name, "", {p.read_text(encoding="utf-8", errors="replace"): [0]}))
+            out.append((flabel, "", {p.read_text(encoding="utf-8", errors="replace"): [0]}))
     return n, out
+
+
+def _refuse_constant(_name):
+    raise CheckError("manifest holds a non-finite number")
+
+
+def _load_manifest(p):
+    """Parse the manifest keeping every number as its exact JSON text, so numbers are scanned as strings."""
+    return json.loads(p.read_text(encoding="utf-8"), parse_int=str, parse_float=str,
+                      parse_constant=_refuse_constant)
 
 
 def _walk(node, acc):
@@ -120,8 +149,12 @@ def _walk(node, acc):
     elif isinstance(node, list):
         for v in node:
             _walk(v, acc)
-    elif isinstance(node, str):
+    elif isinstance(node, str):  # strings and (via _load_manifest) numbers
         acc[node].append(0)
+    elif node is None or isinstance(node, bool):
+        return  # no content to scan
+    else:
+        raise CheckError("manifest holds an unsupported scalar type")
 
 
 def _source_values(context):
@@ -141,9 +174,9 @@ def _source_values(context):
     return out
 
 
-def _scan(release, check, match):
-    """Run ``match(text) -> set[label]`` over every cell; build the record."""
-    n, groups = _cells(release)
+def _scan(release, contract, check, match):
+    """Run ``match(text) -> set[label]`` over every cell; build the record (content-free labels only)."""
+    n, groups = _cells(release, contract)
     if n == 0:
         raise CheckError("nothing to scan")
     hits_by = defaultdict(list)
@@ -210,7 +243,7 @@ def run_original_values(release, contract, context) -> Outcome:
                     found |= compact[cg]
         return found
 
-    return _scan(release, ORIGINAL_VALUES, match)
+    return _scan(release, contract, ORIGINAL_VALUES, match)
 
 
 # --- reversible (unkeyed) hashes of original values ---------------------------------
@@ -249,7 +282,7 @@ def run_unkeyed_hashes(release, contract, context) -> Outcome:
                         found |= digests[w]
         return found
 
-    return _scan(release, UNKEYED_HASHES, match)
+    return _scan(release, contract, UNKEYED_HASHES, match)
 
 
 # --- key material ---------------------------------------------------------------------
@@ -286,7 +319,20 @@ def run_key_material(release, contract, context) -> Outcome:
         return Outcome.not_run()
     exact, lower = set(), set()
     for k in keys:
-        if not k or len(k) < MIN_KEY_FORM:
+        forms = getattr(k, "scannable_forms", None)
+        if callable(forms):  # an opaque key object (pseudonym.keys.SecretKey): its bytes are never read here
+            try:
+                e, lo = forms()
+            except Exception as exc:  # noqa: BLE001 - content-free
+                raise CheckError("key object cannot give its scannable forms") from exc
+            e = {f for f in e if isinstance(f, str) and len(f) >= MIN_KEY_FORM}
+            lo = {f.lower() for f in lo if isinstance(f, str) and len(f) >= MIN_KEY_FORM}
+            if not e and not lo:
+                raise CheckError("key material too short to scan in every form")
+            exact |= e
+            lower |= lo
+            continue
+        if not isinstance(k, (str, bytes, bytearray)) or not k or len(k) < MIN_KEY_FORM:
             raise CheckError("key material too short to scan in every form")
         e, lo = _key_forms(k)
         exact |= e
@@ -302,4 +348,4 @@ def run_key_material(release, contract, context) -> Outcome:
             return {"keyMaterial"}
         return set()
 
-    return _scan(release, KEY_MATERIAL, match)
+    return _scan(release, contract, KEY_MATERIAL, match)

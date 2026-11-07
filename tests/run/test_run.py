@@ -1,4 +1,4 @@
-"""`pets-release run` on the synthetic minikit, through the real CLI and the production checks.
+﻿"""`pets-release run` on the synthetic minikit, through the real CLI and the production checks.
 
 Rows (trigger -> result):
   hand plan on a kit where k is reachable          -> exit 0, release + scoring folder, gate all pass
@@ -53,8 +53,8 @@ def test_release_passes_gate_and_both_verify_tiers(released):
 def test_visit_pseudonyms_identical_across_tables(released):
     _, out, proc = released
     assert proc.returncode == 0
-    ed = pd.read_csv(out / "ed_visits.csv", dtype=str, keep_default_na=False)
-    lab = pd.read_csv(out / "lab_results.csv", dtype=str, keep_default_na=False)
+    ed = pd.read_csv(out / "ed_visits.csv", dtype=str, keep_default_na=False, na_filter=False)
+    lab = pd.read_csv(out / "lab_results.csv", dtype=str, keep_default_na=False, na_filter=False)
     assert ed["visit_id"].map(lambda v: bool(HEX64.match(v))).all()
     assert len(lab) > 0 and set(lab["visit_id"]) <= set(ed["visit_id"])
 
@@ -97,6 +97,33 @@ def test_planted_card_number_refuses_via_cli(tmp_path):
     assert proc.returncode == 1, proc.stdout + proc.stderr
     assert not out.exists()
     assert "rescan.payment-cards" in proc.stdout
+
+
+def test_spelling_variant_of_a_person_id_is_one_person_via_cli(tmp_path, released):
+    """#57: a second spelling (surrounding whitespace) of one person ID is the same person for person-k."""
+    _, base_out, base_proc = released
+    assert base_proc.returncode == 0
+
+    def plant(folder):
+        coarse_qis(folder)
+        p = folder / "ed_visits.csv"
+        df = pd.read_csv(p, dtype=str, keep_default_na=False, na_filter=False)
+        counts = df["patient_hetu"].value_counts()
+        dup = sorted(v for v, n in counts.items() if n >= 2 and v)[0]
+        i = df.index[df["patient_hetu"] == dup][-1]
+        df.loc[i, "patient_hetu"] = f" {dup} "
+        df.to_csv(p, index=False, encoding="utf-8", lineterminator="\n")
+
+    kit = build_kit(tmp_path / "kit", plant)
+    out = tmp_path / "out" / "rel"
+    proc = cli(*run_args(kit, out))
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+
+    def persons(o):
+        sup = json.loads((o.parent / "rel.scoring" / "suppression_report.json").read_text(encoding="utf-8"))
+        return sup["personKBefore"]["persons"]
+
+    assert persons(out) == persons(base_out)
 
 
 def test_verify_full_ignores_planted_rowmap(released):

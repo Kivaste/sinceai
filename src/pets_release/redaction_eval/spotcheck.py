@@ -67,7 +67,7 @@ def export_spot_check(frame, pred: dict, path, n: int = 200, repo_root=None, ids
     pick = pool[:n]
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w", encoding="utf-8-sig", newline="") as f:
-        w = csv.writer(f)
+        w = csv.writer(f, lineterminator="\n")
         w.writerow(["turn_id", "original", "redacted", "missed", "over_redacted"])
         for tid in pick:
             text = frame.texts[tid]

@@ -15,13 +15,23 @@ Values stay in memory; nothing here prints or returns a value outside the contex
 """
 from __future__ import annotations
 
+import functools
 from collections.abc import Mapping
 from pathlib import Path
 
 import pandas as pd
 
 from pets_release.ladders import PseudonymKeys
-from pets_release.pseudonym import MasterKey, Scope, manifest_signing_key, pseudonymiser_for
+from pets_release.policy import k_target
+from pets_release.pseudonym import (
+    RECORD_KEY,
+    MasterKey,
+    Scope,
+    manifest_signing_key,
+    normalise,
+    pseudonymiser_for,
+    recipient_key,
+)
 
 DEFAULT_RECIPIENT = "default"  # manifest recipient when no --recipient is given (pseudonyms keyed by the master)
 
@@ -44,6 +54,17 @@ SCENARIO_SPEC = {
 
 class ContextError(Exception):
     """Content-free: the scenario has no producer-context spec."""
+
+
+def person_normaliser(label: str = RECORD_KEY):
+    """The pseudonymiser's own normalisation for the person column's label (person-k keys persons by it).
+
+    The label is the ``id.pseudonym`` label the person column would be released under (spec ``label``,
+    default RECORD_KEY, the ladders' default). person-k also refuses if a released person token and this
+    identity do not map one-to-one, so a label mismatch cannot pass silently.
+    """
+    normalise("", label)  # validates the label now (content-free ValueError)
+    return functools.partial(normalise, label=label)
 
 
 def token_keys(master: MasterKey, scope_id: str, recipient: str) -> PseudonymKeys:
@@ -79,14 +100,19 @@ def producer_context(*, scenario_id: str, policy, source: Mapping[str, pd.DataFr
     ctx = {
         "source": dict(source),
         "record_keys": dict(spec["record_keys"]),
-        "person": dict(spec["person"]),
+        "person": {**spec["person"], "normalise": person_normaliser(spec["person"].get("label", RECORD_KEY))},
         "joins": [dict(j) for j in spec["joins"]],
         "identifiers": [{"table": t, "column": c} for t, c in idents if t in source and c in source[t].columns],
-        # master and manifest-signing key material (bytes; scanned in every encoding by producer.key-material)
-        "keys": [master._k, manifest_signing_key(master)._k],
+        # every key the release could leak, as opaque key objects (producer.key-material scans their forms):
+        # master, manifest-signing and, for a non-default recipient, the derived recipient key (#84)
+        "keys": [master, manifest_signing_key(master),
+                 *([recipient_key(master, recipient)] if recipient != DEFAULT_RECIPIENT else [])],
     }
-    if "k" in contract:
-        ctx["k"] = contract["k"]
+    # the k target is the pinned policy's, never copied from the (self-declared) contract (#62); person-k
+    # errors if the contract's k differs
+    k = k_target(policy)
+    if k is not None:
+        ctx["k"] = k
     if released is not None:
         keys = token_keys(master, scope_id, recipient)
         rowmaps = {}
