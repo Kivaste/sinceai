@@ -73,9 +73,10 @@ def _person_k_none_in(site):
     return planted
 
 
-@pytest.mark.parametrize("site", ["evaluate", "risk_vector", "suppress"])
+@pytest.mark.parametrize("site", ["raw", "risk_vector", "suppress"])
 def test_person_k_none_at_each_search_site_refuses(syn, monkeypatch, site):
-    """S4: a PersonK of None, at the candidate evaluation (risk vector without k components: ``evaluate``; with
+    """S4: a PersonK of None, at the candidate evaluation (risk vector without k components: ``raw``, the scoring
+    half of ``evaluate`` since #127; with
     them: ``risk_vector``) or in the local-suppression loop, refuses with ``PersonK missing``. Before the fix
     suppression broke out of its loop and reported 0 of 0 persons."""
     from pets_release.minimiser import risk
