@@ -84,9 +84,8 @@ def capture():
             raise RuntimeError("UI run timed out")
         get(url.replace("/?", "/result?"))
         screenshot(url.replace("/?", "/result?"), "result")
-        if args.measured:
-            if report.get("measured", {}).get("privacy", {}).get("status") != "measured":
-                raise RuntimeError("UI privacy was not measured")
+        if args.measured and report.get("measured", {}).get("privacy", {}).get("status") != "measured":
+            raise RuntimeError("UI privacy was not measured")
         # D41: never decode, store, print or screenshot real-kit rows. Count transport
         # bytes only; screenshots above contain aggregates, with no rows auto-loaded.
         with urlopen(url.replace("/?", "/rows?"), timeout=300) as response:
