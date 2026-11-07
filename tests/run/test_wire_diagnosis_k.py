@@ -76,7 +76,9 @@ def test_measured_entry_counts_the_persons_the_diagnosis_splits_off(setup):
     m, e = _entry(out)
     persons = m["assertionEvidence"]["quasiIdentifiersBelowK"]["denominator"]
     assert persons["unit"] == "persons" and persons["n"] > SPLIT
-    assert e["kind"] == "linkage" and e["label"] is None
+    # a producer-side k measurement, not an attacker rate: never kind linkage (a measured linkage entry means an
+    # attacker ran; #138's tests and the UI's "attacker linkage rates" rely on that)
+    assert e["kind"] == "note" and e["label"] is None
     rate = e["rate"]
     assert rate["status"] == "measured"
     assert rate["denominator"] == {"unit": "persons", "n": persons["n"]}

@@ -83,4 +83,5 @@ def risk_entry(*, kit, key_text: str, release: Path) -> dict:
 
 
 def _entry(rate: dict, description: str) -> dict:
-    return {"risk": RISK, "kind": "linkage", "label": None, "rate": rate, "description": description[:500]}
+    # kind "note", never "linkage": a measured linkage entry means an attacker ran (#138); this is the producer's k
+    return {"risk": RISK, "kind": "note", "label": None, "rate": rate, "description": description[:500]}
