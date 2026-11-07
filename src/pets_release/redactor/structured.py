@@ -361,8 +361,9 @@ class StructuredPass:
             a, b = m.start(1), m.end(1)
             # a following digit, or a letter glued to the same token, means this is not a whole HETU;
             # a separate word read as a letter name ('… är rätt') does not
-            glued_after = b < len(s) and (s[b].isdigit() or (s[b].isalpha() and syms[b].tok == syms[b - 1].tok))
-            if any(used[a:b]) or (a > 0 and s[a - 1].isdigit()) or glued_after:
+            glued_after = b < len(s) and s[b].isalnum() and syms[b].tok == syms[b - 1].tok
+            glued_before = a > 0 and s[a - 1].isalnum() and syms[a - 1].tok == syms[a].tok
+            if any(used[a:b]) or glued_before or glued_after:
                 continue
             if V.hetu_valid(s[a:b]):
                 take(a, b, "NATIONAL_ID", PRIORITY_VALIDATED, "hetu\x00" + s[a:b])
@@ -375,35 +376,48 @@ class StructuredPass:
                 if not any(used[a:b]) and V.iban_valid(s[a:b]):
                     take(a, b, "IBAN", PRIORITY_VALIDATED, "iban\x00" + s[a:b])
                     break
-        for m in re.finditer(r"\+?\d(?:-?\d)*", s):
-            a, b = m.start(), m.end()
-            if any(used[a:b]):
-                continue
+        def classify_segment(a: int, b: int) -> None:
+            """Classify s[a:b] (unused symbols only); after any take, re-scan what is left of it."""
+            while a < b and s[a] == "-":
+                a += 1
+            while b > a and s[b - 1] in "-+":
+                b -= 1
             digits = s[a:b].replace("-", "").replace("+", "")
-            first_turn = chain[owner[a]].turn_index
-            ctx = _context(view, first_turn, syms[a].start)
+            if not digits:
+                return
+            ctx = _context(view, chain[owner[a]].turn_index, syms[a].start)
             res = _classify_digits(digits, s[a] == "+", ctx)
             if res:
-                take(a, b, res[0], res[1], res[0].lower() + "\x00" + digits)
-                continue
-            # a typed value glued to a neighbouring number ('Testitie 5 A 3 040 123 4567'): retry
-            # sub-segments that start and end on token boundaries, validated labels only
+                take(a, b, res[0], res[1], _value_key(res[0], digits, s[a] == "+"))
+                return
+            # several values glued in one run ('Testitie 5 A 3 040 123 4567', 'IBAN + phone'): the longest
+            # token-aligned sub-segment from the left that validates, then the remainder on both sides
             cuts = [q for q in range(a, b + 1)
                     if q in (a, b) or (syms[q].tok != syms[q - 1].tok and s[q - 1] != "-" and s[q] != "-")]
-            done = False
             for lo in cuts:
                 for hi in reversed(cuts):
-                    if hi <= lo or (lo, hi) == (a, b) or done:
+                    if hi <= lo or (lo, hi) == (a, b):
                         continue
-                    sub = s[lo:hi].replace("-", "")
-                    r2 = _classify_digits(sub, False, ctx)
-                    # Luhn passes 1 in 10 random sub-strings: card/device sub-segments need their cue
-                    if r2 and (r2[0] == "PHONE" or (r2[0] in ("DEVICE_ID", "PAYMENT_CARD") and r2[1] == PRIORITY_VALIDATED
-                                                    and _has_cue(ctx, DEVICE_CUES + CARD_CUES))):
-                        take(lo, hi, r2[0], r2[1], r2[0].lower() + "\x00" + sub)
-                        done = True
-                if done:
-                    break
+                    sub = s[lo:hi].replace("-", "").replace("+", "")
+                    r2 = _classify_digits(sub, s[lo] == "+", ctx)
+                    if r2 and _sub_segment_ok(r2, syms[lo:hi], ctx):
+                        take(lo, hi, r2[0], r2[1], _value_key(r2[0], sub, s[lo] == "+"))
+                        classify_segment(a, lo)
+                        classify_segment(hi, b)
+                        return
+
+        for m in re.finditer(r"\+?\d(?:-?\d)*", s):
+            # split around symbols already taken (HETU, IBAN) and classify every unused stretch
+            q = m.start()
+            while q < m.end():
+                if used[q]:
+                    q += 1
+                    continue
+                r = q
+                while r < m.end() and not used[r]:
+                    r += 1
+                classify_segment(q, r)
+                q = r
 
         groups: list[list[_Hit]] = []
         for a, b, label, prio, key in found:
@@ -481,6 +495,44 @@ class StructuredPass:
                 if len(runs[j]) > 1 or runs[j][0].words_after > TAIL_SLACK:
                     break
         return out
+
+
+def _value_key(label: str, digits: str, plus: bool) -> str:
+    """Placeholder key for a digit value; phones use the pseudonymiser's normaliser (ticket 06) so national
+    and international forms of one number share a placeholder."""
+    if label == "PHONE":
+        from pets_release.pseudonym import normalise as pseudo_normalise
+
+        return "phone\x00" + pseudo_normalise(("+" if plus or digits.startswith("358") else "") + digits, "PHONE")
+    return label.lower() + "\x00" + digits
+
+
+_CARD_GROUPS = ([4, 4, 4, 4], [4, 6, 5], [4, 4, 4, 4, 3])
+_DEVICE_GROUPS = ([5, 5, 5], [2, 6, 6, 1])
+
+
+def _sub_segment_ok(res: tuple[str, int], syms: list[Sym], ctx: list[str]) -> bool:
+    """A sub-segment of a longer run is accepted for PHONE, or for a Luhn label when written in its standard
+    grouping (one token, or 4-4-4-4 / 5-5-5 groups) or when a card/device cue is present: Luhn alone passes
+    1 in 10 random sub-strings."""
+    label, prio = res
+    if label == "PHONE":
+        return True
+    if label not in ("DEVICE_ID", "PAYMENT_CARD") or prio != PRIORITY_VALIDATED:
+        return False
+    if _has_cue(ctx, DEVICE_CUES + CARD_CUES):
+        return True
+    groups: list[int] = []
+    last = None
+    for x in syms:
+        if x.ch == "-":
+            continue
+        if x.tok != last:
+            groups.append(0)
+            last = x.tok
+        groups[-1] += 1
+    allowed = _CARD_GROUPS if label == "PAYMENT_CARD" else _DEVICE_GROUPS
+    return (len(groups) == 1 and groups[0] >= 13) or groups in allowed
 
 
 def _classify_digits(d: str, plus: bool, ctx: list[str]) -> tuple[str, int] | None:
