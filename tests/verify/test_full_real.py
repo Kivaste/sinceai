@@ -24,7 +24,8 @@ from pets_release.kit import Kit
 from pets_release.pseudonym import MasterKey
 from pets_release.run.context import verify_context
 
-PRODUCER = ("producer.key-material", "producer.original-values", "producer.person-k", "producer.unkeyed-hashes")
+PRODUCER = ("producer.key-material", "producer.manifest-source-values", "producer.original-values", "producer.person-k",
+            "producer.unkeyed-hashes")
 
 
 def _full(real_bed):
@@ -118,6 +119,7 @@ def test_real_cli_original_value_plant_fails(real_bed, tb, verify_cli):
 
 PRODUCTION = {  # check name -> (module, function) of its production implementation, pinned by name (#115 item 6)
     "producer.key-material": ("pets_release.checks.producer.values", "run_key_material"),
+    "producer.manifest-source-values": ("pets_release.checks.producer.manifest_values", "run_manifest_source_values"),
     "producer.original-values": ("pets_release.checks.producer.values", "run_original_values"),
     "producer.person-k": ("pets_release.checks.producer.kanon", "run_person_k"),
     "producer.unkeyed-hashes": ("pets_release.checks.producer.values", "run_unkeyed_hashes"),

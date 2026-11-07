@@ -7,6 +7,7 @@ contract (10) -> full re-check of every purpose check (``run.purpose``; failing 
 """
 from __future__ import annotations
 
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -23,10 +24,11 @@ from pets_release.pseudonym import MasterKey
 from pets_release.recipient import RecipientError, validate_recipient_id
 from pets_release.run.context import DEFAULT_RECIPIENT, SCENARIO_SPEC, producer_context, token_keys
 from pets_release.run.justify import JustificationError, justify, search_summary
+from pets_release.run.ksets import measure_sets
 from pets_release.run.narrative import build_narrative
 from pets_release.run.purpose import evaluate as evaluate_purpose
 from pets_release.run.suppress import apply_suppression
-from pets_release.writer import Candidate, ProtectedTable, scoring_dir, write_release
+from pets_release.writer import Candidate, ProtectedTable, scoring_dir, table_bytes, write_release
 
 SUPPRESSION_REPORT = "suppression_report.json"
 PERSON_K_REPORT = "person_k_report.json"
@@ -126,9 +128,9 @@ def _within_bound(out: Path, scenario_id: str, sup: dict) -> bool:
     return wb
 
 
-def protect(plan, *, policy, source, master, scope_id, recipient):
-    """Plan -> (released, finals, suppressed, suppression report, contract): apply with release-scope pseudonyms,
-    contract, local suppression. One function for ``run`` and the ``verify --full`` re-measure of a rung step."""
+def applied(plan, *, policy, source, master, scope_id, recipient):
+    """Plan -> (released, finals) before local suppression: apply with release-scope pseudonyms; ``finals`` are the
+    source record keys per released row. Used by ``protect`` and the k-set measure (#146)."""
     released = apply_plan(plan, source, token_keys(master, scope_id, recipient))
     spec = SCENARIO_SPEC[policy.scenario]
     finals = {}
@@ -136,6 +138,14 @@ def protect(plan, *, policy, source, master, scope_id, recipient):
         rk = spec["record_keys"][stem]
         finals[stem] = source[stem].loc[df.index, rk].tolist()  # apply keeps the source index
         released[stem] = df.reset_index(drop=True).astype(str)
+    return released, finals
+
+
+def protect(plan, *, policy, source, master, scope_id, recipient):
+    """Plan -> (released, finals, suppressed, suppression report, contract): apply with release-scope pseudonyms,
+    contract, local suppression. One function for ``run`` and the ``verify --full`` re-measure of a rung step."""
+    released, finals = applied(plan, policy=policy, source=source, master=master, scope_id=scope_id,
+                               recipient=recipient)
     contract = generate_contract(policy, plan)
     base = producer_context(scenario_id=policy.scenario, policy=policy, source=source, master=master,
                             scope_id=scope_id, recipient=recipient, contract=contract, released=None)
@@ -317,9 +327,17 @@ def run_release(*, kit, scenario: dict, created: str, key_text: str, out, plan_n
         except JustificationError as e:
             raise RunError(str(e)) from None
         extra = {SEARCH_LOG: search_log_bytes(found.log)}
+    # #146 (D58): per-person k on the scenario's QIs and on every kept catalogued QI, before and after suppression
+    # ``released`` is measured on the exact bytes the writer publishes, with row maps derived from those tables
+    # (gate_ctx; checked against lineage above); verify --full measures the published files the same way.
+    with tempfile.TemporaryDirectory(prefix="pets-ksets-released-") as td:
+        for t in tables:
+            (Path(td) / t.name).write_bytes(table_bytes(t))
+        k_sets = measure_sets(policy, plan, contract, source=source, master=master, scope_id=rsid,
+                              recipient=recipient, released_dir=Path(td), released_ctx=gate_ctx)
     narrative = build_narrative(policy=policy, plan=plan, scenario_ids=[s["id"] for s in kit.scenarios()],
                                 suppression=sup, k=contract["k"], purpose=purpose, search=search_info,
-                                rung_steps=steps)
+                                rung_steps=steps, k_sets=k_sets)
     cand = Candidate(
         scenario=scenario_id, recipient=recipient, tables=tuple(tables), contract=contract,
         tool_revision=tool_revision, created=created, narrative=narrative,

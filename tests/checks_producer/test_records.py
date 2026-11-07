@@ -25,6 +25,7 @@ OURS = {
     "producer.original-values": ("producer", "cells"),
     "producer.unkeyed-hashes": ("producer", "cells"),
     "producer.key-material": ("producer", "cells"),
+    "producer.manifest-source-values": ("producer", "files"),  # #149
 }
 KEY = "synthetic-test-key-0123456789-abcdefghij"
 
