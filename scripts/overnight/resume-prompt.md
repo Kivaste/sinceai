@@ -22,18 +22,24 @@ You are the **Opus orchestrator** for `Kivaste/sinceai`. You dispatch implemente
 - **Merge after the recording:** #106 and #128. The video doesn't quote k. #127 comes after #106 and #118, merging by 20:00 or deferred. Verda testing is a planning-session side lane, off the critical path.
 - **#32 LLM: GO via the Mistral API (D47).** The key file is `C:\Users\kivas\AI\sinceai-out\llm\llm.env`, created by the human's wizard; load it into env vars only and never print it. #32 merges before the pin only if it doesn't delay #117; otherwise after.
 - **DEMO PIN `5b260ec` is pushed and proven** (`C:\Users\kivas\AI\sinceai-out\proof-5b260ec\`, also on #137). Plain and measured HEALTH-S1 RELEASED, the gate passed 41 of 41, both verify tiers exit 0. k stays provisional until #106. The D53 window closed at 16:58, and the lanes have resumed.
-- **Feature freeze is 23:00 (D55).** #127 and #139 deadlines are 23:00. After 23:00: final review (D32), fresh proof on the final SHA, #103, then PR #95 into main before Sun 08:00.
-- **Recording hold LIFTED (D56, 17:50):** the demo is isolated on pin 5b260ec, in its own worktree. #106, #128 and #138 merge as soon as they are green. #127 starts after #106, and #139 after #138, with both deadlines at 23:00.
-- **Paused until after the 23:00 freeze (human, Sat 20:05):** #136, #141 and #142. Do NOT resume them at 21:00 or on a hand-over. They resume only in the quiet overnight phase, and only if still useful. On resume: #141 rebases onto #150 and adds the overflow-safe averaging (comment on #141); #136 rebases onto #151 and stays backend-only. Also held: #144 until #151 merges (re-check the flake first), #140 (UI redesign deferred), #155 until #151 has a reviewed head.
+- **Timeline (D65, human 21:30; replaces every 23:00 deadline of D55/D63):**
+  - **Demo freeze 00:00.** The must tier (#148, #149, #151, #146, #157) must be merged by 00:00. At 00:00 the planning session pins the integration tip as the **demo commit**, measures it, and rebuilds the bundle from it; video and story numbers come from that pin.
+  - **#157 timebox:** approved by 23:45, else fallback (D64: #139 merges with the lift disclosed as a residual risk).
+  - Anything not merged by 00:00 moves to the **overnight lane**, not to future work.
+  - **Overnight lane 00:00-06:00, same rules** (cross-family reviews, trains, real runs, done gate): whatever missed 00:00 (#127, #144, #155, #110/#138/#143 if late); the paused #136, #141, #142; post-hackathon mediums/lows from reviews that do NOT touch release logic (minimiser, policy, writer, measure, gate). Release-logic changes overnight need a human go. Also overnight: the standard evidence script (#124 log format) and the regeneration of close evidence for merged-but-open tickets; measured runs where reviewers asked for them (#110/#113/#131, #138, #143).
+  - **Final cut 06:00.** The overnight tip replaces the demo pin only if a fresh measured proof passes and no video number gets worse; otherwise the 00:00 pin ships. After 06:00 nothing merges except fixes for the final review's highs. Then final review (D32), PR #95 into main and submission by 08:00.
+  - Keep the orchestrator and the trains running overnight; the planning session keeps steering.
+- **Recording hold LIFTED (D56, 17:50):** the demo is isolated on pin 5b260ec, in its own worktree. #106, #128 and #138 merge as soon as they are green.
+- **Paused until the overnight lane (human, Sat 20:05; D65):** #136, #141 and #142. Do NOT resume them before 00:00 or on a hand-over. On resume: #141 rebases onto #150 and adds the overflow-safe averaging (comment on #141); #136 rebases onto #151 and stays backend-only. Also held: #144 until #151 merges (re-check the flake first), #140 (UI redesign deferred), #155 until #151 has a reviewed head.
 - **Merge order (human, 19:32):** #148 jumps the queue the moment both axes approve (own train if needed; the planning session re-pushes the organiser CS eval files right after it merges, so report its merge SHA at once). Then batched trains (D62: about every 30 min, 3-5 tickets, fast and slow tiers concurrent per D61), then #149, then #151.
-- **Scope triage until the 23:00 freeze (D63, human 20:40):**
-  - **Must land:** #148 (still jumps the queue), #150, #151, #146, #149.
+- **Scope triage until the 00:00 demo freeze (D63, amended by D64/D65):**
+  - **Must land:** #148 (still jumps the queue), #150, #151, #146, #149, #157.
   - **Should land:** #138 + #143, #147, #154, #153, #127 (#127 below the must tier).
-  - **Timebox:** if #139 isn't approved by 22:00 it becomes future work: stop its lane, keep its branch; #143 carries the story.
-  - **Rule:** anything not merged by 23:00 is future work. No extension.
+  - **#139:** D63's 22:00 timebox; #157 builds on #139's head.
+  - **Rule:** anything not merged by 00:00 goes to the overnight lane (D65).
   - **No new tickets** except high findings from reviews. Mediums and lows get the `post-hackathon` label.
   - **Merge as soon as approved:** no 30-min batching. Start a train when any ticket is approved; add others approved while it's being set up. Fast and slow tiers still run concurrently (D61).
-- **Steers come only from the planning session.** Decisions live in docs/decisions.md (D33-D63); read them after every hand-over.
+- **Steers come only from the planning session.** Decisions live in docs/decisions.md (D33-D65); read them after every hand-over.
 
 ### 2.1 Schedule the dependency graph, not a worker quota [D24, D29]
 Priority order. Keep independent work parallel within each tier, and sequence anything that edits the same files:
