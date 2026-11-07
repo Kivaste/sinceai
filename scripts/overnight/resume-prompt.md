@@ -18,7 +18,7 @@ Read `C:\Users\kivas\.config\opencode\skills\implement-spec\SKILL.md` and follow
 - **Integration branch:** `integration/pets-release`, cut from `origin/main` if it does not exist yet. Push it to origin after every merge.
 - **One worktree and one branch per ticket:** branch `ticket/NN-slug`, where NN is the ticket number from tickets.md (not the issue number). Each implementer starts from the integration tip, calls the **`tdd` skill**, merges the integration tip back in before it reports, and pushes its branch to origin.
 - **Merger subagent:** it merges a reviewed, green ticket into the integration branch and **respects Merge after**: a ticket merges only once every ticket named in its Merge after line has merged. Merge after does not block starting work.
-- **Final step:** when every ticket is closed or parked, run the **`code-review` skill** on the integration branch with the reviewers `openai/gpt-6.1-sol` and `opencode-go/deepseek-v4.1-flash` (plus `xai/grok-4.7#medium` as a third family, if time allows). Fix the findings in one fresh implementer, then review again.
+- **Final step:** when every ticket is closed or parked, run the **`code-review` skill** on the integration branch with the reviewers `opencode-go/gemini-4-argon#medium` and `opencode-go/gpt-6-luna#medium` (`openai/gpt-6.1-sol` instead of Luna if its quota has reset). Fix the findings in one fresh implementer, then review again.
 - **Skip** any ticket labelled `ready-for-human`.
 
 ### Merge and clean up as soon as a ticket is ready (user rule, Sat 02:15)
@@ -41,13 +41,18 @@ A ticket is **ready** when both reviews pass on its current head and its tests a
 | Ticket labelled `model:opus` | `claude-agent/opus` |
 | Ticket labelled `model:grok` | `claude-agent/sonnet`. If Anthropic rate-limits or errors, use `openai/gpt-6.1-sol-fast`, then `xai/grok-4.7#medium` |
 | Grunt subtasks (bulk edits, fixture typing, log digging) | `claude-agent/sonnet` |
-| Ticket reviewers | `openai/gpt-6.1-sol` and `opencode-go/deepseek-v4.1-flash` |
+| Ticket reviewers (since Sat 05:35, D13b) | core tickets (`model:opus`): `xai/grok-4.7#medium` + `opencode-go/gpt-6-luna#medium`; routine tickets: `xai/grok-4.7#medium` only. DeepSeek is out of ticket reviews (25+ min each, throttled at high concurrency). Fallbacks: `opencode-go/gemini-4-argon#medium`, then `opencode-go/grok-4.7#medium` |
 
 If `claude-agent/opus` is rate-limited or errors, use `openai/gpt-6.1-sol`. Log every model switch in the decision log.
 
 **Grok tickets already in flight (dispatched 02:01 on `xai/grok-4.7#high`):** when you process this brief, check each one. If its branch has **no commit** yet, interrupt that implementer session (`opencode api post /api/session/<id>/interrupt`), log it, remove only that ticket's worktree, and re-dispatch the ticket on `claude-agent/sonnet` from the integration tip. If it already has commits, let it finish, but re-dispatch it on Sonnet if it has made no new commit for 30 minutes.
 
-**Reviews:** after each ticket, run **two independent, read-only reviews** from two families other than the implementer's. Every implementer is now Claude (Opus or Sonnet), so the two reviewers are **`openai/gpt-6.1-sol` and `opencode-go/deepseek-v4.1-flash`**. Sonnet is the same family as Opus and no longer reviews. Give reviewers context pointers only: the ticket issue, the diff range and AGENTS.md. Send any fixes back to an implementer. A new head after fixes gets a **fresh review pass**. You record the reviews in the decision log and in the ticket comment; reviewers do not record their own.
+**Reviews (D13b, Sat 05:35; replaces the earlier two-reviewers-everywhere rule):** reviewers are always non-Claude, because every implementer is Claude.
+- **Core tickets** (`model:opus`) get **two** independent, read-only reviews: `xai/grok-4.7#medium` and `opencode-go/gpt-6-luna#medium`. **Routine tickets** (`model:grok`, built by Sonnet) get **one**: `xai/grok-4.7#medium`.
+- **Round 1** is a full review. **Rounds 2 and later are delta reviews:** confirm each earlier blocking finding is fixed, and check only the fix diff for new high-severity problems. No new full sweep.
+- **At most 3 rounds.** After round 3, only a high-severity finding blocks (it breaks an acceptance criterion, breaks fail-closed, or leaks values). Everything else becomes a follow-up issue filed at merge.
+- **At most 8 concurrent review sessions per provider** (xai, opencode-go). Review only a ticket's current head, and cancel a review when its head is superseded.
+- **Final whole-branch `code-review`:** `opencode-go/gemini-4-argon#medium` + `opencode-go/gpt-6-luna#medium`. Use `openai/gpt-6.1-sol` instead of Luna if its quota has reset. Give reviewers context pointers only: the ticket issue, the diff range and AGENTS.md. Send any fixes back to an implementer. A new head after fixes gets a **fresh review pass**. You record the reviews in the decision log and in the ticket comment; reviewers do not record their own.
 
 **Done-report:** before closing a ticket, comment with evidence from a real run (a release folder, gate output or a `pets-eval` scorecard, run with `PYTHONUTF8=1`), plus the head commit and the two review verdicts. Unit tests alone are not enough. Close the ticket as `docs/agents/issue-tracker.md` › Close says: comment first, then `gh issue close`.
 
