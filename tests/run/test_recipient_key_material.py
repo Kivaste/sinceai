@@ -57,5 +57,5 @@ def test_verify_full_context_carries_the_recipient_key(tmp_path):
     proc = cli(*run_args(kit_root, out), "--recipient", "recipient-a")
     assert proc.returncode == 0, proc.stdout + proc.stderr
     ctx = verify_context(Kit(kit_root), MasterKey.from_text(TEST_KEY), out)
-    want = recipient_key(MasterKey.from_text(TEST_KEY), "recipient-a")._k
+    want = recipient_key(MasterKey.from_text(TEST_KEY), "recipient-a")  # opaque key objects (#84)
     assert any(k == want for k in ctx["keys"])

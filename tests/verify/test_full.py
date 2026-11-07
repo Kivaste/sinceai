@@ -16,8 +16,10 @@ Failure rows (trigger -> result):
   a check returns not_run                 -> exit 1, not_run
   claimed producer check unavailable / not runnable (real CLI) -> exit 1
 
-In-process tests call the production ``verify_release`` with extra producer stubs (ticket 11's real checks
-need run context that 21 supplies); the CLI tests use the registry as it is.
+The passing row runs the production registry and producer context on a real run release (#71; see also
+test_full_real.py, where each producer check's own plant fails). The failure rows below that isolate one
+non-producer rule (signature, inputs, revision) or simulate a check outcome (not_run, error, unavailable) on
+the 02 fixture still substitute producer stubs; the CLI tests use the registry as it is.
 """
 
 from __future__ import annotations
@@ -105,10 +107,22 @@ def test_full_cli_bad_signature_fails(bed, kit, verify_cli, tb):
 
 # --- in-process rows (production verify_release, stub producer checks) ------------------------------------
 
-def test_full_pass_with_runnable_checks(bed, kit, tb):
-    rep = _full(tb, bed, kit, checks=_checkset(tb, bed))
+def test_full_pass_with_runnable_checks(real_bed):
+    """#71: the production registry and producer context (no stubs), on a real run release."""
+    from pets_release.kit import Kit
+    from pets_release.run.context import verify_context
+    from pets_release.verify import verify_release
+
+    master = MasterKey.from_text(real_bed.KEY)
+    rep = verify_release(real_bed.release, full=True, kit=real_bed.kit, master_key=master,
+                         context=verify_context(Kit(real_bed.kit), master, real_bed.release))
     assert rep.ok, rep.lines
     assert rep.lines[-1].startswith("VERIFIED (full):")
+    producer = {r.check: r for r in rep.records if r.scope == "producer"}
+    # the bed is built by this code, so a deleted check would also be missing from its gate: pin the names
+    named = ("producer.key-material", "producer.original-values", "producer.person-k", "producer.unkeyed-hashes")
+    assert set(producer) >= set(named)
+    assert all(producer[n].status == "pass" and producer[n].denominator["n"] >= 1 for n in named)
 
 
 def test_full_bad_signature(bed, kit, tb):

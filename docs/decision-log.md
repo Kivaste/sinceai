@@ -309,3 +309,67 @@ Each entry records:
   8. AGENTS.md › Review now sets D32 for the final integration review: Standards Grok high; Spec twice, by Sol high and opencode-go/gemini-4-argon#medium. It is applied at the brief's section 4 step.
 - **Why:** Single orchestrator; close only on evidence (D31); a defect class found twice gets a guard.
 - **Evidence:** heartbeat.json session_id; merge train 3 session ses_e4aa6832; review sessions ses_e4aae4fd, ses_e4aae34e, ses_e4aabe3e, ses_e4aab95b, ses_e4aabc36, ses_e4aabab0, ses_e4aaed3b, ses_e4aaeb8d, ses_e4aab0df, ses_e4aaaf12; #89 close comment.
+
+### Sat 11:55 - utilization nudge (09:28Z) handled; merges #104, #85; closes #49, #85, #90, #104
+
+- **When:** Sat 11:45-11:55 EET
+- **Decision:**
+  1. Nudge items:
+     - Dispatched: #98 round 2 (Sol) to merge the integration tip and keep the exit-5 handling and tests. Round 3 then went out for Grok's high finding (interpreter chosen by file presence, not Git identity).
+     - Not dispatched, with the reason on each issue: #53, #54, #92 (D29 chain owner); #63 and #30 (Merge after 23/25; native edges); #62, #71, #84 (#61 wave, now merging); #83, #94 (#81 fixer, live); #102 (round 3 under review); #103 (section 4, after the final SHA; native edges to #24, #26, #30); #49 (evidence task).
+     - Added native edges: #105 blocked by #102 and #98 (same scripts); #63 by #24; #103 by #24, #26, #30.
+  2. Merge train 4: #104 at 6b43d2b (fast tier exit 0, 2290 passed, 5 skipped; slow tier exit 0, 123 passed). Merge train 5: #85 at e19a1d9 (fast tier exit 0, 2311 passed, 5 skipped; slow tier exit 0, 123 passed). Merge train 6 (#61 wave, both axes APPROVE at 40f7a86) is running.
+  3. #49 and #90: a Sol evidence session ran run, verify and verify --full at the exact heads: 0/0/0, gate 40/40. Done-reports were reposted with that evidence and the recorded verdicts. Formatting was normalised only: arrows, one artefact path per line, the template Rule label, and #49's item-7 setup note moved after the outcome. Both pass check-done-report (exit 0) and are closed with worktrees removed. #90's missing red is stated as "No red observed", not reconstructed.
+  4. 25 search, Spec re-run (Sol) at fdadfad: no behavioural blocker. The evidence gaps (both verify tiers, dashboard, rung diff vs hand) are being produced by a Sol evidence session. Grok Standards APPROVE.
+  5. 31 LLM r2 (6b4535c): Grok APPROVE (the ADR 0002 bypass is fixed through one exact-type normaliser). Sol found an evidence-binding gap (no revision or input digests in evidence.json), sent back. It is stretch: merging only on the 14:00 go.
+  6. #102 round 3 (c6d0c06): both axes APPROVE (no substitute path exits 0). It is next in the merge queue.
+- **Why:** Each ticket owns its files; close only on evidence (D31); a guard is chosen by identity, never by a plantable file.
+- **Evidence:** merge sessions ses_e4aa037c, ses_e4a9b1c8; evidence session ses_e4aa228d; close comments on #49, #85, #90, #104.
+
+### Sat 12:00 - STATUS; 12:00 checkpoint decisions; D32 applied
+
+- **When:** Sat 12:00 EET
+
+#### Effective policies (changes only)
+- D32 (human, via the planning session, 11:35): Gemini 4 Argon holds a counting seat on the final whole-product review only. Fixed point c309db6. Standards: Grok high. Spec: Sol high and Gemini 4 Argon, as separate sub-agents. Plus the rule audit. Ticket reviews keep the D31 cross-map. This resolves the 11:05 roster conflict. Main pulled at 678fbd9.
+- Search GO (12:00): ticket 25 ships the measured search for HEALTH-S1 (D10, D23); the hand plan stays available with --plan hand.
+- CS-S1 D29 fallback TRIGGERED (12:00). No real-kit CS-S1 gate pass was shown at 12:00 (the owner's run at d796170 started 11:55). The owner withholds the turns the independent checker still flags, records counts and the CS-U1/CS-U5 effect in sacrifices, and states the reduced checker independence in esidualRisks. The gate stays strict. If the strict run passes, 0 turns are withheld and that is recorded. The two #53 fail-opens and the #56 applicability gap still have to be fixed; the fallback does not replace them.
+
+#### Critical path
+CS-S1 chain (23 + #53/#54/#56/#92, then #63) -> 29 packager (#30) -> pets_submission at 16:00 -> 14:00 LLM go (needs both releases passing gate + verify) -> final review at c309db6 per D32 -> fresh real-kit proof on the final SHA -> #103 story finalisation -> PR #95 merge.
+
+#### Blocker owners
+- #24 + #53, #54, #56, #92 -> ses_e4aac068 (claude-agent/opus, D29 owner), running the real-kit run plus the fallback.
+- #26 (25 search) -> approved on both axes at fdadfad; merge train 8 next (after #102).
+- #30 -> approved; waits on #24, #26.
+- #63 -> approved; waits on #24.
+- #62, #71, #84 -> merged at 8e93dcf; per-issue done-reports outstanding (#71 also lacks its mutation-red evidence).
+- #81/#83/#94 -> fe2feed: Spec APPROVE, Grok delta pending. The full affected selection at the head is unknown, so not merge-clear.
+- #97 -> inherited Sol fixer (ses_e4aae03f).
+- #98 -> 094edb5: Spec APPROVE, Grok delta pending.
+- #102 -> merge train 7 running.
+- #105 -> approved at 96fa357; waits on #102 and #98 (same scripts).
+- #106 -> ready-for-human (detector-QI policy decision).
+- #107 -> waits on #97 (tests/conftest.py); three main-checkout write occurrences today.
+- #108 -> flaky kiteval probe control, ready-for-agent.
+- 31 LLM (#32) -> approved on both axes at f53e09d; held for the 14:00 go.
+
+#### Latest verified revision
+- 8e93dcf (integration tip, #61 wave). Fast tier exit 0, 2372 passed, 5 skipped. Slow tier: first run exit 1 (1 failed, the #108 flaky control), passed 2/2 in isolation; full slow-tier re-run on the same sha exit 0, 123 passed.
+- Requested record, tip 31ffa5c6302a075cd6ad7549499f592792295ccd (merge train 2: #49 at 11:21 + #90 at 11:22; merger ses_e4aaf9c8). Fast tier -n 16 -m "not slow": exit 0, 2274 passed, 0 failed, 5 skipped. Slow tier -n 16 -m slow: exit 0, 123 passed, 0 failed. Exit codes were read after a pipe; pytest's own summary lines agree.
+- Later merges, each with both tiers green on the exact merged sha: 1a2c045 (#89: 2289 + 123), 6b43d2b (#104: 2290 + 123), e19a1d9 (#85: 2311 + 123), d177288 (#102: fast tier exit 0, 2381 passed, 5 skipped; slow tier exit 0, 123 passed).
+- No real-kit release run certifies the integration tip yet.
+
+#### Missing evidence
+- The 5 fast-tier skips at 4ab170b (re-run with -rs on that exact sha: exit 0, 2264 passed, 5 skipped). All five are in 	ests/docs/test_readme_commands.py:
+  1. :126 reason=environment-setup. Intended: the README's environment-setup command (venv/pip) is not executed by tests.
+  2. :126 reason=sets-secret-placeholder-only. Intended: the README line only sets a key placeholder and is not runnable.
+  3. :126 reason=cs-s1-run-needs-ticket-23. Gap: the CS-S1 README command is unverified until 23 merges. Tracked on #24 (skip to be removed at merge).
+  4. :135 "not built yet: pets-release submission is available after ticket=29". Gap: the submission command is unverified until 29 merges. Tracked on #30.
+  5. :126 reason=runs-the-whole-test-suite-recursively. Intended: the README's full-suite command would recurse; the merger runs the suite itself.
+- The CS-S1 real-kit release, both verify tiers and the scorecard at any head (owner running).
+- Per-issue done-reports for #62, #71, #84 (#71: mutation-red demonstration).
+- The full affected selection at #81's head fe2feed.
+- A real-kit run of both releases on the integration tip: needed for the 14:00 go and for section 4.
+
+- **Note:** this status entry is appended at the bottom. The brief asks for status at the top, but the log header and AGENTS.md › Orchestration say append-only, add at the bottom. AGENTS.md wins.

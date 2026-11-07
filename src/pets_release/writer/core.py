@@ -24,6 +24,7 @@ from pets_release.manifest import (
     validate_manifest,
     validate_manifest_file,
 )
+from pets_release.policy import contract_policy_problems
 from pets_release.pseudonym import manifest_signing_key
 from pets_release.writer.assemble import (
     NARRATIVE_KEYS,
@@ -241,8 +242,11 @@ def write_release(candidate: Candidate, out, master_key, kit: Kit, *, context: M
     build = Path(tempfile.mkdtemp(prefix=f".{out.name}.build-", dir=out.parent))
     try:
         digests, lineage = _write_tables(build, candidate)
+        # the pinned scenario policy, not the candidate, fixes the k target and the QI set (#62)
+        reasons = [f"policy:{p}" for p in contract_policy_problems(candidate.scenario, candidate.contract,
+                                                                         candidate.narrative.get("fieldJustifications"))]
         gate = run_checks(build, candidate.contract, {**context, "phase": "gate"})
-        reasons = _gate_reasons(gate, "gate") + _registry_reasons(gate.records)
+        reasons += _gate_reasons(gate, "gate") + _registry_reasons(gate.records)
         reasons += evidence_for(gate.records, candidate.scenario)[2]
         reasons += justification_reasons(candidate.contract, list(candidate.narrative["fieldJustifications"]))
         manifest = None
