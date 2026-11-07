@@ -1,4 +1,4 @@
-"""Rules of ``producer.turn-id-synthetic`` (D21). Pure functions; no values ever leave.
+"""Rules of ``turn-id-synthetic`` (D21). Pure functions; no values ever leave.
 
 A released ``turns.turn_id`` is a synthetic record key carrying no person or conversation
 information iff all of these hold:

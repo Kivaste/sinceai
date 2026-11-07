@@ -55,7 +55,11 @@ module-level ``CHECKS`` tuples.
 ``Outcome.not_applicable()`` is allowed only for a check registered with ``applies_to=(forms...)``
 when the contract declares no column with any of those forms; the runner verifies this, records
 ``not_applicable`` with denominator 0 (does not refuse), and records ``error`` for any other use.
-A run where nothing but not_applicable records exist refuses. Writer rules (16): see the
+A run where nothing but not_applicable records exist refuses.
+``applies_to`` selectors besides forms (ticket 23): ``contract:k`` (applies iff the contract carries
+a top-level ``k``; for the k checks, CS-S1 has none) and ``column:<file>.csv/<column>`` (applies iff
+the contract releases that column; e.g. ``turn-id-synthetic``). Unknown selectors are
+rejected at registration; an unreadable contract counts as declaring the selector (error). Writer rules (16): see the
 ``runner`` docstring (not_applicable and low-severity hits can never back an export assertion).
 
 Violation ``file``/``column`` name only contract-listed files and columns; any other

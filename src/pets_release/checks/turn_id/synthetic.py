@@ -1,4 +1,4 @@
-"""``producer.turn-id-synthetic``: the released ``turns.turn_id`` is a synthetic record key with no
+"""``turn-id-synthetic``: the released ``turns.turn_id`` is a synthetic record key with no
 person or conversation information (D21; rules in ``_rules``).
 
 Applies only when the contract releases ``turns.csv/turn_id`` (else ``not_applicable``, e.g. for
@@ -16,9 +16,14 @@ from pets_release.checks.registry import register
 
 from . import _rules
 
-NAME = "producer.turn-id-synthetic"
+NAME = "turn-id-synthetic"
 VERSION = "1.0.0"
 FILE, COLUMN = "turns.csv", "turn_id"
+
+
+def assess(ids, conv, source, identifiers) -> dict[str, int]:
+    """Same rules on candidate columns (before release): ``{label: rows with a hit}``; empty = pass."""
+    return {label: len(rows) for label, rows in sorted(_rules.evaluate(ids, conv, source, list(identifiers)).items())}
 
 
 @register(name=NAME, version=VERSION, scope="producer", unit="turns", applies_to=(f"column:{FILE}/{COLUMN}",))

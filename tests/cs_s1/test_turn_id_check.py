@@ -1,4 +1,4 @@
-"""``producer.turn-id-synthetic`` through the real registry and runner (D21).
+"""``turn-id-synthetic`` through the real registry and runner (D21).
 
 Rule: a released ``turns.turn_id`` passes only if it is a record key (non-empty, unique) carrying
 no conversation information (no component constant within each conversation and varying across
@@ -27,7 +27,7 @@ import pytest
 
 from pets_release.checks import all_checks, run_checks
 
-NAME = "producer.turn-id-synthetic"
+NAME = "turn-id-synthetic"
 
 
 def _check():
