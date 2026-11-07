@@ -153,8 +153,10 @@ def _residual_problems(manifest: dict, records, scopes: set) -> list[str]:
     the signed ``gate_low_severity`` entries of every check in scope."""
     from pets_release.writer.assemble import LOW_SEVERITY_KIND, low_severity_risks, low_severity_source
 
-    attested_scope = {low_severity_source(c["check"], c["version"], c["scope"]): c["scope"]
-                      for c in manifest["gate"]["checks"]}
+    attested_scope = {
+        low_severity_source(c["check"], c["version"], c["scope"]): c["scope"]
+        for c in manifest["gate"]["checks"]
+    }
     fresh = {r["risk"]: r for r in low_severity_risks(r for r in records if r.scope in scopes)}
     signed = {}
     for r in manifest["residualRisks"]:
@@ -246,8 +248,10 @@ def rung_step_problems(manifest: dict, source: dict, master_key) -> list[str]:
         if rs is None or not (by_hand or by_search):
             out.append(f"rungStep: {s['check']}: not reproducible (not an enumerated step of the hand or search plan)")
             continue
-        scope = {"source": source, "master": master_key, "scope_id": manifest["release"]["releaseScopeId"],
-                 "recipient": manifest["release"]["recipient"]}
+        scope = {
+            "source": source, "master": master_key, "scope_id": manifest["release"]["releaseScopeId"],
+            "recipient": manifest["release"]["recipient"],
+        }
         try:
             if by_hand:
                 *_, sup, _ = protect(plan, policy=policy, **scope)

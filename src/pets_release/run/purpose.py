@@ -30,6 +30,11 @@ def _by_id(results) -> dict:
 
 
 def _score(r):
+    """The adapter normalizes successful task scores with float(score) (kiteval.purpose._run).
+
+    Keep that boundary strict: raw ints (even 0/1), bools and nonfinite floats
+    violate its result contract and refuse on either side; do not coerce here.
+    """
     score = r.get("score") if r is not None and r.get("status") == "ok" else None
     return score if isinstance(score, float) and math.isfinite(score) else None
 
