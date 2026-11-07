@@ -65,6 +65,9 @@ class ScenarioPolicy:
     linked: tuple[tuple[tuple[str, str], ...], ...]  # column groups that must share rung + params
     param_minimums: dict  # (table, column) -> {"rung": r, "param": p, "min": n}
     alt_floors: dict = field(default_factory=dict)  # (table, column) -> alternative floor rung (conditional release)
+    # (table, column) -> {check, outcome}: the alt floor applies only when `check` fails with the column
+    # withheld (machine-readable predicate; a search/run step evaluates it, prose is not enough)
+    alt_floor_conditions: dict = field(default_factory=dict)
     residual_notes: tuple[dict, ...] = ()  # {id, status, note}: e.g. a target that is not applicable
     suppression: dict | None = None  # last-step local suppression of below-k persons (applied by ticket 21)
 
@@ -77,6 +80,8 @@ class ScenarioPolicy:
             if not isinstance(t, dict) or t.get("kind") not in _TARGETS:
                 raise PolicyError("unknown privacy target kind")
             _exact(t, _TARGETS[t["kind"]], "privacy target")
+            if t["kind"] == "timestamp_floor" and t["rung"] not in LADDERS["timestamp"]:
+                raise PolicyError("timestamp_floor rung must be a canonical timestamp rung ID")
         for q in self.qi:
             _exact(q, _QI_REQ, "qi row", _QI_OPT)
             if (q["table"], q["column"]) not in cols:
@@ -103,9 +108,29 @@ class ScenarioPolicy:
                     raise PolicyError("joint QI move names an unknown column")
                 if m["rung"] not in CONTRACT_FORMS and m["rung"] != WITHHELD:
                     raise PolicyError("joint QI move names an unknown rung")
+            seen_cols = [(m["table"], m["column"]) for m in mv]
+            if len(set(seen_cols)) != len(seen_cols):
+                raise PolicyError("joint QI move names a column twice")
+            qi_cols = {(q["table"], q["column"]) for q in self.qi}
+            for m in mv:
+                key = (m["table"], m["column"])
+                fl = self.floors[key]
+                ladder = LADDERS[fl.family]
+                if key not in qi_cols:
+                    raise PolicyError("joint QI move column is not a QI")
+                if m["rung"] not in ladder:
+                    raise PolicyError("joint QI move rung is not on the column's ladder")
+                if ladder.index(m["rung"]) < ladder.index(fl.rung):
+                    raise PolicyError("joint QI move rung is finer than the column's floor")
         for key, rung in (self.alt_floors or {}).items():
             if key not in cols or (rung not in CONTRACT_FORMS and rung != WITHHELD):
                 raise PolicyError("alt_floors entry is invalid")
+        for key, cond in (self.alt_floor_conditions or {}).items():
+            if key not in (self.alt_floors or {}):
+                raise PolicyError("alt_floor_conditions entry has no alt floor")
+            _exact(cond, {"check", "outcome"}, "alt floor condition")
+            if cond["check"] not in self.purpose_checks or cond["outcome"] != "fail_without":
+                raise PolicyError("alt floor condition must name a purpose check and outcome fail_without")
         for n in self.residual_notes:
             _exact(n, _NOTE, "residual note")
             if n["status"] not in _NOTE_STATUS:
@@ -132,6 +157,9 @@ class ScenarioPolicy:
             "jointQiMoves": [[dict(m) for m in mv] for mv in self.joint_qi_moves],
             "altFloors": [
                 {"table": t, "column": c, "floor": r} for (t, c), r in sorted((self.alt_floors or {}).items())
+            ],
+            "altFloorConditions": [
+                {"table": t, "column": c, **v} for (t, c), v in sorted((self.alt_floor_conditions or {}).items())
             ],
             "residualNotes": [dict(n) for n in self.residual_notes],
             "suppression": dict(self.suppression) if self.suppression else None,
