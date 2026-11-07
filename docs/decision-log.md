@@ -570,3 +570,14 @@ CS-S1 chain done-report + 4 reviews (23 + #53/#54/#56/#92) -> merge -> #63 -> 25
   3. Noted: the pass found no path that makes a missing check produce false. The #109 and #120 regressions pass. The Standards axis (Grok) is still running.
 - **Why:** Tier-1 fail-closed first; same-area work goes to one owner.
 - **Evidence:** newest comments on #106, #110, #113 and #118; #131.
+
+### Sat 15:00 - utilization nudge (12:58Z); reviews for 5 finished heads; #116 r3; #32 AC3 question
+
+- **When:** Sat 14:58-15:05 EET (machine clock)
+- **Decision:**
+  1. Finished inherited sessions: #116 r2 (810594c), #32 delta prep (25dddf7), #124 (5f926b3), #125+#126 (beae83b). Also #103 prep (860829e, own child). Ten reviews were dispatched, Grok Standards + Sonnet Spec for each, since all are Sol-written. #131 is folded into fu110 (live owner). #94 is unchanged (closes on the final proof).
+  2. #116 r2 Spec (Sonnet): CHANGES REQUIRED. The real-kit smoke at 810594c has pass:false. HEALTH-S1 passes and CS-S1 is run-unknown (expected before #24), but the measured delivery lane refused. The base 3fe0298 predates #120, so a Sol fixer (ses_e49e7225) merges the tip and re-runs the smoke. Any remaining refusal is diagnosed from reason codes only.
+  3. #124 r1 Spec (Sonnet): CHANGES REQUIRED. The new close gate rejects #120's genuine multi-release evidence folder (it requires exactly one manifest, plus hard-coded log names). A report that omits "gate"/"verify" also skips machine validation. The fixer waits for Grok Standards so there is one combined round.
+  4. #32 delta Spec (Sonnet): CHANGES REQUIRED on AC3 ("a drafted HEALTH-S1 policy run through the search passes gate and verify"). The draft is review-only and `run` cannot consume it. The earlier "AC3 pipeline part deferred to 14:00" was an orchestrator deferral, not an amendment. Not decided by the orchestrator: asked the human to choose between (a) amending AC3 on #32 (the draft stays a reviewed artefact, with the consumer as future work) and (b) building a minimal approved-draft consumer on `run` before 16:00. #32 does not merge until this is answered and D39's condition holds.
+- **Why:** Close on evidence (D31). An acceptance criterion is changed only by the human.
+- **Evidence:** review sessions ses_e49e82a9 (#116 Spec), ses_e49e7bf8 (#124 Spec), ses_e49e7f95 (#32 Spec); C:\Users\kivas\AI\sinceai-out\smoke\810594cc0d51fb60d1e0fc2e60eff480b5a388cd\smoke.json.
