@@ -146,7 +146,8 @@ try {
     # Helpers are started via WMI (Win32_Process.Create) so they are NOT children of this task or of the OpenCode
     # server: a server restart or task-scheduler job cleanup must not kill them.
     $helpers = @(@{ pid = 'keep-awake.pid'; script = 'keep-awake.ps1'; skipIf = $null },
-                 @{ pid = 'gpt-probe.pid'; script = 'gpt-quota-probe.ps1'; skipIf = (Join-Path $StateDir 'gpt-available.json') })
+                 @{ pid = 'gpt-probe.pid'; script = 'gpt-quota-probe.ps1'; skipIf = (Join-Path $StateDir 'gpt-available.json') },
+                 @{ pid = 'deprioritize.pid'; script = 'deprioritize-tests.ps1'; skipIf = $null })
     if ($SkipHelpers) { $helpers = @() }
     foreach ($h in $helpers) {
       if ($h.skipIf -and (Test-Path $h.skipIf)) { continue }
