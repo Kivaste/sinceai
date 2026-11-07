@@ -790,3 +790,43 @@ CS-S1 chain done-report + 4 reviews (23 + #53/#54/#56/#92) -> merge -> #63 -> 25
   6. **#117 stays open** until the real-kit proof on 5b260ec exists. Its newest real-kit evidence is for 8a7d6a8.
 - **Why:** D46, D49, D52 and D53 (human); close only on evidence (D31).
 - **Evidence:** `sinceai-out/pin-5b260ec/{fast,slow,guard}-5b260ec….{log,exit}`; review sessions ses_e498c7d8 and ses_e498c591; `git ls-remote origin integration/pets-release` = 5b260ec.
+
+### Sat 17:05 - D53 window closed; pin proof done; train 26; #136; resumes
+
+- **When:** Sat 16:50-17:05 EET
+- **Decision:**
+  1. **Pin proof done (planning session).** 5b260ec has all 8 steps at exit 0:
+     - Plain and measured HEALTH-S1 are both RELEASED, and both verify tiers pass on each.
+     - Gate 41/41; toolRevision 5b260ec.
+     - Measured scorecard (privacy / utility / composite) moved from 0.1716 / 1 / 0.2752 to 1 / 0.9283 / 0.9661. Linkage moved from 0.5697 to 0.
+     - k stays provisional until #106.
+     - Evidence: `sinceai-out/proof-5b260ec/` and #137.
+     - The pin train's 7 fast-tier skips are named ledger placeholders (README x6, #103 x1), not environment skips, and they are not counted as passes.
+  2. **#116:** the human amended its target to a 15-minute budget with a 900 s hard timeout. Accepted.
+  3. **Train 26** (ses_e49760b8): #30 at 9bab611, #32 at 5e1bf09, #132 at dec9653 and #116 at d5d6bd2. Fast and slow tiers, the guard stopgap, then the real-kit D34 smoke with `scripts/release_smoke.py` (it arrives with #116).
+  4. **#136** (D50, Sol, ses_e4975d2a) is dispatched on ticket/fu136-ui-measured from c8c612e. Its README edit comes last, after #30, with the slow_tests.txt ids kept in sync.
+  5. **Resumed:** #106 r2 (ses_e4a0a4c1) and #110/#131 r2 (ses_e4a02df0).
+  6. **#117 stays open** for a real-kit UI capture bound to 5b260ec. The newest capture was at 8a7d6a8, and #118's minimiser change has landed since. The Sol session ses_e49cc60d runs it from the pin worktree, with the pin-proof CLI release as the byte-equality reference.
+  7. **Order after the recording:** #106 and #128 merge after the recording (the planning session will signal). #80, #121 and #130 follow #30 in the next train.
+
+### Sat 17:05 - STATUS
+
+- **Effective policies (changes only):** D49-D53 (pin fast path, D52 concurrent tiers, D53 quiet window, now closed). D51 amends #32's AC3 to draft-only. #116's target is 15 min with a 900 s hard limit.
+- **Critical path:** #117 is pinned (5b260ec), so the demo is ready. Next: train 26 (#30 → pets_submission delivery by the humans), then #106 and #128 after the recording, then #127 (by 20:00 or deferred), then the final review and fresh proof (brief §4).
+- **Blocker owners (issue → session/model):**
+  - train 26 (#30, #32, #132, #116) → ses_e49760b8 / Opus merger
+  - #106 r2 → ses_e4a0a4c1 / claude-agent/opus
+  - #110/#113/#131 r2 (#131 child-input strictness) → ses_e4a02df0 / claude-agent/opus
+  - #117 pin-bound UI capture → ses_e49cc60d / openai/gpt-6.1-sol
+  - #136 → ses_e4975d2a / openai/gpt-6.1-sol
+  - #80 (approved) → next train
+  - #128 (approved) → needs #30's strict xfails removed, after the recording
+- **Latest verified revision:** 5b260ec2dc0fb36d34c6e2b47ede56d677eac3b9.
+  - Fast tier exit 0: 2618 passed, 7 named skips. Slow tier exit 0: 123 passed. Guard exit 0: 99 passed.
+  - Pin proof: 8/8 steps exit 0 (plain + measured, both verify tiers, dashboards).
+  - Logs: `sinceai-out/pin-5b260ec/` and `sinceai-out/proof-5b260ec/`.
+- **Missing evidence:**
+  - Real-kit UI capture at 5b260ec (#117 close).
+  - D34 smoke on a merged integration SHA (first run comes with train 26).
+  - Final person-k with test_name as a QI (#106).
+  - CS-S1 real-kit release: dropped (D46).
