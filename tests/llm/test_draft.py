@@ -1,4 +1,4 @@
-﻿"""Strict validation of model output: closed schema, then the dictionary and the fixed vocabulary."""
+"""Strict validation of model output: closed schema, then the dictionary and the fixed vocabulary."""
 from __future__ import annotations
 
 import copy

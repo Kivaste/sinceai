@@ -21,6 +21,7 @@ def main() -> int:
     url = os.environ.get("PETS_LLM_SEND_URL", "")
     timeout = float(os.environ.get("PETS_LLM_SEND_TIMEOUT", "120"))
     key = os.environ.get("PETS_LLM_API_KEY", "")
+    limit = int(os.environ.get("PETS_LLM_MAX_RESPONSE", "262144"))
     if not url.startswith(("http://", "https://")):
         print("sender: bad URL", file=sys.stderr)
         return 2
@@ -30,7 +31,11 @@ def main() -> int:
     req = urllib.request.Request(url, data=sys.stdin.buffer.read(), headers=headers, method="POST")
     try:
         with urllib.request.build_opener(_NoRedirect).open(req, timeout=timeout) as resp:
-            sys.stdout.buffer.write(resp.read())
+            data = resp.read(limit + 1)
+            if len(data) > limit:
+                print("sender: reply larger than the size limit", file=sys.stderr)
+                return 1
+            sys.stdout.buffer.write(data)
     except urllib.error.HTTPError as e:
         print(f"sender: HTTP status {e.code}", file=sys.stderr)
         return 1

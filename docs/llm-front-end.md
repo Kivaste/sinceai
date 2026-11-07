@@ -55,3 +55,17 @@ The vocabulary is pinned by a test to the purpose checks of the packaged scenari
 `--align-with HEALTH-S1|CS-S1` builds the request from the kit scenario's recipient and purpose and prints
 `alignment <ID>: recovered N of M required analyses (K extra)` on stderr, comparing the drafted purpose checks
 to the scenario's official required tasks. It is content-free and exits 0 regardless of the count.
+
+## Hardening (review round 1)
+
+- **Dictionary metadata is allowlisted.** Table and column names must be plain identifiers; role and subtype must be in
+  the closed lists in `llm/dictionary.py` (the kit taxonomy names). A name, role or subtype outside them fails closed
+  (exit 2, nothing sent). A description that looks like it carries a value (email, ID shape, long digit run, IBAN,
+  international phone, URL: the same screen as the request, `llm/screen.py`) is excluded: it is replaced by an empty
+  description and the column is still offered. These checks run when the typed objects are built, so no construction
+  path bypasses them.
+- **No credentials in a draft.** A draft containing the API key (raw, hex, base64) or a credential-shaped token
+  (`sk-`, bearer, JWT, cloud and VCS tokens, private-key header, 40+ hex) is refused with exit 1 and nothing written,
+  on stdout and `--out` alike.
+- **Reply size caps.** The sender reads at most 256 KB (`PETS_LLM_MAX_RESPONSE`, bytes) before buffering; the client
+  also rejects replies over 256 KB and model text over 64 K characters before JSON parsing.

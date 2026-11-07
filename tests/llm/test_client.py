@@ -1,4 +1,4 @@
-﻿"""Provider config, request screening and the OpenAI-compatible chat-completions exchange."""
+"""Provider config, request screening and the OpenAI-compatible chat-completions exchange."""
 from __future__ import annotations
 
 import json

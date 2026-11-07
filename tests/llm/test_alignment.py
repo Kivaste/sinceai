@@ -3,13 +3,14 @@ from __future__ import annotations
 
 import json
 import sys
-import threading
-from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
 import pytest
 
 sys.path.insert(0, str(Path(__file__).parent))
+
+from fake_provider import FakeProvider
+
 from pets_release.llm.alignment import AlignmentError, align, required_tasks
 
 DRAFT = {"purposeChecks": [{"id": "H-U2", "reason": "a"}, {"id": "H-U4", "reason": "b"}, {"id": "H-U8", "reason": "c"}]}
@@ -36,38 +37,23 @@ def test_required_tasks_come_from_the_scenario_and_only_packaged_scenarios_quali
         required_tasks({"id": "HEALTH-S1", "utility_requirements": []})
 
 
-def test_cli_self_check_reports_recovered_n_of_m(cli, make_kit):
+def test_cli_self_check_reports_recovered_n_of_m(cli, make_kit, tmp_path):
     reply = {
         "recipient": "University research group",
         "trustLevel": "controlled_research",
         "purposeChecks": [{"id": "H-U2", "reason": "x"}],
         "fieldsNeeded": [{"table": "ed_visits", "column": "when", "detail": "exact", "reason": "x"}],
     }
-
-    class H(BaseHTTPRequestHandler):
-        def do_POST(self):
-            self.rfile.read(int(self.headers["Content-Length"]))
-            p = json.dumps({"choices": [{"message": {"content": json.dumps(reply)}}]}).encode()
-            self.send_response(200)
-            self.send_header("Content-Length", str(len(p)))
-            self.end_headers()
-            self.wfile.write(p)
-
-        def log_message(self, *a):
-            pass
-
-    httpd = HTTPServer(("127.0.0.1", 0), H)
-    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    provider = FakeProvider(tmp_path / "provider", reply=reply)
     try:
         kit = make_kit(scenarios=[{
             "id": "HEALTH-S1", "dataset": "health", "recipient": "A research group", "purpose": "Analyse stays",
             "utility_requirements": ["H-U2", "H-U4"],
         }])
-        env = {"PETS_LLM_ENDPOINT": f"http://127.0.0.1:{httpd.server_address[1]}/v1", "PETS_LLM_MODEL": "m"}
-        r = cli("draft-policy", "--align-with", "HEALTH-S1", "--kit", str(kit), "--allow-network", env=env)
+        r = cli("draft-policy", "--align-with", "HEALTH-S1", "--kit", str(kit), "--allow-network",
+                env=provider["env"])
     finally:
-        httpd.shutdown()
-        httpd.server_close()
+        provider.close()
     assert r.returncode == 0, r.stderr
     assert "recovered 1 of 2 required analyses" in r.stderr
     assert json.loads(r.stdout)["status"] == "draft"

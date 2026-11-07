@@ -1,14 +1,15 @@
-﻿"""`pets-release draft-policy` through the real CLI, against a fake loopback chat-completions server."""
+"""`pets-release draft-policy` through the real CLI, against a fake loopback chat-completions server."""
 from __future__ import annotations
 
 import json
 import os
 import sys
-import threading
-from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
 import pytest
+
+sys.path.insert(0, str(Path(__file__).parent))
+from fake_provider import FakeProvider
 
 GOOD = {
     "recipient": "University research group",
@@ -21,32 +22,10 @@ ARGS = ["draft-policy", "--request", REQUEST, "--dataset", "health"]
 
 
 @pytest.fixture
-def server():
-    state = {"bodies": [], "headers": [], "reply": GOOD}
-
-    class H(BaseHTTPRequestHandler):
-        def do_POST(self):
-            n = int(self.headers.get("Content-Length", "0"))
-            state["bodies"].append(self.rfile.read(n))
-            state["headers"].append((self.path, dict(self.headers)))
-            content = state["reply"] if isinstance(state["reply"], str) else json.dumps(state["reply"])
-            payload = json.dumps({"choices": [{"message": {"role": "assistant", "content": content}}]}).encode()
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Content-Length", str(len(payload)))
-            self.end_headers()
-            self.wfile.write(payload)
-
-        def log_message(self, *a):
-            pass
-
-    httpd = HTTPServer(("127.0.0.1", 0), H)
-    t = threading.Thread(target=httpd.serve_forever, daemon=True)
-    t.start()
-    state["url"] = f"http://127.0.0.1:{httpd.server_address[1]}/v1"
-    yield state
-    httpd.shutdown()
-    httpd.server_close()
+def server(tmp_path):
+    p = FakeProvider(tmp_path / "provider", api_key="sekret-key-123", reply=GOOD)
+    yield p
+    p.close()
 
 
 @pytest.fixture

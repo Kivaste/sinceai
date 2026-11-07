@@ -1,4 +1,4 @@
-﻿"""The LLM call site sees the request text and the data dictionary only (ADR 0002)."""
+"""The LLM call site sees the request text and the data dictionary only (ADR 0002)."""
 from __future__ import annotations
 
 import ast

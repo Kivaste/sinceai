@@ -7,26 +7,21 @@ Errors never carry the API key, the request text or model output.
 from __future__ import annotations
 
 import json
-import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from urllib.parse import urlparse
 
 from pets_release.llm.dictionary import DataDictionary
-from pets_release.llm.draft import build_draft, parse_model_output
+from pets_release.llm.draft import DraftRejected, build_draft, parse_model_output
 from pets_release.llm.prompt import build_messages
+from pets_release.llm.screen import has_credential, has_value_shape
 from pets_release.llm.vocabulary import vocabulary_for
 
 MAX_REQUEST = 2000
+MAX_REPLY_BYTES = 262_144  # whole HTTP body; the sender enforces the same cap before buffering
+MAX_CONTENT_CHARS = 65_536  # model text, before JSON parsing
 TIMEOUT_S = 120
 Transport = Callable[[str, bytes, str, float], bytes]
-
-_VALUE_SHAPES = (
-    re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+"),  # email
-    re.compile(r"\b\d{6}[-+A-Fa-f]\d{3}[0-9A-Za-z]\b"),  # Finnish personal identity code shape
-    re.compile(r"\d{9,}"),  # long digit run (phone, card, account)
-    re.compile(r"\d(?:[ -]?\d){11,}"),  # spaced or dashed digit run
-)
 
 
 class LlmError(Exception):
@@ -62,7 +57,7 @@ def screen_request(text: str) -> str:
         raise LlmError("the data request is empty")
     if len(text) > MAX_REQUEST:
         raise LlmError(f"the data request is longer than {MAX_REQUEST} characters")
-    if any(p.search(text) for p in _VALUE_SHAPES):
+    if has_value_shape(text):
         raise LlmError("the data request contains a value-shaped string (email, ID or long number); remove it")
     return text
 
@@ -85,10 +80,30 @@ def draft_policy(
         raw = transport(_url(config.endpoint), body, config.api_key, TIMEOUT_S)
     except Exception:  # noqa: BLE001 - the exception text could echo the key or the endpoint
         raise LlmError("the provider request failed") from None
+    if not isinstance(raw, (bytes, bytearray)) or len(raw) > MAX_REPLY_BYTES:
+        raise LlmError("the provider reply is missing or larger than the size limit")
     try:
         content = json.loads(raw)["choices"][0]["message"]["content"]
     except (ValueError, KeyError, IndexError, TypeError):
         raise LlmError("the provider reply is not a chat-completions response") from None
     if not isinstance(content, str) or not content.strip():
         raise LlmError("the provider reply has no text content")
-    return build_draft(parse_model_output(content), dictionary, request=request, model=config.model)
+    if len(content) > MAX_CONTENT_CHARS:
+        raise LlmError("the model text is larger than the size limit")
+    draft = build_draft(parse_model_output(content), dictionary, request=request, model=config.model)
+    model_fields = {k: v for k, v in draft.items() if k != "requestSha256"}  # the digest is ours, not the model's
+    if has_credential(list(_strings(model_fields)), config.api_key):
+        raise DraftRejected("the draft contains a credential or the API key")
+    return draft
+
+
+def _strings(obj):
+    if isinstance(obj, str):
+        yield obj
+    elif isinstance(obj, dict):
+        for k, v in obj.items():
+            yield k
+            yield from _strings(v)
+    elif isinstance(obj, list):
+        for v in obj:
+            yield from _strings(v)

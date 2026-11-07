@@ -1,4 +1,4 @@
-﻿"""Shared synthetic dictionary text for the LLM tests."""
+"""Shared synthetic dictionary text for the LLM tests."""
 
 DICT_MD = """# Data dictionary
 
@@ -25,4 +25,5 @@ DICT_MD = """# Data dictionary
 |---|---|---|---|---|
 | `thing` | non_sensitive | CATEGORY |  | A thing |
 """
+
 
