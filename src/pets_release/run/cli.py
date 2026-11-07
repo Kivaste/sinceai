@@ -49,7 +49,7 @@ def main(argv: list[str]) -> int:
         return 2
     try:
         res = run_release(kit=ctx.kit, scenario=ctx.scenario, created=ctx.created, key_text=ctx.key,
-                          out=a.out, plan_name=a.plan or "hand", tool_revision=rev)
+                          out=a.out, plan_name=a.plan, tool_revision=rev)
     except RunError as e:
         print(f"pets-release run: {e}", file=sys.stderr)
         return 2

@@ -48,7 +48,9 @@ def _pet(entry) -> tuple[str, dict]:
     return "generalisation", {"rung": rung}
 
 
-def build_narrative(*, policy, plan, scenario_ids, suppression: dict, k: int) -> dict:
+def build_narrative(*, policy, plan, scenario_ids, suppression: dict, k: int, search=None) -> dict:
+    """``search`` (ticket 25): {"justifications", "summary", "sacrifices"} from ``run.justify`` and the
+    search result; None for the hand plan."""
     by_key = sorted(plan, key=lambda e: (e["table"], e["column"]))
     inventory = [{"dataset": policy.dataset, "table": e["table"], "column": e["column"],
                   "role": _role(policy, e["table"], e["column"]),
@@ -72,9 +74,12 @@ def build_narrative(*, policy, plan, scenario_ids, suppression: dict, k: int) ->
                    "outputColumn": output_column(e) if released else None,
                    "decision": "released" if released else "withheld",
                    "rung": e["rung"], "floor": e["floor"], "reason": e["reason"][:500], "source": e["source"]})
+    if search is not None:
+        fj = list(search["justifications"])
     pending = "not measured yet: the measurer is wired in the story-kit ticket"
     measured = {"utility": not_measured(pending), "privacy": not_measured(pending),
-                "search": not_measured("hand-picked plan; no search run"),
+                "search": (dict(search["summary"]) if search is not None
+                           else not_measured("hand-picked plan; no search run")),
                 "baselines": not_measured(pending), "redaction": not_measured("no free text released")}
     risks = []
     for n in policy.residual_notes:
@@ -95,7 +100,10 @@ def build_narrative(*, policy, plan, scenario_ids, suppression: dict, k: int) ->
          "rate": not_measured(pending), "description": "attribute inference from released quasi-identifiers"},
     ]
     risks.sort(key=lambda r: r["risk"])
-    sacrifices = sorted(({"check": s["check"], "floor": s["floor_score"], "before": None, "after": None,
+    taken = {s["check"]: s for s in (search or {}).get("sacrifices", [])}
+    sacrifices = sorted(({"check": s["check"], "floor": s["floor_score"],
+                          "before": taken[s["check"]]["score_before"] if s["check"] in taken else None,
+                          "after": taken[s["check"]]["score_after"] if s["check"] in taken else None,
                           "reason": s["reason"][:500]} for s in policy.sacrifices), key=lambda s: s["check"])
     checks = ", ".join(policy.purpose_checks)
     fit = [{"scenario": policy.scenario,
