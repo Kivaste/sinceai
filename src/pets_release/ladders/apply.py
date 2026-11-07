@@ -25,6 +25,7 @@ _SIMPLE: dict[str, Callable[[pd.Series, dict], pd.Series]] = {
     "ts.exact": T.ts_exact,
     "ts.hour": T.ts_hour,
     "ts.month_hour": T.ts_month_hour,
+    "ts.hour_of_day": T.ts_hour_of_day,
     "ts.day": T.ts_day,
     "ts.week": T.ts_week,
     "ts.month": T.ts_month,
