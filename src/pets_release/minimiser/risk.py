@@ -89,6 +89,8 @@ def person_k(prot, plan, policy, source, kspec, k):
     with tempfile.TemporaryDirectory(prefix="pets-min-") as d:
         rowmaps = _write(Path(d), prot, contract, source, kspec)
         res = person_k_values(d, contract, _context(source, rowmaps, kspec, k))
+    if res is None:  # fail closed (#112): a missing PersonK is never scored, least of all as perfect privacy
+        raise RuntimeError("PersonK missing: per-person k not measured")
     return res, contract
 
 
@@ -118,15 +120,12 @@ def risk_vector(policy, plan, prot, source, kspec, k) -> tuple[dict, object]:
     pk = None
     wanted = set(policy.risk_vector)
     if wanted & K_COMPONENTS:
-        pk, _ = person_k(prot, plan, policy, source, kspec, k)
-        if pk is None:
-            out["qi_k_shortfall"] = out["qi_unique_rate"] = 0.0
-        else:
-            n = len(pk.per_person) + pk.unidentified
-            below = sum(1 for v in pk.per_person.values() if v < k) + pk.unidentified
-            uniq = sum(1 for v in pk.per_person.values() if v == 1) + pk.unidentified
-            out["qi_k_shortfall"] = below / n if n else 1.0
-            out["qi_unique_rate"] = uniq / n if n else 1.0
+        pk, _ = person_k(prot, plan, policy, source, kspec, k)  # raises on a missing PersonK
+        n = len(pk.per_person) + pk.unidentified
+        below = sum(1 for v in pk.per_person.values() if v < k) + pk.unidentified
+        uniq = sum(1 for v in pk.per_person.values() if v == 1) + pk.unidentified
+        out["qi_k_shortfall"] = below / n if n else 1.0
+        out["qi_unique_rate"] = uniq / n if n else 1.0
     if "join_derived_qi" in wanted:
         jq = [(q["table"], q["column"]) for q in policy.qi if q.get("join_via")]
         out["join_derived_qi"] = (sum(1 for x in jq if x in released) / len(jq)) if jq else 0.0
