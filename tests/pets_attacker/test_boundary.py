@@ -157,3 +157,20 @@ def test_runtime_guard_on_the_real_tree(tmp_path: Path):
     else:
         with pytest.raises(BoundaryError):
             runtime_violations(SRC, truth)
+
+
+def test_main_entry_modules_are_not_executed_by_the_runtime_walk(tmp_path: Path):
+    src = _tree(tmp_path, {"pets_release/__main__.py": "raise SystemExit(3)\n", "pets_release/a.py": "X = 1\n"})
+    assert runtime_violations(src, _truth(tmp_path)) == []
+
+
+def test_kit_module_is_exempt_from_the_truth_scan_only(tmp_path: Path):
+    """pets_release/kit.py names `truth` to forbid it; the exemption is that one file, truth text only."""
+    lit = 'FORBIDDEN = frozenset({"truth"})\n'
+    _plant(tmp_path, "pets_release/kit.py", lit)
+    _plant(tmp_path, "pets_release/other.py", lit)
+    hits = truth_references(tmp_path / "src")
+    assert not any(h.endswith("kit.py") for h in hits)
+    assert any(h.endswith("other.py") for h in hits)
+    _plant(tmp_path, "pets_release/kit.py", "import pets_attacker\n")
+    assert any(h.endswith("kit.py") for h in attacker_importers(tmp_path / "src"))

@@ -26,6 +26,11 @@ PACKAGE = "pets_release"
 _TRUTH_RE = re.compile(r"""(^|[\\/'"])truth([\\/'"]|$)""", re.MULTILINE)
 
 
+# The kit adapter names `truth` only to forbid it; exempt from the truth-text scan (not the
+# attacker-name scan, not the runtime guard).
+TRUTH_SCAN_EXEMPT = frozenset({"pets_release/kit.py"})
+
+
 class BoundaryError(ValueError):
     """The scan could not be performed (bad root)."""
 
@@ -47,9 +52,11 @@ def _text(p: Path) -> str | None:
         return None
 
 
-def _scan(src: Path, pattern, *, inside_attacker: bool = False) -> list[str]:
+def _scan(src: Path, pattern, *, inside_attacker: bool = False, exempt=frozenset()) -> list[str]:
     out = []
     for p in _py_files(src, inside_attacker=inside_attacker):
+        if p.relative_to(src).as_posix() in exempt:
+            continue
         t = _text(p)
         if t is None or pattern(t):  # unreadable = violation
             out.append(str(p))
@@ -58,7 +65,7 @@ def _scan(src: Path, pattern, *, inside_attacker: bool = False) -> list[str]:
 
 def truth_references(src: Path) -> list[str]:
     """Files outside the attacker package naming a `truth` path segment (or unreadable)."""
-    return _scan(src, lambda t: bool(_TRUTH_RE.search(t)))
+    return _scan(src, lambda t: bool(_TRUTH_RE.search(t)), exempt=TRUTH_SCAN_EXEMPT)
 
 
 def attacker_importers(src: Path) -> list[str]:
@@ -90,7 +97,8 @@ n = 0
 pkg = importlib.import_module(sys.argv[2])
 mods = [sys.argv[2]]
 for m in pkgutil.walk_packages(pkg.__path__, sys.argv[2] + ".", onerror=lambda name: errors.append(name)):
-    mods.append(m.name)
+    if not m.name.endswith(".__main__"):  # entry points run main() on import; the static scan covers them
+        mods.append(m.name)
 for name in mods:
     try:
         importlib.import_module(name)
@@ -129,4 +137,5 @@ def runtime_violations(src: Path, truth_dir: Path) -> list[str]:
     if res["truth_opened"]:
         out.append("truth-opened")
     return out
+
 
