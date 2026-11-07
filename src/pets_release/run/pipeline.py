@@ -212,7 +212,8 @@ def require_strict(purpose, steps):
 def run_release(*, kit, scenario: dict, created: str, key_text: str, out, plan_name: str,
                 tool_revision: str, recipient: str | None = None) -> RunOutcome:
     scenario_id = scenario.get("id")
-    if scenario_id == "CS-S1" and plan_name == "hand":  # ticket 23: CS-S1 glue
+    # ticket 23: CS-S1 glue. CS-S1 has no search yet (follow-up #96), so no --plan means its hand plan
+    if scenario_id == "CS-S1" and plan_name in (None, "hand"):
         from pets_release.cs_s1.release import run_cs_s1
 
         return run_cs_s1(kit=kit, scenario=scenario, created=created, key_text=key_text, out=out,

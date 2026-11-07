@@ -108,6 +108,13 @@ _HOLDOUT = ("exact-match on the template-held-out split at turn level (skeleton 
             "ticket 14 deviation from conversation level)")
 
 
+# D45 (human decision): the held-out SECRET figure after the misspelled-cue rule is optimistic, because the two
+# held-out misses informed that rule. Stated in every release; the target is never lowered or hidden.
+_SECRET_DISCLOSURE = ("Before the misspelled-cue redactor rule (ticket 23 round 5) held-out recall was 15/17 "
+                      "(0.8824). The two held-out misses informed that rule (held-out contamination), so any "
+                      "later held-out figure is optimistic and the target is not shown to be met on untouched data.")
+
+
 def _target_risks(by: dict, sc: dict, n_held: int) -> list[dict]:
     """Per-label held-out recall of every CS-S1 target label against the spec floor, and SECRET precision; each
     stated on its own, never only as the combined figure (Sol r1 Spec)."""
@@ -124,8 +131,13 @@ def _target_risks(by: dict, sc: dict, n_held: int) -> list[dict]:
                     "source": "redactor spans vs kit gold, " + _HOLDOUT}
             verdict = (f"{e['tp']}/{e['support']} held-out spans, "
                        + ("meets" if e["recall"] >= TARGET_RECALL else "BELOW") + f" the spec floor {TARGET_RECALL}")
-        out.append({"risk": rid, "kind": "note", "label": lab, "rate": rate,
-                    "description": f"{lab} recall: {verdict}; {_HOLDOUT}"})
+        desc = f"{lab} recall: {verdict}; {_HOLDOUT}"
+        if lab == "SECRET":
+            desc = (f"SECRET recall: unmet target (spec floor {TARGET_RECALL}). {_SECRET_DISCLOSURE} This run: "
+                    f"{verdict}; exact-match, template-held-out split at turn level (accepted ticket 14 deviation)")
+            if len(desc) > 500:
+                raise ValueError("SECRET target note longer than the manifest text limit")
+        out.append({"risk": rid, "kind": "note", "label": lab, "rate": rate, "description": desc})
     sec = sc["cs_s1_target"]["per_label"].get("SECRET", {})
     p = _num(sec.get("precision"))
     out.append({"risk": "target-precision-secret", "kind": "note", "label": "SECRET",

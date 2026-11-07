@@ -108,6 +108,10 @@ def test_manifest_turn_id_measurements_and_risks(cs_run):
         r = by_id[f"target-recall-{lab.lower().replace('_', '-')}"]
         assert r["kind"] == "note" and r["label"] == lab and "0.98" in r["description"]
         assert "template-held-out" in r["description"] and "turn level" in r["description"]
+    # D45: the SECRET figure is disclosed as an unmet target: 15/17 before the misspelled-cue rule, the
+    # post-change figure contaminated by the held-out misses that informed it, the target not shown on untouched data
+    sec = by_id["target-recall-secret"]["description"]
+    assert "15/17" in sec and "contaminat" in sec and "not shown" in sec and "unmet" in sec
     p = by_id["target-precision-secret"]
     assert p["kind"] == "note" and p["label"] == "SECRET" and "precision" in p["description"]
     assert "healthInText" in m["exportAssertions"] and "quasiIdentifiersBelowK" not in m["exportAssertions"]
