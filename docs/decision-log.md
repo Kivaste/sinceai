@@ -89,3 +89,31 @@ Each entry records:
 - **Decision:** `openai/gpt-6.1-sol` returned `subscription_sharing_usage_limit_exceeded`. New ticket reviews pair `opencode-go/deepseek-v4.1-flash` with `xai/grok-4.7#medium` (a third family, not Claude, so still independent of every implementer). GPT reviews already returned stay valid for their heads. Retry GPT for the final integration `/code-review` if the limit has reset.
 - **Why:** Two-family review is mandatory; Grok is the roster's remaining non-Claude family.
 - **Evidence:** 08 r5 GPT review session error.
+
+### Sat 03:00–03:40 — merges 06, 07, 15; network outage; recorded deviations
+
+- **When:** Sat 03:00–03:40 EET
+- **Decision:** (1) Merged 06 (`6f58567`), 07 (`910a80a`) and 15 (`900dd8b`), each with the full suite green on the merged result (141 / 250 / 320 passed); follow-ups #42, #43, #44. (2) Accepted ticket 06's 5-field token message (adds scope kind to the spec's 4 fields): stricter domain separation, documented and pinned by test. (3) Rejected a DeepSeek "blocker" on 04 (files deleted vs integration) after a trial `git merge-tree`: the merge adds 43 files and deletes none; the branch was only behind. (4) A DNS outage killed 9 review sessions and 04's fix session; all re-dispatched after DNS recovered, 04 resumed in its own session. (5) Ticket 20's implementer self-reported briefly viewing part of a field-catalog-derived doc (the detect answer key) before realising; no answers hard-coded; its health macro-F1 is flagged optimistic and the other datasets treated as the held-out signal. Reviewers told not to open those files. (6) HEALTH-S1 hand plan misses k=5 per person (DeepSeek on 09); 09 is measuring per-person k with ticket 11's check and may add a deterministic local-suppression policy field for ticket 21 (D10 "suppression last").
+- **Why:** Keep the critical path moving and record judgment calls.
+- **Evidence:** #7, #8, #16 done-reports; `git merge-tree --write-tree` diff (A 43 / D 0).
+
+### Sat 05:15 — time correction; 16/17/18/19 started before 02/04 merge
+
+- **When:** Sat 05:15 EET
+- **Decision:** (1) Correction: the DNS outage lasted ~2 h (about 03:00–05:10 EET); the previous entry's "03:00–03:40" range is wrong — the merges were ~03:00, the re-dispatch ~05:10. (2) With under 4 h to the Sat 09:00 story kit and 02/04 still in final review, started 16 (writer, Opus), 17 (verify, Opus), 18 (dashboard, Sonnet) and 19 (measurer, Sonnet) now, branched from 02's head (which contains 04) and, for 19, 08's head. They merge only after 02/04 (and 08) merge; implementers merge the final sibling heads before reporting. This bends "Blocked by" to "Merge after" for these four.
+- **Why:** The critical path 04 → 16/17 → 21 → 22 cannot fit in the remaining time if 16/17 wait for two more review rounds on 02/04; both upstream APIs are stable and only final-round changes are pending.
+- **Evidence:** heartbeat timestamp 03:12 UTC; worktrees `ticket/16-writer`, `17-verify`, `18-dashboard`, `19-measurer` based on 67ef441.
+
+### Sat 05:22 — human instruction: six blocked tickets started early
+
+- **When:** Sat 05:22 EET (applied 05:30)
+- **Decision:** Per Kivaste (planning session): started 24 minimiser (Opus), 28 recipient keys (Sonnet), 27 determinism/offline tests (Sonnet; tests needing 21's `run` explicitly marked and listed), 30 README draft (Sonnet), 23 CS-S1 glue + fixture tests (Opus; real-kit e2e after 21), 22 part A story-kit script and numbers template keyed to manifest paths (Sonnet; part B blocked on 18/19/21). Blockers treated as Merge after only; each merges after its blockers close with the full suite green on the merged result. Implementer count ~12, under the cap; `pytest -n 8` (CPU 31–43%).
+- **Why:** Machine headroom and time pressure; pinned contracts make parallel work safe.
+- **Evidence:** worktrees `ticket/{24-minimiser,28-recipient-keys,27-determinism,30-readme,23-cs-s1,22-story-kit}` at 6675731.
+
+### Sat 05:30 — k in the contract; hour-of-day rung; 08 identity-data check
+
+- **When:** Sat 05:30 EET
+- **Decision:** (1) The release contract carries the scenario's k target (`k`, from the policy) so recipient verify can re-run `producer.row-k` from the release alone; 10 emits it, 02's schema accepts it, 11 reads it. CS-S1 (no k target) handling is assigned to ticket 23. (2) Added rung `ts.hour_of_day` (ticket 07b, date-free `HH:00`): ticket 09 measured per-person k on the kit — with existing rungs the best HEALTH-S1 hand plan keeping all required tasks leaves 55% of persons below k=5, and suppression alone would remove 71% and break H-U4; hour-of-day gave ~4.5% below k with all tasks 1.0, within the policy's 10% suppression cap. (3) Ticket 08 decides "linkage expected" via pets-eval's own identity-data loader (in memory, yes/no only, never kept or exported) instead of building a truth/ path; recorded as a scoped exception to "only the attacker reads truth", because it is the kit evaluator's own loader used for the scorecard's coverage check.
+- **Why:** Story-kit release must pass the producer k gate; recipient verify must be re-runnable; the boundary guard must hold on the merged tree.
+- **Evidence:** 09's per-person k table (aggregate, ticket thread on merge); 07b scorecard H-U2…H-U8 all 1.0 with `arrival_ts` at `ts.hour_of_day`.
