@@ -16,6 +16,7 @@ import re
 import sys
 from pathlib import Path
 
+from pets_release.manifest.canonical import loads_strict
 from pets_release.offline import entry_point
 
 _ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:+-]{0,63}$")
@@ -71,7 +72,8 @@ def main(argv=None) -> int:
     ap.add_argument("--out", required=True, type=Path)
     a = ap.parse_args(argv)
     try:
-        risks = residual_risks(json.loads(a.attack.read_text(encoding="utf-8-sig")))
+        # #114: strict (duplicate keys, NaN/Infinity refuse): a dropped duplicate aggregate never reaches the manifest
+        risks = residual_risks(loads_strict(a.attack.read_text(encoding="utf-8-sig")))
     except (OSError, ValueError) as e:
         print(f"bridge: refused: {type(e).__name__}", file=sys.stderr)
         return 2

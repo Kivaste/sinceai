@@ -116,10 +116,26 @@ def test_real_cli_original_value_plant_fails(real_bed, tb, verify_cli):
     assert value not in r.stdout + r.stderr
 
 
+PRODUCTION = {  # check name -> (module, function) of its production implementation, pinned by name (#115 item 6)
+    "producer.key-material": ("pets_release.checks.producer.values", "run_key_material"),
+    "producer.original-values": ("pets_release.checks.producer.values", "run_original_values"),
+    "producer.person-k": ("pets_release.checks.producer.kanon", "run_person_k"),
+    "producer.unkeyed-hashes": ("pets_release.checks.producer.values", "run_unkeyed_hashes"),
+}
+
+
 @pytest.mark.parametrize("name", PRODUCER)
 def test_real_producer_check_is_the_registered_implementation(name):
-    """No stub: the check verify runs is the registry's production function from checks.producer."""
+    """No stub: the registry entry verify runs is exactly the pinned production function (identity, not a module
+    prefix), so a deleted check or any other function registered under its name (even one defined inside
+    checks.producer) fails here. A stub written into the production function's own body is caught by the plant
+    rows above."""
+    import importlib
+
     from pets_release.checks import all_checks
 
-    chk = next(c for c in all_checks() if c.name == name)
-    assert chk.run.__module__.startswith("pets_release.checks.producer."), chk.run.__module__
+    module, fn = PRODUCTION[name]
+    want = getattr(importlib.import_module(module), fn)
+    got = [c for c in all_checks() if c.name == name]
+    assert len(got) == 1, name
+    assert got[0].run is want, (got[0].run.__module__, got[0].run.__qualname__)
