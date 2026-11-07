@@ -1,20 +1,25 @@
 """Redacted customer_service eval turns (``turn_id,text``) and detected spans (JSONL) for the organisers.
 
-The redactor's output is not proof (D37): the exact export bytes go through the gate's production ``text.*``
-checks before publication. A turn with a high-severity hit is masked whole (``MASK``) and its spans become one
-whole-turn span per label; the checks re-run until clean. Counts only reach the index; no text leaves this module.
+The redactor's output is not proof (D37): the exact export bytes go through the gate's production ``text.*`` checks
+and its cell-level checks (rescans, raw timestamps, 64-hex, original values, unkeyed hashes; #148), over the turn
+texts, the turn ids as both files decode them, and the decoded spans. A turn with a high-severity hit is masked whole
+with one typed placeholder and one whole-turn span of its label; the checks re-run until clean. A hit in an ID or the
+spans refuses. Counts only reach the index; no text leaves this module.
 """
 from __future__ import annotations
 
 import csv
 import io
 import json
+import re
 import tempfile
 from collections.abc import Sequence
+from dataclasses import replace
 from pathlib import Path
 
 from pets_release.kit import Kit, KitError
 from pets_release.redactor import Turn, default_passes, redact_conversation
+from pets_release.redactor.labels import LABELS, PLACEHOLDER_TYPE, parse_placeholder, placeholder
 from pets_release.submission.errors import SubmissionRefused
 
 DATASET = "customer_service"
@@ -22,7 +27,6 @@ TURN_COLUMNS = ("turn_id", "conversation_id", "seq", "text")
 CONV_COLUMNS = ("conversation_id", "split")
 EVAL_SPLIT = "eval"
 EXPORT_HEADER = ["turn_id", "text"]
-MASK = "[REDACTED]"  # a placeholder shape the gate's normaliser masks, so a masked turn re-checks clean
 
 # Staged views of the export bytes for the gate runner: the redacted texts stitched per conversation (the order
 # and grouping come from the kit by turn_id), and every spans line as its own free-text row.
@@ -40,6 +44,24 @@ _CONTRACT = {
         _IDS_FILE: {"columns": {"id": {"form": "text"}}},
     },
 }
+_EXPORT_FILE = "customer_service_eval_redacted.csv"  # the cell checks see the redacted file's exact bytes
+_CELL_CONTRACT = {
+    "tokens": [],  # nothing in the eval exports is a keyed token: any 64-hex is a hit
+    "files": {
+        _EXPORT_FILE: {"columns": {"turn_id": {"form": "categorical"}, "text": {"form": "text"}}},
+        _SPANS_FILE: {"columns": {"line": {"form": "text"}}},
+        _IDS_FILE: {"columns": {"id": {"form": "text"}}},
+    },
+}
+# Cell-check labels that are not span labels -> the span label of a whole masked turn.
+_CHECK_LABELS = {"RAW_TIMESTAMP": "DATE", "HEX64_OUTSIDE_TOKEN": "SECRET"}
+# producer.original-values labels are "<table>.<column>" of a CS-S1 direct identifier -> its span label.
+_IDENTIFIER_LABELS = {"full_name": "PERSON", "agent_name": "PERSON", "street_address": "ADDRESS", "email": "EMAIL",
+                      "phone": "PHONE", "iban": "IBAN", "hetu": "NATIONAL_ID", "customer_id": "ACCOUNT_NUMBER",
+                      "customer_number": "ACCOUNT_NUMBER", "contract_number": "ACCOUNT_NUMBER"}
+_BRACKETED = re.compile(r"\[[A-Z_0-9]+\]")  # candidate placeholders; parse_placeholder decides
+INDEPENDENCE_NOTE = ("reduced for masked turns: the production checks that flagged a turn also decided its masking, "
+                     "so no independent check confirms those turns (D29/D37)")
 
 
 def _seq(value: str) -> int:
@@ -81,10 +103,11 @@ def cs_eval_outputs(kit: Kit, passes: Sequence | None = None) -> tuple[bytes, by
         raise SubmissionRefused("cs_eval_no_lexicon") from None
     texts, spans, order, lengths = _redact(sub, passes)
     redactor_spans = sum(len(v) for v in spans.values())
-    redacted, spans_bytes, gate = _gate(texts, spans, order, lengths)
+    context = producer_context(kit)
+    redacted, spans_bytes, gate = _gate(texts, spans, order, lengths, context)
     counts = {"conversations": len(eval_ids & set(sub["conversation_id"])), "turns": len(texts),
               "redactorSpans": redactor_spans, "spans": sum(len(v) for v in spans.values()), **gate,
-              "maskingEffect": masking_effect(kit, turns, convs, passes)}
+              "maskingEffect": masking_effect(kit, turns, convs, passes, context)}
     return redacted, spans_bytes, counts
 
 
@@ -127,7 +150,7 @@ def _micro(gold: dict, pred: dict) -> dict:
     return {k: None if m[k] is None else round(float(m[k]), 4) for k in ("precision", "recall", "f2")}
 
 
-def masking_effect(kit: Kit, turns, convs, passes) -> dict:
+def masking_effect(kit: Kit, turns, convs, passes, context: dict) -> dict:
     """Exact-match micro precision/recall/F2 (all labels) of the packaging pipeline on the labelled held-out
     conversations, before and after the D37 whole-turn masking; ``not_measured`` with a reason where the kit
     gives no labelled held-out frame. Aggregates only."""
@@ -149,7 +172,7 @@ def masking_effect(kit: Kit, turns, convs, passes) -> dict:
         texts, spans, order, lengths = _redact(turns[turns["turn_id"].isin(set(held))], passes)
         truth = {t: frame.gold[t] for t in held}
         before = _micro(truth, {t: list(spans[t]) for t in held})
-        _r, _s, gate = _gate(texts, spans, order, lengths)
+        _r, _s, gate = _gate(texts, spans, order, lengths, context)
         after = _micro(truth, {t: spans[t] for t in held})
     except SubmissionRefused as e:
         return _not_measured(f"masking could not be replayed on the held-out frame ({e.code})")
@@ -177,6 +200,38 @@ def _text_checks() -> list:
     if set(got) != want:
         raise SubmissionRefused("cs_eval_checks_unavailable")
     return [got[n] for n in sorted(want)]
+
+
+def _cell_checks() -> list:
+    """The gate's cell-level production checks that apply to the eval bytes (#148): every per-label rescan, raw
+    timestamps, 64-hex outside tokens, original-value survival and unkeyed hashes. Key material is scanned over
+    the whole bundle by the packager; the structural/contract/k checks have no eval-file counterpart."""
+    from pets_release.checks import registry
+    from pets_release.checks.cells.labels import LABEL_CHECKS
+    from pets_release.checks.producer.values import ORIGINAL_VALUES, UNKEYED_HASHES
+
+    want = {*LABEL_CHECKS, ORIGINAL_VALUES, UNKEYED_HASHES}
+    try:
+        got = {c.name: c for c in registry.all_checks() if c.name in want}
+    except registry.RegistryError:
+        raise SubmissionRefused("cs_eval_checks_unavailable") from None
+    if set(got) != want:
+        raise SubmissionRefused("cs_eval_checks_unavailable")
+    return [got[n] for n in sorted(want)]
+
+
+def producer_context(kit: Kit) -> dict:
+    """The original-value context of the producer checks: the kit's customer_service tables and the CS-S1
+    policy's direct identifiers present in them (values stay in memory). None present refuses later (not run)."""
+    from pets_release.policy import get_policy
+
+    try:
+        source = kit.load_dataset(DATASET)
+    except KitError:
+        raise SubmissionRefused("cs_eval_unavailable") from None
+    idents = sorted(get_policy("CS-S1").direct_identifiers)
+    return {"source": source,
+            "identifiers": [{"table": t, "column": c} for t, c in idents if t in source and c in source[t].columns]}
 
 
 _SPAN_KEYS = {"start", "end", "label"}
@@ -220,36 +275,86 @@ def _write_csv(path: Path, header: list, rows: list) -> None:
         w.writerows(rows)
 
 
-def _scan(redacted: bytes, spans: bytes, order: dict, checks: list):
-    """Run the checks on the exact export bytes. Returns (turn ids, records) of the redacted-file rows."""
+def _run(stage: Path, contract: dict, context: dict, checks: list) -> list:
+    """The checks' violations on a staged folder; any check not run, errored or not applicable refuses."""
     from pets_release.checks.runner import run_checks
 
+    res = run_checks(stage, contract, context, checks=checks)
+    if (res.registry_error is not None or sorted(r.check for r in res.records) != sorted(c.name for c in checks)
+            or any(r.status not in ("pass", "fail") for r in res.records)):
+        raise SubmissionRefused("cs_eval_check_error")  # not run, errored or not applicable is never clean
+    return [v for r in res.records for v in r.violations]
+
+
+def _scan(redacted: bytes, spans: bytes, order: dict, checks: tuple, context: dict):
+    """Run the checks on the exact export bytes. Returns (turn ids, violations): turn-text violations name the
+    staged turns file (rows in turn-id order); every other file or column is an ID, spans or header hit."""
     rows, lines, decoded = _parse_export(redacted, spans)
     ids = [r[0] for r in rows]
     if len(lines) != len(ids) or set(ids) != set(order) or [d[0] for d in decoded] != ids:
         raise SubmissionRefused("cs_eval_format")
+    text_checks, cell_checks = checks
     with tempfile.TemporaryDirectory(prefix="pets-cs-eval-gate-") as tmp:
-        stage = Path(tmp)
+        stage, cells = Path(tmp) / "text", Path(tmp) / "cells"
+        stage.mkdir()
+        cells.mkdir()
         _write_csv(stage / _TURNS_FILE, ["conversation_id", "seq", "text"], [[*order[t], x] for t, x in rows])
         # Every ID as both readers recover it: the CSV turn_id and the decoded JSON record_id (#148).
-        _write_csv(stage / _IDS_FILE, ["id"], [[t] for t in ids] + [[d[0]] for d in decoded])
+        id_rows = [[t] for t in ids] + [[d[0]] for d in decoded]
+        _write_csv(stage / _IDS_FILE, ["id"], id_rows)
         # The raw spans lines and every decoded string value in them.
-        _write_csv(stage / _SPANS_FILE, ["line"], [[x] for x in lines] + [[s] for d in decoded for s in d[1]])
-        res = run_checks(stage, _CONTRACT, {"phase": "gate"}, checks=checks)
-    if (res.registry_error is not None or sorted(r.check for r in res.records) != sorted(c.name for c in checks)
-            or any(r.status not in ("pass", "fail") for r in res.records)):
-        raise SubmissionRefused("cs_eval_check_error")  # not run, errored or not applicable is never clean
-    return ids, res.records
+        span_rows = [[x] for x in lines] + [[s] for d in decoded for s in d[1]]
+        _write_csv(stage / _SPANS_FILE, ["line"], span_rows)
+        found = _run(stage, _CONTRACT, {"phase": "gate"}, text_checks)
+        # The cell-level production checks (#148) on the redacted file's exact bytes and the same ID/spans views;
+        # a turn-text hit is reported against the turns file so one masking path handles both.
+        (cells / _EXPORT_FILE).write_bytes(redacted)
+        _write_csv(cells / _IDS_FILE, ["id"], id_rows)
+        _write_csv(cells / _SPANS_FILE, ["line"], span_rows)
+        for v in _run(cells, _CELL_CONTRACT, {"phase": "gate", **context}, cell_checks):
+            if v.file == _EXPORT_FILE:
+                v = replace(v, file=_TURNS_FILE if v.column == "text" else _IDS_FILE)
+            found.append(v)
+    return ids, found
 
 
-def _gate(texts: dict, spans: dict, order: dict, lengths: dict) -> tuple[bytes, bytes, dict]:
-    """Mask flagged turns whole until the checks find no high-severity hit; mutates ``texts`` and ``spans``."""
-    checks = _text_checks()
+def _span_label(check_label: str) -> str:
+    """The span label (and so the placeholder type) of a checker hit; an unmapped label refuses (fail closed)."""
+    if check_label in PLACEHOLDER_TYPE:
+        return check_label
+    if ":" in check_label:  # producer.unkeyed-hashes: "<algo>:<table>.<column>", an identifier's digest
+        return "SECRET"
+    label = _CHECK_LABELS.get(check_label) or _IDENTIFIER_LABELS.get(check_label.rpartition(".")[2])
+    if label is None:
+        raise SubmissionRefused("cs_eval_unlabelled_hit")
+    return label
+
+
+def _mask(tid: str, label: str, texts: dict, order: dict) -> str:
+    """One typed placeholder for a whole masked turn, numbered after every ``label`` placeholder already in the
+    turn's conversation (per-conversation numbering, as the redactor's)."""
+    conv = order[tid][0]
+    used = [0]
+    for t, x in texts.items():
+        if order[t][0] == conv:
+            for m in _BRACKETED.findall(x):
+                p = parse_placeholder(m)
+                if p is not None and p[0] == label:
+                    used.append(p[1])
+    return placeholder(label, max(used) + 1)
+
+
+def _gate(texts: dict, spans: dict, order: dict, lengths: dict, context: dict) -> tuple[bytes, bytes, dict]:
+    """Mask flagged turns whole until the checks find no high-severity hit; mutates ``texts`` and ``spans``.
+
+    A masked turn becomes one typed placeholder and one whole-turn span of the same label (the redactor's
+    placeholder<->label table), so the two files cannot drift."""
+    checks = (_text_checks(), _cell_checks())
     flagged: dict[str, set] = {}  # turn id -> labels the checker found there
     for _ in range(len(texts) + 1):
         redacted, spans_bytes = _serialise(texts, spans)
-        ids, records = _scan(redacted, spans_bytes, order, checks)
-        high = [v for r in records for v in r.violations if v.severity == "high"]
+        ids, found = _scan(redacted, spans_bytes, order, checks, context)
+        high = [v for v in found if v.severity == "high"]
         if any(v.file == _IDS_FILE for v in high):
             raise SubmissionRefused("cs_eval_id_flagged")  # turn ids must ship as they are; nothing to mask
         if any(v.file == _SPANS_FILE for v in high):
@@ -263,18 +368,21 @@ def _gate(texts: dict, spans: dict, order: dict, lengths: dict) -> tuple[bytes, 
                 if tid not in flagged:
                     new.setdefault(tid, set()).add(v.label)
         if not high:
-            low = sum(v.count for r in records for v in r.violations if v.severity == "low")
+            low = sum(v.count for v in found if v.severity == "low")
             by_label: dict[str, int] = {}
             for labels in flagged.values():
                 for label in labels:
                     by_label[label] = by_label.get(label, 0) + 1
-            return redacted, spans_bytes, {"maskedTurns": len(flagged), "maskedTurnsByLabel": dict(sorted(by_label.items())),
-                                           "lowSeverityHits": low, "textChecks": [c.name for c in checks]}
+            return redacted, spans_bytes, {
+                "maskedTurns": len(flagged), "maskedTurnsByLabel": dict(sorted(by_label.items())),
+                "lowSeverityHits": low, "textChecks": [c.name for c in checks[0]],
+                "cellChecks": [c.name for c in checks[1]],
+                "checkerIndependence": {"reducedForTurns": len(flagged), "note": INDEPENDENCE_NOTE}}
         if not new:
             raise SubmissionRefused("cs_eval_unmaskable")  # a hit survives in a masked turn: never ship it
-        for tid, labels in new.items():
+        for tid, labels in sorted(new.items()):
             flagged[tid] = labels
-            texts[tid] = MASK
-            kinds = labels | {s["label"] for s in spans[tid]}
-            spans[tid] = [{"start": 0, "end": lengths[tid], "label": k} for k in sorted(kinds)] if lengths[tid] else []
+            label = min((_span_label(x) for x in labels), key=LABELS.index)
+            texts[tid] = _mask(tid, label, texts, order)
+            spans[tid] = [{"start": 0, "end": lengths[tid], "label": label}] if lengths[tid] else []
     raise SubmissionRefused("cs_eval_unmaskable")

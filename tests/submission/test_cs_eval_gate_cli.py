@@ -2,13 +2,19 @@
 
 Rule: before publication the packager runs the gate's ``text.*`` checks on the exact bytes of
 ``customer_service_eval_redacted.csv`` (stitched per conversation) and ``customer_service_eval_spans.jsonl``.
-A turn with a high-severity hit is masked whole (``[REDACTED]``), keeping the format: same rows, and that turn's
-spans become whole-turn spans, one per label. The masked-turn count goes into ``submission_index.json``. A successful
+A turn with a high-severity hit is masked whole with one typed placeholder, keeping the format: same rows, and that
+turn's spans become one whole-turn span with the placeholder's label. The masked-turn count goes into ``submission_index.json``. A successful
 redactor run is not proof. A hit the packager cannot mask (in the spans file) or a check that cannot run refuses.
 
 Failure rows (trigger -> result):
-  planted miss: an eval turn the redactor leaves but text.ip-addresses flags -> that turn masked whole, counted 1
+  planted miss: an eval turn the redactor leaves but text.ip-addresses flags -> that turn masked whole with one
+                typed placeholder [IP_ADDRESS_<next n>] and one whole-turn IP_ADDRESS span, counted 1,
+                index checkerIndependence reducedForTurns 1 (D29/D37 note)
   no miss                                                                   -> maskedTurns 0, texts unchanged
+  a raw timestamp / unkeyed hash / 64-hex / original value in a turn (the cell-level production checks
+  rescan.raw-timestamps, producer.unkeyed-hashes, release.token-hex64, producer.original-values) (#148)
+                                                                            -> that turn masked whole, typed
+  an original value as a turn id (producer.original-values) (#148)          -> exit 1 cs_eval_id_flagged
   an identifier in an exported turn id (CSV turn_id / JSON record_id)       -> exit 1 cs_eval_id_flagged
   the same, hidden by JSON escaping (tab -> \\t, U+001F -> \\u001f) (#148)    -> exit 1 cs_eval_id_flagged
   a text check missing from the registry                                    -> refused cs_eval_checks_unavailable
@@ -17,8 +23,10 @@ Failure rows (trigger -> result):
 from __future__ import annotations
 
 import csv
+import hashlib
 import io
 import json
+import re
 import shutil
 from dataclasses import replace
 from pathlib import Path
@@ -32,6 +40,9 @@ from pets_release.submission import SubmissionRefused, build_submission
 
 # The redactor misses this spaced-out public IP; the gate's ip-addresses check finds it (synthetic).
 MISS = "ip 8 . 8 . 8 . 8 is down again"
+# D29/D37: the bundle index states the reduced checker independence for masked turns (content-free, fixed text).
+INDEPENDENCE_NOTE = ("reduced for masked turns: the production checks that flagged a turn also decided its masking, "
+                     "so no independent check confirms those turns (D29/D37)")
 
 
 def _kit_with_turn(world, tmp_path, turn_id, text):
@@ -55,15 +66,22 @@ def _bundle(kit, rel, out):
     return p, texts, spans, idx
 
 
+PLACEHOLDER = re.compile(r"\[([A-Z_]+)_([1-9][0-9]*)\]")
+
+
 def test_a_planted_miss_is_masked_whole_and_counted(world, tmp_path):
     kit, rel = _kit_with_turn(world, tmp_path, "t6", MISS)
     p, texts, spans, idx = _bundle(kit, rel, tmp_path / "pets_submission")
-    assert texts["t6"] == "[REDACTED]"
+    # one typed placeholder, numbered after the conversation's own IP_ADDRESS placeholders, and one whole-turn
+    # span with the same label (the placeholder<->label table: they cannot drift)
+    used = [int(n) for lab, n in PLACEHOLDER.findall(texts["t3"]) if lab == "IP_ADDRESS"]
+    assert texts["t6"] == f"[IP_ADDRESS_{max(used, default=0) + 1}]"
     assert spans["t6"] == [{"start": 0, "end": len(MISS), "label": "IP_ADDRESS"}]
     assert idx["customerServiceEval"]["maskedTurns"] == 1
     assert sorted(texts) == ["t1", "t2", "t3", "t4", "t6"]  # same rows
     assert texts["t2"] == "Thanks for contacting us"  # other turns untouched
     assert "masked turns=1" in p.stdout
+    assert idx["customerServiceEval"]["checkerIndependence"] == {"reducedForTurns": 1, "note": INDEPENDENCE_NOTE}
 
 
 def test_without_a_miss_nothing_is_masked(world, tmp_path):
@@ -71,6 +89,44 @@ def test_without_a_miss_nothing_is_masked(world, tmp_path):
     _p, texts, _spans, idx = _bundle(kit, rel, tmp_path / "pets_submission")
     assert idx["customerServiceEval"]["maskedTurns"] == 0
     assert "[REDACTED]" not in texts.values()
+    assert idx["customerServiceEval"]["checkerIndependence"] == {"reducedForTurns": 0, "note": INDEPENDENCE_NOTE}
+
+
+# ---------- #148 (Gemini 3): the remaining production checks run on the export bytes too ----------
+# Each plant is synthetic, missed by the redactor, and found only by the named cell-level check.
+
+ORIGINAL_NAME = "Zorblax Quindarius"  # a synthetic customers.full_name
+
+
+def _with_customers(kit):
+    (kit / "data" / "customer_service" / "customers.csv").write_text(
+        f"customer_id,full_name\nu1,{ORIGINAL_NAME}\n", encoding="utf-8", newline="")
+
+
+@pytest.mark.parametrize(("text", "label"), [
+    ("seen it at 2025-13-45 10:37 again", "DATE"),                                  # rescan.raw-timestamps
+    ("ref " + hashlib.md5(b"u1").hexdigest() + " please", "SECRET"),                 # producer.unkeyed-hashes
+    ("commit " + "0123456789abcdef" * 4 + " broke it", "SECRET"),                    # release.token-hex64
+    (f"please tell {ORIGINAL_NAME} thanks", "PERSON"),                               # producer.original-values
+], ids=["raw-timestamp", "unkeyed-hash", "token-hex64", "original-value"])
+def test_a_cell_check_hit_in_a_turn_is_masked_whole(world, tmp_path, text, label):
+    kit, rel = _kit_with_turn(world, tmp_path, "t6", text)
+    _with_customers(kit)
+    _p, texts, spans, idx = _bundle(kit, rel, tmp_path / "pets_submission")
+    m = PLACEHOLDER.fullmatch(texts["t6"])
+    assert m and m.group(1) == label, "the turn must be masked whole with a typed placeholder"
+    assert spans["t6"] == [{"start": 0, "end": len(text), "label": label}]
+    assert idx["customerServiceEval"]["maskedTurns"] == 1
+    assert texts["t2"] == "Thanks for contacting us"
+
+
+def test_an_original_value_as_a_turn_id_refuses(world, tmp_path):
+    kit, rel = _kit_with_turn(world, tmp_path, ORIGINAL_NAME, "fine thanks")
+    _with_customers(kit)
+    out = tmp_path / "pets_submission"
+    p = submission("--out", str(out), "--release", str(rel), "--kit", str(kit), "--partial")
+    assert (p.returncode, p.stdout.strip()) == (1, "REFUSED: cs_eval_id_flagged"), p.stdout + p.stderr
+    assert not out.exists()
 
 
 def test_an_identifier_in_an_exported_turn_id_refuses(world, tmp_path):
