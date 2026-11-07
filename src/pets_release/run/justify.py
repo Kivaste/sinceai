@@ -102,7 +102,7 @@ def _measured_number(v) -> bool:
     return isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
 
 
-def search_summary(log: list, stats: dict) -> dict:
+def search_summary(log: list, stats: dict, policy) -> dict:
     """``measured.search``: one point per non-final candidate (risk = worst component, utility = mean score),
     the candidate count and the accepted count. Risk and utility are rounded to 6 decimals, like the manifest's
     other shares: a raw float's long digit run would read as an identifier to the manifest identifier-shape
@@ -111,18 +111,28 @@ def search_summary(log: list, stats: dict) -> dict:
     Fails closed (#133): an unknown figure is never published as a measured 0.0. A step with an empty or
     non-numeric risk map, with an empty score map, or accepted with a missing score, raises
     ``JustificationError``. A rejected candidate with a check the search could not score (not answerable or
-    error) has an unknown utility: ``null``, never a stand-in 0.0."""
+    error) has an unknown utility: ``null``, never a stand-in 0.0.
+
+    Members are exact (#150): every step carries one risk component per ``policy.risk_vector`` component and no
+    other; its score members are a subset of ``policy.purpose_checks``. An omitted member is unknown, never
+    measured: an omitted risk component refuses; an omitted score refuses on an accepted step and makes a rejected
+    candidate's utility ``null``."""
+    want_risk, want_scores = set(policy.risk_vector), set(policy.purpose_checks)
     steps = [e for e in log if e["step"] != "final"]
     points = []
     for e in steps:
+        if set(e["risk"]) != want_risk:
+            raise JustificationError("measured.search: a search step's risk components differ from the policy's")
+        if not set(e["scores"]) <= want_scores:
+            raise JustificationError("measured.search: a search step has a purpose score the policy does not name")
         risk = list(e["risk"].values())
         if not risk or not all(_measured_number(v) for v in risk):
             raise JustificationError("measured.search: a search step has no measured risk")
         if not e["scores"]:
             raise JustificationError("measured.search: a search step has no purpose scores")
-        if e["accepted"] and any(v is None for v in e["scores"].values()):
+        scores = [e["scores"].get(c) for c in sorted(want_scores)]  # an omitted member reads as unknown (None)
+        if e["accepted"] and any(v is None for v in scores):
             raise JustificationError("measured.search: an accepted search step has a missing purpose score")
-        scores = list(e["scores"].values())
         utility = None if any(v is None for v in scores) else round(sum(map(float, scores)) / len(scores), 6)
         points.append({"step": e["step"], "risk": round(float(max(risk)), 6),
                        "utility": utility, "accepted": bool(e["accepted"])})
