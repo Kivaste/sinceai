@@ -57,6 +57,7 @@ These apply to every change. A skipped, missing or errored check is a fail, not 
 - Privacy tests call the production checks, and the real CLI at least once. Never hand-build both the writer and the reader in a test. A test that would still pass with the check deleted is not evidence.
 - TDD: write the rule the change adds, list the failure rows from trigger to result, and write a red test for each changed row before any code.
 - A defect class found twice becomes an automated test or a gate check in the same change.
+- **Run only the affected tests** (D27): `powershell -NoProfile -File scripts/overnight/affected-tests.ps1 -Worktree <your worktree> -Run`, which runs `pytest -n 2 -m "not slow"` on the tests mapped from your changed files. Don't run the whole suite. The merger runs the full suite on every merged result.
 
 ### Review
 
