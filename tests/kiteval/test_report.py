@@ -197,6 +197,16 @@ def test_exported_summary_is_allowlisted_and_drops_raw_fields():
     assert "detail" not in blob
 
 
+def test_exported_risks_are_ordered_by_key_whatever_order_the_kit_wrote_them():
+    report = _passing_report()
+    unsorted = {"records with k<5": 0.5, "direct identifiers retained": 0.25}  # kit order: not sorted by key
+    assert list(unsorted) != sorted(unsorted)
+    report["tables"]["ed_visits"]["risks"] = dict(unsorted)
+    report["risk_components"] = {f"ed_visits: {k}": v for k, v in unsorted.items()}
+    exported = list(_validate(report)["risks"])
+    assert exported == ["ed_visits: direct identifiers retained", "ed_visits: records with k<5"]
+
+
 def test_missing_summary_is_a_fail_not_zeros():
     report = _passing_report()
     del report["summary"]
