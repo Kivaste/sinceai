@@ -85,6 +85,7 @@ _REASONS = {  # attacker reason code -> manifest text (the attacker's codes only
     "no-sensitive-released": "no released sensitive attribute",
     "no-target": "no attacker target in the release",
     "no-attack-spec": "no attack spec for the released table",
+    "no-link-to-target-table": "the table shares no visit pseudonym with the released visits",
 }
 _ERROR = re.compile(r"^error:[A-Za-z][A-Za-z0-9_]{0,63}$")
 _RED_FRAME = (f"targets: the adversary records of the scenario's attack specs whose person is in the release, each "

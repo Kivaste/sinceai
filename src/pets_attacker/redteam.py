@@ -43,7 +43,7 @@ AUX_SOURCES = (
 )
 AGE_COLS = ["date_of_birth", "age", "age_band"]
 REASONS = frozenset({"no-aux-table", "aux-table-malformed", "no-field-catalog", "no-sensitive-released",
-                     "no-target", "no-attack-spec"})
+                     "no-target", "no-attack-spec", "no-link-to-target-table"})
 LINK_KEYS = ("evaluated", "reason", "n_targets", "n_unique_claims", "reidentification_rate", "guess_rate",
              "median_top_set", "n_enriched", "n_aux_sources")
 ATTR_KEYS = ("evaluated", "reason", "n_targets", "inference_rate", "baseline_rate")
@@ -228,8 +228,9 @@ def _mode(values) -> str | None:
     return min(counts, key=lambda v: (-counts[v], v)) if counts else None
 
 
-def sensitive_columns(kit: Path, dataset: str, table: str, protected: pd.DataFrame) -> list:
-    """Released columns the kit's field catalog marks as sensitive attributes (QI columns excluded)."""
+def sensitive_columns(kit: Path, dataset: str, released: dict) -> dict:
+    """``{table: [columns]}``: per released table (``released`` maps table -> released columns, from the release
+    contract's rungs), the columns the kit's field catalog marks as sensitive attributes (QI columns excluded)."""
     p = Path(kit) / "metadata" / "field_catalog.csv"
     if not p.is_file():
         raise RedTeamError("no-field-catalog")
@@ -237,29 +238,70 @@ def sensitive_columns(kit: Path, dataset: str, table: str, protected: pd.DataFra
     if not {"dataset", "table", "column", "privacy_role"} <= set(cat.columns):
         raise RedTeamError("no-field-catalog")
     qi_cols = {c for q in BACKGROUND_QIS for c in q["protected"]}
-    sel = cat[(cat["dataset"] == dataset) & (cat["table"] == table) & (cat["privacy_role"] == "sensitive_attribute")]
-    cols = sorted(set(sel["column"]) & set(protected.columns) - qi_cols)
-    if not cols:
+    sel = cat[(cat["dataset"] == dataset) & (cat["privacy_role"] == "sensitive_attribute")]
+    out = {}
+    for table, cols in sorted(released.items()):
+        found = sorted(set(sel.loc[sel["table"] == table, "column"]) & set(cols) - qi_cols)
+        if found:
+            out[table] = found
+    if not out:
         raise RedTeamError("no-sensitive-released")
-    return cols
+    return out
+
+
+def _cells(df: pd.DataFrame, col: str) -> np.ndarray:
+    return np.array(["" if _blank(v) else str(v).strip() for v in df[col].tolist()], dtype=object)
+
+
+def _link_column(rungs: dict, table: str, target: str, target_cols, cols) -> str | None:
+    """The column a released table shares with the target table as the same pseudonym (rung id.pseudonym in both),
+    e.g. the visit pseudonym of lab rows. Chosen by the release contract's rungs, never by cell shape."""
+    shared = sorted(c for c in cols if c in target_cols and rungs.get(table, {}).get(c) == "id.pseudonym"
+                    and rungs.get(target, {}).get(c) == "id.pseudonym")
+    return shared[0] if len(shared) == 1 else None
+
+
+def _score(cells: np.ndarray, rows, top_of, base) -> dict:
+    """Targets ``rows`` of a column; ``top_of(row)`` -> the candidate rows whose values the attacker votes over."""
+    n = ok = b = 0
+    for r in rows:
+        truth = cells[r]
+        if not truth:
+            continue
+        n += 1
+        ok += _mode(cells[top_of(r)]) == truth
+        b += base == truth
+    if not n:
+        return failed(RedTeamError("no-target"), ATTR_KEYS)
+    return {"evaluated": True, "reason": None, "n_targets": n, "inference_rate": round(ok / n, 4),
+            "baseline_rate": round(b / n, 4)}
+
+
+def _sample(n: int) -> np.ndarray:
+    rows = np.arange(n)
+    if n > MAX_SAMPLE:
+        rows = np.sort(np.random.default_rng(SEED).choice(n, MAX_SAMPLE, replace=False))
+    return rows
 
 
 def attribute_inference(kit: Path, dataset: str, table: str, world: _World, protected: pd.DataFrame,
-                        original: pd.DataFrame, record_key: str, rungs: dict) -> dict:
-    """Targets: released visits (a seeded sample of at most MAX_SAMPLE); the attacker knows each target's exact
-    QIs from the original record. Per sensitive column: attacker accuracy and base-rate accuracy."""
+                        original: pd.DataFrame, record_key: str, rungs: dict, others: dict | None = None) -> dict:
+    """Per released sensitive attribute of every released table: attacker accuracy and base-rate accuracy.
+
+    ``rungs`` is the release contract's ``{table: {column: rung}}``; ``others`` maps each other released table to
+    its released rows. Targets of a column are its released rows (a seeded sample of at most MAX_SAMPLE). The
+    attacker knows the target visit's exact QIs from the original record; a row of another table inherits the QIs
+    of its visit through the shared pseudonym column and the vote runs over the rows of the best-scoring visits.
+    Keys: the column name for the target table, ``<table>.<column>`` for the others."""
+    others = others or {}
     prot = protected.reset_index(drop=True)
-    cols = sensitive_columns(kit, dataset, table, prot)
-    matcher = Matcher(prot, qis_from_spec(BACKGROUND_QIS, prot.columns), rungs)
+    released = {table: list(prot.columns), **{t: list(df.columns) for t, df in others.items()}}
+    by_table = sensitive_columns(kit, dataset, released)
+    matcher = Matcher(prot, qis_from_spec(BACKGROUND_QIS, prot.columns), rungs.get(table, {}))
     orig = {str(r[record_key]): r for r in original.to_dict("records")}
-    rows = np.arange(len(prot))
-    if len(rows) > MAX_SAMPLE:
-        rows = np.sort(np.random.default_rng(SEED).choice(len(rows), MAX_SAMPLE, replace=False))
-    cells = {c: np.array(["" if _blank(v) else str(v).strip() for v in prot[c].tolist()], dtype=object) for c in cols}
-    base = {c: _mode(cells[c]) for c in cols}
-    tally = {c: [0, 0, 0] for c in cols}  # targets, attacker right, base rate right
     cache: dict = {}
-    for pr in rows:
+
+    def visit_top(pr: int) -> np.ndarray:
         o = orig.get(str(world.record[pr]))
         if o is None:
             raise RedTeamError("no-target")
@@ -271,18 +313,36 @@ def attribute_inference(kit: Path, dataset: str, table: str, world: _World, prot
         key = tuple(sorted(bg.items()))
         if key not in cache:
             cache[key] = fs_top(matcher, bg)[0]
-        top = cache[key]
-        for c in cols:
-            truth = cells[c][pr]
-            if not truth:
-                continue
-            t = tally[c]
-            t[0] += 1
-            t[1] += _mode(cells[c][top]) == truth
-            t[2] += base[c] == truth
+        return cache[key]
+
     out = {}
-    for c in cols:
-        n, ok, b = tally[c]
-        out[c] = ({"evaluated": True, "reason": None, "n_targets": n, "inference_rate": round(ok / n, 4),
-                   "baseline_rate": round(b / n, 4)} if n else failed(RedTeamError("no-target"), ATTR_KEYS))
+    for c in by_table.get(table, []):
+        cells = _cells(prot, c)
+        out[c] = _score(cells, _sample(len(prot)), visit_top, _mode(cells))
+    for t in sorted(set(by_table) - {table}):
+        df = others[t].reset_index(drop=True)
+        link = _link_column(rungs, t, table, prot.columns, df.columns)
+        if link is None:
+            for c in by_table[t]:
+                out[f"{t}.{c}"] = failed(RedTeamError("no-link-to-target-table"), ATTR_KEYS)
+            continue
+        visit_of = {k: i for i, k in enumerate(_cells(prot, link)) if k}
+        keys = _cells(df, link)
+        rows_of: dict = {}
+        for i, k in enumerate(keys):
+            rows_of.setdefault(k, []).append(i)
+        linked = np.array([i for i in _sample(len(df)) if keys[i] in visit_of], dtype=int)
+
+        prot_keys, memo = _cells(prot, link), {}
+
+        def lab_top(r: int, keys=keys, visit_of=visit_of, rows_of=rows_of, prot_keys=prot_keys, memo=memo):
+            v = visit_of[keys[r]]
+            if v not in memo:
+                memo[v] = np.array(sorted(i for k in set(prot_keys[visit_top(v)]) for i in rows_of.get(k, ())),
+                                   dtype=int)
+            return memo[v]
+
+        for c in by_table[t]:
+            cells = _cells(df, c)
+            out[f"{t}.{c}"] = _score(cells, linked, lab_top, _mode(cells))
     return {"evaluated": True, "reason": None, "columns": out}

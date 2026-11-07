@@ -101,8 +101,31 @@ def _kit(root: Path, *, catalog: str = CATALOG, finance_cols=("full_name", "birt
     return kit, rel, rungs
 
 
-def _run(root: Path, **kw) -> dict:
+LAB_CATALOG = CATALOG + ("health,lab_results,lab_id,record_key,identifier,id\n"
+                         "health,lab_results,visit_id,record_key,identifier,id\n"
+                         "health,lab_results,value,sensitive_attribute,numerical,m\n")
+
+
+def _with_lab(kit: Path, rel: Path, rungs: Path, *, link: bool = True) -> None:
+    """Round 2 (Sol Spec): a released lab table joined to the visits by the visit pseudonym. Two lab rows per
+    released visit: value "5" for the Alpha 50-59 group (r1-r5), "7" for the rest; r0 (v1) also has one "9"."""
+    keys = [f"r{i}" for i in range(len(VISITS))]
+    rows = [(k, "5" if 1 <= i <= 5 else "7") for i, k in enumerate(keys) for _ in range(2)] + [("r0", "9")]
+    lab = pd.DataFrame({"lab_id": [f"l{i}" for i in range(len(rows))],
+                        "visit_id": [k for k, _ in rows] if link else [f"x{i}" for i in range(len(rows))],
+                        "value": [v for _, v in rows]})
+    _csv(lab, rel / "lab_results.csv")
+    r = json.loads(rungs.read_text(encoding="utf-8"))
+    r["lab_results"] = {"lab_id": "id.pseudonym", "visit_id": "id.pseudonym" if link else "keep",
+                        "value": "num.exact"}
+    rungs.write_text(json.dumps(r), encoding="utf-8")
+    (kit / "metadata/field_catalog.csv").write_text(LAB_CATALOG, encoding="utf-8")
+
+
+def _run(root: Path, lab: bool | str = False, **kw) -> dict:
     kit, rel, rungs = _kit(root, **kw)
+    if lab:
+        _with_lab(kit, rel, rungs, link=lab != "unlinked")
     out = root / "attack.json"
     assert main(["--kit", str(kit), "--release", str(rel), "--label", "t", "--out", str(out),
                  "--rungs", str(rungs)]) == 0
@@ -184,3 +207,21 @@ def test_real_cli_is_deterministic_and_content_free(tmp_path):
     assert '"red_team"' in text
     for leaked in ("Aino", "Planted", "Alpha", "Beta", "Gamma", "A01", "J10", "1990", "n1", "p1", "v1", "r0"):
         assert leaked not in text, leaked
+
+
+def test_attribute_inference_covers_a_sensitive_column_of_every_released_table(tmp_path):
+    """Round 2 (Sol Spec HIGH). Lab targets (17 released lab rows) inherit their visit's QIs through the shared
+    visit pseudonym; the vote runs over the lab rows of the best-scoring visits. Right: r0's 2 of 3, all 10 of
+    r1-r5, 2 of r6, 2 of r7 = 16/17; base rate (always "5") = 10/17."""
+    ai = _run(tmp_path, lab=True)["red_team"]["attribute_inference"]
+    assert sorted(ai["columns"]) == ["icd10_primary", "lab_results.value", "triage"]
+    assert ai["columns"]["lab_results.value"] == {"evaluated": True, "reason": None, "n_targets": 17,
+                                                  "inference_rate": round(16 / 17, 4),
+                                                  "baseline_rate": round(10 / 17, 4)}
+    assert ai["columns"]["icd10_primary"]["inference_rate"] == 0.75  # unchanged by the extra table
+
+
+def test_a_released_table_without_a_pseudonym_link_is_not_measured_with_its_reason(tmp_path):
+    ai = _run(tmp_path, lab="unlinked")["red_team"]["attribute_inference"]
+    lab = ai["columns"]["lab_results.value"]
+    assert lab["evaluated"] is False and lab["reason"] == "no-link-to-target-table" and lab["inference_rate"] is None

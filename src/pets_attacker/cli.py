@@ -39,7 +39,8 @@ def run(kit: Path, release: Path, label: str, scoring_dir: Path | None = None, r
     if rungs_path is None:
         raise RungError("--rungs is required: rungs are never inferred from cell shape")
     # #114: strict (duplicate keys, NaN/Infinity refuse); the rung record is never partially parsed
-    rungs = loads_strict(Path(rungs_path).read_text(encoding="utf-8-sig")).get(TABLE)
+    all_rungs = loads_strict(Path(rungs_path).read_text(encoding="utf-8-sig"))
+    rungs = all_rungs.get(TABLE) if isinstance(all_rungs, dict) else None
     if not isinstance(rungs, dict):
         raise RungError("rung metadata has no entry for the table")
     rowmap_path = _rowmap_path(release, scoring_dir, rowmaps or {})
@@ -73,8 +74,10 @@ def run(kit: Path, release: Path, label: str, scoring_dir: Path | None = None, r
         except (ValueError, KeyError, IndexError) as e:  # RedTeamError, RungError, MappingError included
             red[name] = redteam.failed(e)
     try:
+        # #139 r2: every other table the release contract names (rungs) is read from the release by that name
+        others = {t: _csv(release / f"{t}.csv") for t in sorted(all_rungs) if t != TABLE and isinstance(all_rungs[t], dict)}
         red["attribute_inference"] = redteam.attribute_inference(kit, DOMAIN, TABLE, world, protected, original,
-                                                                 RECORD_KEY, rungs)
+                                                                 RECORD_KEY, all_rungs, others)
     except (ValueError, KeyError, IndexError) as e:
         red["attribute_inference"] = {**{k: v for k, v in redteam.failed(e).items() if k in ("evaluated", "reason")},
                                       "columns": {}}
