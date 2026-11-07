@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import math
 import re
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from numbers import Integral, Real
 
 # Allowlist of exported top-level fields. Everything else stays in the scoring folder.
@@ -251,7 +251,11 @@ def _check_released(name: str, tr: dict, expected: dict, found: list) -> None:
     _check_results(name, tr, expected, found)
 
 
-def _check_table(name: str, tr: dict, expected: dict, found: list) -> dict:
+def _check_table(name: str, tr: dict, expected: dict, found: list, *, rows_original: int,
+                 rows_protected: int | None) -> dict:
+    """`rows_original` / `rows_protected` are the adapter's own counts; `rows_protected` is None when the
+    table is not in the release. The evaluator's status and counts must agree exactly: a released file
+    never takes the withheld branch."""
     if not _name(name):
         raise ScorecardRejected("structure")
     _scan_nested(name, tr, expected, found)
@@ -260,22 +264,49 @@ def _check_table(name: str, tr: dict, expected: dict, found: list) -> dict:
         raise ScorecardRejected("error_status")
     if status not in ("released", "withheld"):
         raise ScorecardRejected("structure")
+    if status != ("withheld" if rows_protected is None else "released"):
+        raise ScorecardRejected("status_mismatch")
     if not _int(tr.get("rows_original")) and status == "withheld":
         raise ScorecardRejected("structure")
     if status == "released":
         _check_released(name, tr, expected, found)
+        if not tr["risks"]:  # the kit always scores at least "direct identifiers retained"
+            raise ScorecardRejected("missing_section")
+        if tr["rows_protected"] != rows_protected:
+            raise ScorecardRejected("row_count_mismatch")
+    if tr["rows_original"] != rows_original:
+        raise ScorecardRejected("row_count_mismatch")
     return {"table": name, "status": status, "rows_original": int(tr["rows_original"]),
             "rows_protected": int(tr["rows_protected"]) if status == "released" else None}
 
 
+def _row_counts(counts) -> dict:
+    """A table -> row-count map from the adapter; anything else is a caller error, not a pass."""
+    if not isinstance(counts, Mapping) or not all(
+            _name(k) and _int(v) and v >= 0 for k, v in counts.items()):
+        raise ScorecardRejected("structure")
+    return dict(counts)
+
+
 def validate_report(report: dict, *, scenario: str, required_tasks: Iterable[str],
-                    tables: Iterable[str], expected_sections: dict | None = None) -> dict:
+                    tables: Mapping[str, int], released: Mapping[str, int],
+                    expected_sections: dict | None = None) -> dict:
     """Return the allowlisted aggregate summary, or raise ScorecardRejected.
+
+    `tables` (original table -> original rows) and `released` (table really in the release -> protected
+    rows) are the adapter's own counts. The report must list exactly the original tables, mark exactly the
+    released ones `released` with matching counts, and its `risk_components` must be exactly the released
+    tables' risks: nothing the evaluator skipped or dropped passes as withheld or as an empty map.
 
     `expected_sections` (table -> {"free_text": [columns that must be evaluated], "linkage": bool})
     names the result sections this scenario requires beyond the baseline ones; the caller derives it
     from the kit (catalog, gold spans, identity data). Unavailable evaluations pass only with a BENIGN_REASONS
     reason, and are exported as `not_applicable` with their code."""
+    tables, released = _row_counts(tables), _row_counts(released)
+    if set(released) - set(tables):
+        raise ScorecardRejected("unknown_table")
+    if not released:
+        raise ScorecardRejected("no_released_table")
     if not isinstance(report, dict):
         raise ScorecardRejected("structure")
     summary = report.get("summary")
@@ -291,12 +322,15 @@ def validate_report(report: dict, *, scenario: str, required_tasks: Iterable[str
     for name in tables:
         if name not in rep_tables:
             raise ScorecardRejected("missing_table")
+    if set(rep_tables) - set(tables):
+        raise ScorecardRejected("unknown_table")
     exported_tables, found = [], []
     expected_sections = expected_sections or {}
     for name, tr in rep_tables.items():
         if not isinstance(tr, dict):
             raise ScorecardRejected("structure")
-        exported_tables.append(_check_table(name, tr, expected_sections.get(name, {}), found))
+        exported_tables.append(_check_table(name, tr, expected_sections.get(name, {}), found,
+                                            rows_original=tables[name], rows_protected=released.get(name)))
     for item in found:
         if not (_name(item["table"]) and item["section"] in SECTIONS and _CODE.fullmatch(item["code"])
                 and (item["key"] == "" or _KEY.fullmatch(item["key"]))):
@@ -306,6 +340,12 @@ def validate_report(report: dict, *, scenario: str, required_tasks: Iterable[str
     if not isinstance(risks, dict) or not all(
             isinstance(k, str) and _RISK_KEY.fullmatch(k) and _num(v) for k, v in risks.items()):
         raise ScorecardRejected("structure")
+    if not risks:
+        raise ScorecardRejected("missing_section")
+    # the kit builds risk_components as "<table>: <risk>" over the released tables; anything else is not it
+    derived = {f"{name}: {k}": v for name in sorted(released) for k, v in rep_tables[name]["risks"].items()}
+    if risks != derived:
+        raise ScorecardRejected("risk_mismatch")
     return {
         "scenario": scenario,
         "dataset": report["dataset"],

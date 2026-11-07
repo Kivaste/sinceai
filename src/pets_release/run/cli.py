@@ -9,6 +9,8 @@ import sys
 
 from pets_release.cli import UsageError, resolve_run_context
 from pets_release.manifest import loads_strict
+from pets_release.offline import entry_point
+from pets_release.recipient import RecipientError, validate_recipient_id
 from pets_release.run.pipeline import RunError, RunRefused, run_release
 
 
@@ -31,6 +33,7 @@ def _print_gate(scoring) -> None:
                 print(f"  check {r['check']}: {r['status']} (hits={r.get('hits')})")
 
 
+@entry_point
 def main(argv: list[str]) -> int:
     try:
         ctx = resolve_run_context(argv)
@@ -38,9 +41,15 @@ def main(argv: list[str]) -> int:
         print(f"pets-release run: {e}", file=sys.stderr)
         return 2
     a = ctx.args
-    if a.recipient or a.sample is not None:
-        print("pets-release run: --recipient and --sample are not supported in this build", file=sys.stderr)
+    if a.sample is not None:
+        print("pets-release run: --sample is not supported in this build", file=sys.stderr)
         return 2
+    if a.recipient is not None:
+        try:
+            validate_recipient_id(a.recipient)
+        except RecipientError as e:
+            print(f"pets-release run: {e}", file=sys.stderr)
+            return 2
     from pets_release.verify import current_tool_revision
 
     rev = current_tool_revision()
@@ -49,7 +58,8 @@ def main(argv: list[str]) -> int:
         return 2
     try:
         res = run_release(kit=ctx.kit, scenario=ctx.scenario, created=ctx.created, key_text=ctx.key,
-                          out=a.out, plan_name=a.plan or "hand", tool_revision=rev)
+                          out=a.out, plan_name=a.plan or "hand", tool_revision=rev,
+                          recipient=a.recipient)
     except RunError as e:
         print(f"pets-release run: {e}", file=sys.stderr)
         return 2

@@ -19,6 +19,7 @@ import build_fixture as fx
 
 from pets_release.kit import Kit
 from pets_release.pseudonym import MasterKey
+from pets_release.run.context import person_normaliser
 from pets_release.writer import Candidate, ProtectedTable
 from pets_release.writer.assemble import NARRATIVE_KEYS
 
@@ -97,7 +98,7 @@ def producer_context(cand) -> dict:
         "source": {"ed_visits": src["ed_visits"], "lab_results": src["lab_results"]},
         "rowmaps": {"ed_visits": rowmap(by["ed_visits.csv"]), "lab_results": rowmap(by["lab_results.csv"])},
         "record_keys": {"ed_visits": "visit_key", "lab_results": "lab_key"},
-        "person": {"table": "ed_visits", "column": "patient_id"},
+        "person": {"table": "ed_visits", "column": "patient_id", "normalise": person_normaliser()},
         "joins": [{"table": "lab_results", "column": "visit_key", "ref_table": "ed_visits",
                    "ref_column": "visit_key"}],
         "identifiers": [{"table": "ed_visits", "column": "patient_id"},

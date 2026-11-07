@@ -6,10 +6,13 @@ from __future__ import annotations
 import argparse
 import json
 
+from pets_release.offline import entry_point
+
 from .harness import evaluate_frames, headline, load_frames
 from .predictors import regex_predictor
 
 
+@entry_point
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--kit", required=True)

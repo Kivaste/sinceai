@@ -13,8 +13,10 @@ import json
 import sys
 
 from pets_release.checks.runner import run_checks
+from pets_release.offline import entry_point
 
 
+@entry_point
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="python -m pets_release.checks")
     ap.add_argument("release")

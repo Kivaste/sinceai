@@ -36,6 +36,8 @@ KEYS = _Via04("producer.key-material")
 HETUS = ["121285-987X", "010203A123B", "300377-111C"]
 NAMES = ["Testi Henkilo", "Mallin Ihminen", "Kuvitteel Lainen"]
 KEY = "synthetic-test-key-0123456789-abcdefghij"
+# a contract that declares the released schema: declared file/column names may appear in records
+DECLARED = {"files": {"ed_visits.csv": {"columns": {c: {} for c in ("visit_tok", "patient_tok", "sex", "note")}}}}
 
 
 @pytest.fixture
@@ -96,7 +98,7 @@ def test_clean_release_with_keyed_tokens_passes(h, ctx, check):
     [HETUS[0], f"soitti, hetu {HETUS[1]} tarkistettu", HETUS[2].replace("-", ""), NAMES[0].upper()],
 )
 def test_original_identifier_in_a_cell_is_refused(h, ctx, value):
-    rec = ORIGINALS.run(_with_cell(h, "note", 1, value), {}, ctx)
+    rec = ORIGINALS.run(_with_cell(h, "note", 1, value), DECLARED, ctx)
     assert rec["status"] == "fail"
     assert rec["hits"] == 1
     (v,) = rec["violations"]
@@ -173,7 +175,7 @@ def test_unexpected_exception_becomes_a_content_free_error(h, ctx, check):
     ],
 )
 def test_unkeyed_hash_of_original_value_is_refused(h, ctx, digest):
-    rec = HASHES.run(_with_cell(h, "patient_tok", 2, digest), {}, ctx)
+    rec = HASHES.run(_with_cell(h, "patient_tok", 2, digest), DECLARED, ctx)
     assert rec["status"] == "fail"
     assert rec["hits"] == 1
     (v,) = rec["violations"]
@@ -193,7 +195,7 @@ def test_unkeyed_hash_of_original_value_is_refused(h, ctx, digest):
     ],
 )
 def test_key_material_in_a_cell_is_refused(h, ctx, form):
-    rec = KEYS.run(_with_cell(h, "note", 0, form), {}, ctx)
+    rec = KEYS.run(_with_cell(h, "note", 0, form), DECLARED, ctx)
     assert rec["status"] == "fail"
     assert rec["hits"] == 1
     (v,) = rec["violations"]
