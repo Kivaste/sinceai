@@ -195,6 +195,8 @@ def _age_interval(s: pd.Series, rung: str):
             if not re.fullmatch(form, raw):
                 raise RungError("cell does not fit its declared rung")
             cache[raw] = _age_one(raw, rung)
+            if cache[raw][1] <= 0.0 or cache[raw][0] > AGE_MAX:  # wholly outside [0, AGE_MAX], as for adversary ages
+                raise RungError("protected age value outside a plausible age range")
         lo[i], hi[i] = cache[raw]
     return lo, hi
 
@@ -234,6 +236,8 @@ def _hod_keys(col: pd.Series) -> np.ndarray:
     out = np.full(len(col), -1, dtype=np.int64)
     for i, raw in enumerate(col.fillna("").astype(str).str.strip().tolist()):
         if raw:
+            if not re.fullmatch(_TIME_FORMS["ts.hour_of_day"], raw):
+                raise RungError("cell does not fit its declared rung")
             out[i] = int(raw[:2])
     return out
 
