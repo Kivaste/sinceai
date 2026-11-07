@@ -570,3 +570,71 @@ CS-S1 chain done-report + 4 reviews (23 + #53/#54/#56/#92) -> merge -> #63 -> 25
   3. Noted: the pass found no path that makes a missing check produce false. The #109 and #120 regressions pass. The Standards axis (Grok) is still running.
 - **Why:** Tier-1 fail-closed first; same-area work goes to one owner.
 - **Evidence:** newest comments on #106, #110, #113 and #118; #131.
+
+### Sat 15:00 - utilization nudge (12:58Z); reviews for 5 finished heads; #116 r3; #32 AC3 question
+
+- **When:** Sat 14:58-15:05 EET (machine clock)
+- **Decision:**
+  1. Finished inherited sessions: #116 r2 (810594c), #32 delta prep (25dddf7), #124 (5f926b3), #125+#126 (beae83b). Also #103 prep (860829e, own child). Ten reviews were dispatched, Grok Standards + Sonnet Spec for each, since all are Sol-written. #131 is folded into fu110 (live owner). #94 is unchanged (closes on the final proof).
+  2. #116 r2 Spec (Sonnet): CHANGES REQUIRED. The real-kit smoke at 810594c has pass:false. HEALTH-S1 passes and CS-S1 is run-unknown (expected before #24), but the measured delivery lane refused. The base 3fe0298 predates #120, so a Sol fixer (ses_e49e7225) merges the tip and re-runs the smoke. Any remaining refusal is diagnosed from reason codes only.
+  3. #124 r1 Spec (Sonnet): CHANGES REQUIRED. The new close gate rejects #120's genuine multi-release evidence folder (it requires exactly one manifest, plus hard-coded log names). A report that omits "gate"/"verify" also skips machine validation. The fixer waits for Grok Standards so there is one combined round.
+  4. #32 delta Spec (Sonnet): CHANGES REQUIRED on AC3 ("a drafted HEALTH-S1 policy run through the search passes gate and verify"). The draft is review-only and `run` cannot consume it. The earlier "AC3 pipeline part deferred to 14:00" was an orchestrator deferral, not an amendment. Not decided by the orchestrator: asked the human to choose between (a) amending AC3 on #32 (the draft stays a reviewed artefact, with the consumer as future work) and (b) building a minimal approved-draft consumer on `run` before 16:00. #32 does not merge until this is answered and D39's condition holds.
+- **Why:** Close on evidence (D31). An acceptance criterion is changed only by the human.
+- **Evidence:** review sessions ses_e49e82a9 (#116 Spec), ses_e49e7bf8 (#124 Spec), ses_e49e7f95 (#32 Spec); C:\Users\kivas\AI\sinceai-out\smoke\810594cc0d51fb60d1e0fc2e60eff480b5a388cd\smoke.json.
+
+### Sat 15:15 - merge train 19 (#103 prep); review rounds dispatched
+
+- **When:** Sat 15:05-15:15 EET (machine clock)
+- **Decision:**
+  1. #103 prep: Grok Standards and Sonnet Spec both APPROVE at 860829e. Docs-only train 19 merged it at 871ff07 (tests/docs + tests/story_kit: exit 0, 39 passed, 6 named skips). #103 stays open for finalisation. The prep worktree and branch are removed.
+  2. #116: Grok r2 APPROVE. Its non-blocking gap (the CS expectation test is vacuous with respect to the CLI outcome) was added to the round-3 fixer ses_e49e7225.
+  3. #125+#126: Grok APPROVE and Sonnet CHANGES REQUIRED (the heartbeat running-id parser collapsed the live scan to unknown). Round 2 is with Sol (ses_e49e4418): parse every known shape, isolate unparsable entries, re-run the live dry run, and add the process-identity and bounded-retry tests. The orchestrator's heartbeat now lists plain issue numbers.
+  4. #124: Grok and Sonnet both CHANGES REQUIRED. There are two highs: release selection by file presence (it rejects #120's genuine three-release folder, yet accepts one planted manifest), and validation skipped when the Outcome omits "gate"/"verify". Round 2 is with Sol (ses_e49e3870).
+  5. #32: Grok delta APPROVE. Sonnet Spec CHANGES REQUIRED on AC3, which awaits a human decision (15:00 entry).
+- **Why:** Close and merge only on evidence (D31); one combined fix round per ticket.
+- **Evidence:** merger ses_e49e4d31; review sessions ses_e49e776e, ses_e49e75de, ses_e49e84b0, ses_e49e7a78, ses_e49e791c, ses_e49e7da5, ses_e49e7bf8, ses_e49e80f0, ses_e49e7f95.
+
+### Sat 15:10 - D46 applied (demoable cut); nudge 13:08Z handled
+
+- **When:** Sat 15:07-15:12 EET (heartbeat clock). Correction: the entry above headed "15:15" was written at about 15:05.
+- **Decision:**
+  1. **CS-S1 dropped (D46).** The #63 rebase lane (ses_e49f4e82) was interrupted. #65, #66 and #69 were never dispatched. "Deferred, D46" comments were posted on #24, #53, #54, #56, #63, #65, #66, #88 and #92, and their ready-for-agent labels removed (this stops the utilization monitor flagging them). The planning session told the chain owner to push its WIP and stop. The CS eval exports still ship under D37 (#30).
+     - #116 r3 fixer steered: the CS-S1 expectation stays refused/unsupported permanently. A crash exit must not pass, and the "unsupported" outcome is pinned by a test.
+     - #130 steered: the README states CS-S1 is unsupported, with skip reason `cs-s1-deferred-d46`.
+  2. **Tooling parked until the pin (#117 merge):** #124 and #125+#126 round-2 fixers (ses_e49e3870, ses_e49e4418) interrupted. #124, #125, #126 and #129 commented and unlabelled.
+  3. **Queued after the pin:** #133 and #134 natively blocked by #117.
+  4. **Dispatched (Opus, from integration e24fa05):**
+     - #132: rung-form check for validator-ID rungs. High, demo path, before the pin; 4 reviews in round 1.
+     - #80: writer self-scan of withheld source values. It merges after the recording, unless it is green on the real kit before the pin.
+     - #128: search keeps record keys. It merges after the recording and after #118, and avoids #118's lines in search.py.
+     - #128 was relabelled ready-for-agent + model:opus.
+  5. **#30 round 3** finished at 5a6b82f (Opus). Reviews dispatched: Grok Standards and Sol Spec. The Spec reviewer is asked what "complete bundle" means under D46.
+  6. **#117 fast track (D46):** when its round-2 head is ready, only high findings against D35/D41 block. It merges alone, ahead of the queue, and its merge commit is the pin.
+  7. **#32:** not merged and not closed; the human decides (D47).
+  8. **Nudge 13:08Z:**
+     - #131 is in ticket/fu110-scorecard-k (live owner ses_e4a02df0).
+     - #94 closes on the final proof.
+     - #121 waits on #117.
+     - #29-packager reviews are now dispatched.
+     - The remaining CS items are deferred (above).
+- **Why:** D46 (human, 15:05): a demoable HEALTH-S1 web-app cut pinned on the #117 merge by about 17:00.
+- **Evidence:** interrupt responses {"interrupted":true} x3; issue comments; sessions ses_e49de3e3 (#132), ses_e49de156 (#80), ses_e49dde65 (#128), ses_e49ddc6a / ses_e49dda89 (#30 reviews).
+
+### Sat 15:16 - D47: #32 GO via the Mistral API; dispatched
+
+- **When:** Sat 15:16 EET (heartbeat clock)
+- **Decision:** A Sol session (ses_e49db522) merges integration 436e81c into ticket/31-llm, resolving the cli.py conflicts with search, then does the real Mistral `draft-policy` run once the human's key file exists. The key goes into the env var only and is never printed. Evidence: closed-schema pass, request digest, a no-credentials scan, no values in the request, the offline guard on every other subcommand, and a HEALTH-S1 real-kit run (the D47 condition). Delta reviews follow: Grok Standards + Sonnet Spec. #32 merges before the pin only if that doesn't delay #117; otherwise after the pin.
+- **Open:** AC3 of #32 (a drafted policy run through the search) is not amended by D47. The orchestrator asked the human at 15:00 and has no answer yet, so #32 doesn't close until AC3 is amended or met. No draft consumer is being built meanwhile.
+- **Why:** D47 (human, 15:12).
+- **Evidence:** D47 on main; session ses_e49db522.
+
+### Sat 15:20 - nudge 13:18Z handled
+
+- **When:** Sat 15:18-15:20 EET
+- **Decision:**
+  - #69: its branch builds on the deferred CS chain, so it needs a fresh branch after the pin. Native blocked-by #117 added; unlabelled.
+  - #131: on ticket/fu110-scorecard-k with a live owner. Native blocked-by #110 added.
+  - #94: no implementer work remains; it closes on the final proof. Unlabelled.
+  - #121: the native #117 edge already exists. The branch flag is the #129 monitor defect.
+- **Why:** None of them can be dispatched. The edges and labels stop repeat flags.
+- **Evidence:** issue comments on #69, #94 and #131.

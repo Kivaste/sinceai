@@ -1,22 +1,83 @@
-﻿# Demo video script (target 1:50, hard limit 2:00)
+# Demo video draft (target 1:50, hard limit 2:00)
 
-English narration. All screen actions are real CLI or the dashboard rendered from the manifest. No row values on screen. HEALTH-S1 numbers are from the real story-kit release (sources in 06). Pre-record from that release; `<R>` = release folder.
-Current-build rule: everything outside a conditional block is true today. `<!-- IF #n ... -->` blocks are used only after that ticket has merged and the claim is verified (06, claims checklist).
-Setup: `PETS_KIT`, `PETS_HMAC_KEY` (throwaway), `SOURCE_DATE_EPOCH` set; large terminal font; Wi-Fi visibly off.
+PREP: rehearse after final review and final-SHA proof, then fill from 06. No old
+gate totals, measurements or verification lines are certified by this draft.
+All agent-visible recordings and screenshots use hand-made synthetic fixtures.
+The human may show protected real-kit rows only under D41 and #117; agents must
+not read or screenshot that view. “Before” always means fields and value forms.
 
-| Time | On screen | Narration |
-|---|---|---|
-| 0:00-0:08 | Terminal: `pets-release run --scenario HEALTH-S1 --out <R> --created <iso> --kit "$env:PETS_KIT"` finishes; gate passed, release written. | "A hospital must share emergency-visit data with a university team. One offline command builds the release and gates it." |
-| 0:08-0:20 | `ls <R>`: protected tables and `privacy_manifest.json`, nothing else. `pets-release verify <R>`: show the real output of the tip release, `VERIFIED (limited): 36 release-checked, 4 producer-attested` (exit 0; re-run at recording, and if it fails show the failure instead). | "The recipient gets tables and a manifest and can re-run the checks. It says limited, because they do not hold the key." |
-| 0:20-0:45 | Dashboard, sections 1-3: field inventory with a reason per column, PET per field, 37 fields withheld. | "We start from the purpose. Names and clinical notes never leave; age goes out in 10-year bands, arrival time as hour of day." |
-| 0:45-1:00 | Dashboard after suppression: H-U2 0.9908, H-U4 0.7952, H-U6 0.9462, H-U7 0.9933, H-U8 0.9505; per-person k minimum 5. Do not present the scorecard privacy score without its age_band caveat. | "We measure the release after suppression. H-U4 is a sacrifice our policy lists up front, with a floor of 0.60; per-person k is at least five. Unmeasured risks stay labelled." |
-| 1:00-1:20 | Terminal: plant a payment-card number in a copy of `<R>`; `pets-release verify <R>.planted` fails, naming check `rescan.payment-cards` and the count, exit 1. | "We do not trust our own output. Plant a card number and the check fails, reporting the check and count, never the value." |
-| 1:20-1:38 | Manifest: `exportAssertions.paymentCards: false` beside `assertionEvidence.paymentCards` (check, 1,106,994 cells, 0 hits). | "Each assertion can only say false and names the check that proved it on this release. If a check fails, no manifest is written." |
-| 1:38-1:50 | Limitations in the dashboard, then name and tagline card. | "Pseudonymised data is still personal data, and we say so. Release only what the purpose needs, and prove it." |
+## 1. Data types and privacy risks (0:00–0:20)
 
-## Notes
+Screen: HEALTH-S1 recipient and purpose, field inventory with column roles. Show
+schema only: direct identifiers, quasi-identifiers, sensitive attributes, free text.
+Show original scorecard privacy
+{{manifest.measured.privacy.components[component=privacy].before}} and original
+below-k row share {{manifest.measured.privacy.components[component=k_below_5_share].before}}.
+If unavailable, display “not measured”. Separate attacker-persona rates: not
+measured unless the final manifest contains their measured entries.
 
-- Do not say "anonymised", "no identifiers remain", or that a search picked the levels (a hand plan does today).
-<!-- IF #26 search merged -->- With search merged, add: "A measured search picks the coarsest level that keeps every purpose check passing." Only if `measured.search.status` is measured.<!-- END IF -->
-<!-- IF #24 CS-S1 release -->- With a CS-S1 release: add at most 5 s of aggregate per-label recall, never transcript rows.<!-- END IF -->
-- Show `unseen` detection only if the output is column names and roles.
+Narration: “A university research group needs crowding and revisit analyses, not
+names or clinical notes. We identify the fields and the linkage risks first.”
+
+## 2. PETs and why (0:20–0:40)
+
+Screen: `fieldJustifications` and `pets`; name the purpose check for each shown
+field. Withholding avoids unnecessary sharing; HMAC pseudonyms keep required joins;
+generalisation and local suppression reduce quasi-identifier detail.
+
+Narration: “Each field has a ladder floor, a chosen detail level and a reason tied
+to the purpose. The manifest records the trade-off, not just the method's name.”
+
+<!-- IF #127 -->Optional screen annotation, not extra running time: parallel scoring
+is opt-in; compare byte digests from final-SHA runs at different worker counts.
+Do not claim a speed-up without a timed measurement.<!-- END IF -->
+
+## 3. Protected output (0:40–0:58)
+
+Screen: field-level before-to-after map and the protected table schemas; read
+exact rungs from the final manifest.
+
+<!-- IF #106 -->Include the D33 lab test-name trade-off only as recorded in the
+final field justifications and residual risks, with its measured H-U7 effect.<!-- END IF -->
+
+<!-- IF #117 -->The human can instead show the first approximately ten protected
+rows per table from the verified web view, with the mandatory label:
+“Synthetic kit data © Since AI ry, CC BY 4.0. In a real deployment only the recipient
+sees this view.” Display-time limited verify and manifest-file digests must pass;
+no raw rows, row maps or truth/. Agent screenshots still use synthetic fixtures.<!-- END IF -->
+
+Narration: “This is what the recipient receives. Before means the original field's
+detail, never a display of a patient's raw record.”
+
+## 4. Measured privacy and utility (0:58–1:27)
+
+Screen: 06's targets met / not met table, with final measurements and explicit
+sacrifices. Show per-person minimum k
+{{manifest.measured.privacy.components[component=person_k.min].after}} separately
+from scorecard row shares. Mention the renamed-age-band blind spot. Overall
+scorecard utility and composite: not measured unless final manifest keys exist.
+
+Narration: “Privacy and usefulness are measured on the actual protected tables.
+A sacrifice is not a full pass. Missing measurements stay labelled not measured.”
+
+<!-- IF #24 -->Show the SECRET target note in place of part of this segment, not as
+extra time: {{manifest.residualRisks[risk=target-recall-secret].description}}.
+Narration: “SECRET recall missed its target. Later results are optimistic because
+the held-out misses informed the change; the target stays at 0.98.”<!-- END IF -->
+
+## 5. Sharing scenario and limitations, then proof (1:27–1:50)
+
+Screen: recipient/trust level, `fitFor`, `notFitFor`, sacrifices and residual risks;
+then actual final-SHA gate totals and fresh CLI outputs of `verify` and
+`verify --full`. A deliberate synthetic planted-card candidate must be refused by
+the real CLI: show the failed check and count, never a value. If any proof step
+fails, show that outcome; do not paste a success line. No verification result is
+itself a manifest measurement.
+
+Narration: “Pseudonymised data is still personal data. Recipient verification is
+limited; full verification needs the controller's inputs and key. A failed check
+refuses the candidate release. Share only what the purpose needs.”
+
+<!-- IF #32 -->Optional closing caption within the same duration: the needs-spec
+front end receives request text and the data dictionary, never rows. Enable only
+after D39 and final-SHA proof; otherwise list it as future work.<!-- END IF -->
