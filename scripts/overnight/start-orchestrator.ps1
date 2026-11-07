@@ -22,6 +22,8 @@ param(
   [string]$Agent = 'build',
   [string]$Title,
   [int]$StaleMinutes = 25,
+  # First prompt for the new session. Default: resume-prompt.md (test-handover.ps1 passes a harmless one).
+  [string]$PromptFile,
   [switch]$Force,
   [switch]$DryRun
 )
@@ -32,6 +34,7 @@ $HbPath = Join-Path $StateDir 'heartbeat.json'
 $StatePath = Join-Path $StateDir 'watchdog-state.json'
 $LockPath = Join-Path $StateDir 'orchestrator.lock'
 $PromptPath = Join-Path $PSScriptRoot 'resume-prompt.md'
+if ($PromptFile) { $PromptPath = $PromptFile }
 $HbScript = Join-Path $PSScriptRoot 'heartbeat.ps1'
 $NowUtc = (Get-Date).ToUniversalTime()
 $tag = $(if ($DryRun) { '[DRYRUN] ' } else { '' })
@@ -123,7 +126,9 @@ if ($blockers.Count -gt 0 -and -not $Force) {
 # ---------- build requests ----------
 $body = [ordered]@{ title = $Title; agent = $Agent; model = (Parse-Model $Model); location = [ordered]@{ directory = $RepoRoot } } | ConvertTo-Json -Compress -Depth 4
 $header = "[start-orchestrator $($NowUtc.ToString('o'))] Fresh orchestrator start. Previous tracked orchestrator: $(if ($oldId) { $oldId } else { 'none' }) (do not use it). Your first action: run scripts/overnight/heartbeat.ps1 -Phase resume -ClaimSession.`n`n"
-$text = $header + (Get-Content -Raw $PromptPath)
+# A custom -PromptFile is sent verbatim: the header tells the session to write the LIVE heartbeat, which a test must not do.
+# ReadAllText, not Get-Content: a bare Get-Content string carries PSPath note properties that ConvertTo-Json serialises.
+if ($PromptFile) { $text = [IO.File]::ReadAllText($PromptPath, [Text.Encoding]::UTF8) } else { $text = $header + (Get-Content -Raw $PromptPath) }
 $promptBody = @{ text = $text; delivery = 'queue' } | ConvertTo-Json -Compress
 
 if ($DryRun) {

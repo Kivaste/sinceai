@@ -48,6 +48,11 @@ param(
   [int]$HandoverCooldownMinutes = 30,
   [string]$Model = 'claude-agent/opus#high',
   [string]$FallbackModel = 'openai/gpt-6.1-sol',
+  # Hand-over overrides (test-handover.ps1). Empty = start-orchestrator.ps1 defaults (its -Model, resume-prompt.md).
+  [string]$HandoverModel,
+  [string]$HandoverPromptFile,
+  # Test-only: do not (re)start the keep-awake / gpt-probe helpers.
+  [switch]$SkipHelpers,
   [switch]$DryRun,
   [switch]$NoFetch,
   # Test hook: JSON file that replaces the gh / OpenCode / commit probes. See test-watchdog.ps1.
@@ -142,6 +147,7 @@ try {
     # server: a server restart or task-scheduler job cleanup must not kill them.
     $helpers = @(@{ pid = 'keep-awake.pid'; script = 'keep-awake.ps1'; skipIf = $null },
                  @{ pid = 'gpt-probe.pid'; script = 'gpt-quota-probe.ps1'; skipIf = (Join-Path $StateDir 'gpt-available.json') })
+    if ($SkipHelpers) { $helpers = @() }
     foreach ($h in $helpers) {
       if ($h.skipIf -and (Test-Path $h.skipIf)) { continue }
       $hp = $null; $hf = Join-Path $StateDir $h.pid
@@ -169,7 +175,13 @@ try {
         if ($ctx -gt $MaxContextTokens -and $hoAge -gt $HandoverCooldownMinutes) {
           Write-Log ('action=handover reason="orchestrator context {0:N0} > {1:N0} tokens" session={2}' -f $ctx, $MaxContextTokens, $hbNow.session_id)
           Set-Content $hoFile (Get-Date).ToString('o')
-          $out = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'start-orchestrator.ps1') -Force 2>&1 | Out-String
+          $soArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $PSScriptRoot 'start-orchestrator.ps1'), '-Force', '-StateDir', $StateDir)
+          if ($HandoverModel) { $soArgs += @('-Model', $HandoverModel) }
+          if ($HandoverPromptFile) { $soArgs += @('-PromptFile', $HandoverPromptFile) }
+          # EAP Continue: under Stop, the child's first stderr line (e.g. a Write-Error) would crash this run and lose the result.
+          $ErrorActionPreference = 'Continue'
+          $out = & powershell.exe @soArgs 2>&1 | Out-String
+          $ErrorActionPreference = 'Stop'
           Write-Log ('handover result: ' + (($out -split "`r?`n" | Where-Object { $_ -match 'created session|retirement|interrupting|error|WARN' }) -join ' | '))
           exit 0
         }
