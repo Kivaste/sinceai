@@ -1,4 +1,4 @@
-"""Must-fix follow-up 52: full-table "before", consistent person-k, scenario baselines, [0,1] scores."""
+﻿"""Must-fix follow-up 52: full-table "before", consistent person-k, scenario baselines, [0,1] scores."""
 
 from __future__ import annotations
 
@@ -277,3 +277,17 @@ def test_release_dir_untouched_by_before_stand_in(args):
     measure(SCENARIO, **args)
     assert not any(p.name.startswith("rowmap_") for p in args["protected_dir"].iterdir())
     shutil.rmtree(args["out_dir"])
+
+
+@pytest.mark.parametrize("value", ["absent", None, "x", {}, [], [""], [1]])
+def test_missing_or_malformed_utility_requirements_is_rejected(kit, value):
+    p = kit / "metadata" / "scenarios.json"
+    s = json.loads(p.read_text(encoding="utf-8"))
+    if value == "absent":
+        del s[0]["utility_requirements"]
+    else:
+        s[0]["utility_requirements"] = value
+    p.write_text(json.dumps(s), encoding="utf-8")
+    with pytest.raises(MeasureRejected) as caught:
+        baseline_rows(kit, SCENARIO, "customer_service")
+    assert caught.value.reason == "baseline_structure"
