@@ -26,6 +26,10 @@ Failure rows (trigger -> result):
                                                      -> at 7b21bc5 the source scan silently scanned nothing (refusal
                                                         only via other checks' not_run); must refuse with its own
                                                         content-free reason selfscan:source-missing
+  a source value equal to a column name (one hand-made withheld note cell), planted as the whole fitFor[0].reason
+  (#149 r2)                                          -> RELEASED at 19870a2 (header exemption at any path); must
+                                                        refuse selfscan:manifest-value
+  the same kit without the plant                     -> released (structural header paths stay exempt)
   honest hand release: a source category value occurs inside a column-name string (e.g. inventory[].column)
                                                      -> released (no false positive)
   (identifier values, e.g. patient_name or a raw visit_id, are already refused by producer.original-values in
@@ -182,6 +186,52 @@ def test_missing_source_context_refuses_source_missing(tmp_path, monkeypatch, ca
     assert not out.exists()
     reasons = json.loads((out.parent / "rel.scoring" / "refusal_report.json").read_text(encoding="utf-8"))["reasons"]
     assert "selfscan:source-missing" in reasons
+
+
+HEADER_VALUE = "chief_complaint"  # a source column NAME, written into one withheld note cell (hand-made)
+
+
+def _kit_with_header_value(tmp_path):
+    def edit(folder):
+        coarse_qis(folder)
+        p = folder / "clinical_notes.csv"
+        df = pd.read_csv(p, dtype=str, keep_default_na=False, na_filter=False)
+        df.loc[0, "note_text"] = HEADER_VALUE
+        df.to_csv(p, index=False, encoding="utf-8", lineterminator="\n")
+
+    return build_kit(tmp_path / "kit", edit)
+
+
+def test_source_value_equal_to_header_in_free_text_refuses(tmp_path, monkeypatch, capsys):
+    """#149 r2: the header exemption is bound to structural header paths. A source value that equals a column
+    name, copied as the whole fitFor[0].reason, is scanned like any other text and refuses."""
+    from pets_release.run import pipeline
+
+    _kit_with_header_value(tmp_path)
+    real = pipeline.build_narrative
+
+    def leaky(**kw):
+        nar = real(**kw)
+        nar["fitFor"] = [dict(f, reason=HEADER_VALUE) if i == 0 else f for i, f in enumerate(nar["fitFor"])]
+        return nar
+
+    monkeypatch.setattr(pipeline, "build_narrative", leaky)
+    code, out = _run(tmp_path, monkeypatch, None)
+    capsys.readouterr()
+    assert code == 1
+    assert not out.exists()
+    reasons = json.loads((out.parent / "rel.scoring" / "refusal_report.json").read_text(encoding="utf-8"))["reasons"]
+    assert reasons == ["selfscan:check:producer.manifest-source-values:status:fail", "selfscan:manifest-value",
+                       "selfscan:refused"]
+
+
+def test_source_value_equal_to_header_honest_release_releases(tmp_path, monkeypatch, capsys):
+    """Control for the row above: the same kit (a note cell equal to a column name) without the plant releases,
+    so the column name at its structural paths (inventory, pets, contract, ...) stays exempt."""
+    _kit_with_header_value(tmp_path)
+    code, _ = _run(tmp_path, monkeypatch, None)
+    capsys.readouterr()
+    assert code == 0
 
 
 def test_honest_release_with_category_inside_column_name_releases(tmp_path, monkeypatch, capsys):

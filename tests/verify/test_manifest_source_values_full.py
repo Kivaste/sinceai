@@ -18,6 +18,9 @@ Rows (trigger -> result):
                                                              not echoed
   a withheld clinical_notes.note_type value (paramName-shaped) planted as a pets[0].params KEY, re-signed
                                                           -> same
+  (r2) own kit with one withheld note cell equal to a column name; its honest release verifies; that value
+  re-signed as the whole fitFor[0].reason                 -> was exit 0 at 19870a2 (header exemption at any path);
+                                                             must exit 1 with the check's fail line
 """
 from __future__ import annotations
 
@@ -54,6 +57,40 @@ def test_folded_withheld_value_in_manifest_text_fails_verify_full(real_bed, tb, 
     assert r.returncode == 1, r.stdout
     assert _fail_line(r.stdout), r.stdout
     assert value not in r.stdout + r.stderr and planted not in r.stdout + r.stderr
+
+
+def test_header_equal_source_value_in_free_text_fails_verify_full(tmp_path, tb, verify_cli):
+    """#149 r2: a source value equal to a column name, re-signed into fitFor[0].reason as the whole string, fails
+    verify --full (the header exemption holds only at structural header paths). Own kit: one withheld note cell
+    is the column name; the honest release of that kit verifies first."""
+    import sys
+
+    from tests.verify.conftest import ROOT, RealBed
+
+    sys.path.insert(0, str(ROOT / "tests" / "run"))
+    from run_helpers import build_kit, cli, coarse_qis, run_args
+
+    header = "chief_complaint"
+
+    def edit(folder):
+        coarse_qis(folder)
+        p = folder / "clinical_notes.csv"
+        df = pd.read_csv(p, dtype=str, keep_default_na=False, na_filter=False)
+        df.loc[0, "note_text"] = header
+        df.to_csv(p, index=False, encoding="utf-8", lineterminator="\n")
+
+    kit = build_kit(tmp_path / "kit", edit)
+    out = tmp_path / "out" / "rel"
+    proc = cli(*run_args(kit, out))
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    bed = RealBed(kit, out)
+    assert verify_cli("--full", "--kit", kit, out, env=bed.env()).returncode == 0
+    m = tb.load(out)
+    m["fitFor"][0]["reason"] = header
+    bed.resign(m)
+    r = verify_cli("--full", "--kit", kit, out, env=bed.env())
+    assert r.returncode == 1, r.stdout
+    assert _fail_line(r.stdout), r.stdout
 
 
 def test_withheld_value_as_map_key_fails_verify_full(real_bed, tb, verify_cli):
