@@ -1,5 +1,6 @@
 """Read content-free release evidence for the PowerShell close gate (stdlib only)."""
 
+import hashlib
 import json
 import re
 import sys
@@ -27,6 +28,44 @@ def read_json(path):
 def exact_keys(record, keys):
     if not isinstance(record, dict) or set(record) != set(keys.split()):
         raise ValueError("record keys")
+
+
+def canonical_digest(record):
+    raw = json.dumps(record, sort_keys=True, separators=(",", ":"),
+                     ensure_ascii=False, allow_nan=False).encode("utf-8")
+    return hashlib.sha256(raw).hexdigest()
+
+
+def release_identity(path, manifest):
+    bindings = manifest["bindings"]
+    exact_keys(bindings, "files inputs toolRevision checkVersions lexiconDigests contractDigest")
+    release = manifest["release"]
+    exact_keys(release, "scenario recipient releaseScopeId created")
+    for name in ("inputs", "files"):
+        mapping = bindings[name]
+        if not isinstance(mapping, dict) or not mapping:
+            raise ValueError("missing identity digests")
+        if any(not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest)
+               for digest in mapping.values()):
+            raise ValueError("identity digest")
+    identity = {"inputs": bindings["inputs"], "recipient": release["recipient"],
+                "scenario": release["scenario"], "toolRevision": bindings["toolRevision"]}
+    if release["releaseScopeId"] != canonical_digest(identity)[:16]:
+        raise ValueError("release scope")
+    if bindings["contractDigest"] != canonical_digest(manifest["contract"]):
+        raise ValueError("contract digest")
+    if set(bindings["files"]) != set(manifest["contract"]["files"]):
+        raise ValueError("contract files")
+    for name, expected in sorted(bindings["files"].items()):
+        if not re.fullmatch(r"[A-Za-z0-9_]{1,64}\.csv", name):
+            raise ValueError("release filename")
+        digest = hashlib.sha256()
+        # Hash locally as bytes; never parse or print protected row values.
+        with (path.parent / name).open("rb") as stream:
+            for block in iter(lambda: stream.read(1024 * 1024), b""):
+                digest.update(block)
+        if digest.hexdigest() != expected:
+            raise ValueError("file digest")
 
 
 def check_record(record, *, report=False):
@@ -147,6 +186,11 @@ def check(folder, head, outcome):
         return ["manifest revision does not equal Head"]
     problems = []
     for path, manifest in bound:
+        try:
+            release_identity(path, manifest)
+        except (OSError, ValueError, KeyError, TypeError):
+            problems.append("release identity missing, malformed or mismatched")
+            continue
         gate_path = path.parent.with_name(path.parent.name + ".scoring") / "gate_report.json"
         try:
             gate_records(manifest, read_json(gate_path))

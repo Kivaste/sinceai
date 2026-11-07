@@ -1,12 +1,15 @@
 """Planted content-free artefacts tested through the real close-gate CLI."""
 
 import json
+import hashlib
 import shutil
 from pathlib import Path
 
 import pytest
 
 from tests.overnight import test_done_report_encoding as encoding
+from pets_release.manifest.canonical import canonical_digest
+from pets_release.manifest.validate import release_scope_id
 
 close_gate = encoding.close_gate
 pytestmark = pytest.mark.skipif(encoding.POWERSHELL is None, reason="requires Windows PowerShell 5.1")
@@ -29,6 +32,19 @@ def evidence(close_gate):
                               "checkVersions": {"release.synthetic": "1"}},
                 "gate": {"status": "pass", "checks": [check]}}
     gate = {"records": [dict(check, violations=[])], "refused": False, "registryError": None}
+    # Hand-made content; bind it with the production manifest identity writer.
+    table = b"synthetic\n"
+    (release / "synthetic.csv").write_bytes(table)
+    manifest["contract"] = {"files": {"synthetic.csv": {"required": [], "columns": {}}},
+                            "qi": [], "tokens": []}
+    manifest["bindings"].update(
+        files={"synthetic.csv": hashlib.sha256(table).hexdigest()},
+        inputs={"synthetic": "a" * 64}, lexiconDigests={},
+        contractDigest=canonical_digest(manifest["contract"]))
+    manifest["release"] = {
+        "scenario": "CS-S1", "recipient": "synthetic", "created": "2026-01-01T00:00:00Z",
+        "releaseScopeId": release_scope_id(scenario="CS-S1", recipient="synthetic",
+                                           inputs=manifest["bindings"]["inputs"], tool_revision=head)}
     manifest_path = release / "privacy_manifest.json"
     gate_path = scoring / "gate_report.json"
     manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
@@ -268,6 +284,7 @@ def test_multi_release_folder_validates_every_manifest(evidence):
         (folder / name).mkdir()
         (folder / (name + ".scoring")).mkdir()
         shutil.copyfile(manifest_path, folder / name / manifest_path.name)
+        shutil.copyfile(manifest_path.with_name("synthetic.csv"), folder / name / "synthetic.csv")
         shutil.copyfile(gate_path, folder / (name + ".scoring") / gate_path.name)
         text = (folder / "run.log").read_text(encoding="utf-8").replace(
             "RELEASED: release (", f"RELEASED: {name} (")
@@ -286,6 +303,7 @@ def shared_logs(evidence):
         (folder / name).mkdir()
         (folder / (name + ".scoring")).mkdir()
         shutil.copyfile(manifest_path, folder / name / manifest_path.name)
+        shutil.copyfile(manifest_path.with_name("synthetic.csv"), folder / name / "synthetic.csv")
         shutil.copyfile(gate_path, folder / (name + ".scoring") / gate_path.name)
     manifest_path.parent.rename(folder / "release-health-s1")
     gate_path.parent.rename(folder / "release-health-s1.scoring")
@@ -334,3 +352,42 @@ def test_no_verify_claim_still_requires_limited_tier_record(shared_logs):
     result = run("body-file", body)
     assert result.returncode == 1, result.stdout + result.stderr
     assert "verify (limited) exit 0 record missing" in result.stdout
+
+
+@pytest.mark.parametrize("defect", [
+    "missing-inputs", "bad-input-digest", "changed-inputs", "scope", "contract-digest",
+    "file-digest", "missing-file", "unsafe-file", "contract-files",
+])
+def test_planted_manifest_must_bind_release_identity(evidence, defect):
+    """Seam: CLI; a same-Head planted manifest cannot replace input/file identity."""
+    run, body, folder, manifest_path, _ = evidence
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    bindings = manifest["bindings"]
+    if defect == "missing-inputs":
+        del bindings["inputs"]
+    elif defect == "bad-input-digest":
+        bindings["inputs"]["synthetic"] = "not-a-digest"
+    elif defect == "changed-inputs":
+        bindings["inputs"]["synthetic"] = "b" * 64
+    elif defect == "scope":
+        manifest["release"]["releaseScopeId"] = "0" * 16
+    elif defect == "contract-digest":
+        bindings["contractDigest"] = "0" * 64
+    elif defect == "file-digest":
+        bindings["files"]["synthetic.csv"] = "0" * 64
+    elif defect == "missing-file":
+        manifest_path.with_name("synthetic.csv").unlink()
+        # A file with the right bytes elsewhere cannot replace the bound table.
+        (folder / "synthetic.csv").write_bytes(b"synthetic\n")
+    elif defect == "unsafe-file":
+        bindings["files"] = {"../synthetic.csv": bindings["files"]["synthetic.csv"]}
+        manifest["contract"]["files"] = {"../synthetic.csv": {}}
+        bindings["contractDigest"] = canonical_digest(manifest["contract"])
+        (folder / "synthetic.csv").write_bytes(b"synthetic\n")
+    else:
+        manifest["contract"]["files"]["planted.csv"] = {}
+        bindings["contractDigest"] = canonical_digest(manifest["contract"])
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    result = run("body-file", body)
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "release identity" in result.stdout
