@@ -80,3 +80,41 @@ def test_no_usable_qi_returns_everyone_with_used_zero():
     m = Matcher(_prot(), [QI("exact", ("place",), ("municipality",))])
     rows, used = m.candidates({"place": ""})
     assert used == 0 and len(rows) == 4
+
+
+def test_month_hour_form_matches_month_and_hour_of_day():
+    prot = pd.DataFrame({"arrival_ts": ["2025-03-01T10:00", "2025-03-01T15:00", "2025-04-01T10:00"]})
+    m = Matcher(prot, [QI("time", ("t",), ("arrival_ts",), window=(2, 1))])
+    rows, _ = m.candidates({"t": "2025-03-17T10:30:00"})  # March, hours 8..11 reachable
+    assert list(rows) == [0]
+    rows, _ = m.candidates({"t": "2025-04-30T09:15:00"})
+    assert list(rows) == [2]
+
+
+def test_hour_form_is_an_hour_bucket():
+    prot = pd.DataFrame({"arrival_ts": ["2025-03-17T10:00", "2025-03-17T11:00"]})
+    m = Matcher(prot, [QI("time", ("t",), ("arrival_ts",), window=(0, 0))])
+    rows, _ = m.candidates({"t": "2025-03-17T10:40:00"})
+    assert list(rows) == [0]
+
+
+def test_other_municipality_is_a_wildcard_over_non_released_places():
+    prot = pd.DataFrame({"municipality": ["Turku", "Raisio", "other", "other"]})
+    m = Matcher(prot, [QI("exact", ("place",), ("municipality",))])
+    assert sorted(m.candidates({"place": "Naantali"})[0]) == [2, 3]
+    assert sorted(m.candidates({"place": "Turku"})[0]) == [0]
+
+
+def test_age_band_form_is_an_interval():
+    prot = pd.DataFrame({"age_band": ["20-24", "25-29", "90+"]})
+    m = Matcher(prot, [QI("age", ("age",), ("age_band",), tol=0)])
+    assert list(m.candidates({"age": "22"})[0]) == [0]
+    assert list(m.candidates({"age": "95"})[0]) == [2]
+
+
+def test_single_target_release_in_ladder_forms_links_with_certainty():
+    prot = pd.DataFrame({"arrival_ts": ["2025-03-01T10:00"], "municipality": ["other"], "age_band": ["30-34"], "sex": ["F"]})
+    qis = [QI("time", ("t",), ("arrival_ts",), window=(0, 0)), QI("exact", ("p",), ("municipality",)),
+           QI("age", ("a",), ("age_band",), tol=0), QI("sex", ("s",), ("sex",))]
+    rows, used = Matcher(prot, qis).candidates({"t": "2025-03-20T10:10:00", "p": "Kaarina", "a": "32", "s": "F"})
+    assert list(rows) == [0] and used == 4

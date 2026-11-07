@@ -19,6 +19,10 @@ AGGREGATE_KEYS = (
 )
 
 
+class MappingError(ValueError):
+    """Row map or identity truth is incomplete, duplicated or inconsistent; scoring refused."""
+
+
 def _empty(**kw) -> dict:
     out = {k: None for k in AGGREGATE_KEYS}
     out.update(evaluated=False, n_targets=0, n_unique_claims=0)
@@ -36,12 +40,25 @@ class _World:
     def __init__(self, protected, rowmap, identity, original, record_key, sensitive):
         id_map = dict(zip(identity.iloc[:, 0].astype(str), identity.iloc[:, 1].astype(str)))
         n = len(protected)
+        if not {"protected_row", "original_record_id"} <= set(rowmap.columns):
+            raise MappingError("row map needs columns protected_row and original_record_id")
+        rows = rowmap["protected_row"].astype(str)
+        recs = rowmap["original_record_id"].astype(str)
+        if n == 0 or len(rowmap) != n:
+            raise MappingError("row map must cover every protected row exactly once")
+        if not rows.str.fullmatch(r"\d+").all() or set(rows.astype(int)) != set(range(n)) or rows.duplicated().any():
+            raise MappingError("row map protected_row must be a complete, unique 0..n-1 index")
+        if recs.duplicated().any() or (recs == "").any() or (recs == "nan").any():
+            raise MappingError("row map original_record_id must be non-empty and unique")
+        if not set(recs) <= set(id_map):
+            raise MappingError("row map record ids missing from the identity truth")
+        if original is not None and record_key and not set(recs) <= set(original[record_key].astype(str)):
+            raise MappingError("row map record ids missing from the original table")
         self.person = np.full(n, "", dtype=object)
         self.record = np.full(n, "", dtype=object)
-        for pr, rid in zip(rowmap["protected_row"].astype(str), rowmap["original_record_id"].astype(str)):
-            if pr.isdigit() and int(pr) < n and rid and rid != "nan":
-                self.person[int(pr)] = id_map.get(rid, "")
-                self.record[int(pr)] = rid
+        for pr, rid in zip(rows.astype(int), recs):
+            self.person[pr] = id_map[rid]
+            self.record[pr] = rid
         self.persons = set(self.person[self.person != ""])
         self.id_map = id_map
         self.sens_true: dict = {}
@@ -80,7 +97,7 @@ class _Tally:
     def result(self, has_sens: bool) -> dict:
         n = self.n
         return {
-            "evaluated": True,
+            "evaluated": n > 0,
             "n_targets": n,
             "n_unique_claims": self.claims,
             "reidentification_rate": round(self.correct / n, 4) if n else None,
@@ -101,6 +118,8 @@ def broker_attack(adversary: pd.DataFrame, adv_truth: pd.DataFrame, protected: p
     if not qis:
         return _empty()
     world = _World(protected, rowmap, identity, original, record_key, sensitive)
+    if adv_truth is None or len(adv_truth) == 0 or adv_truth.shape[1] < 2:
+        raise MappingError("adversary truth is empty")
     tmap = dict(zip(adv_truth.iloc[:, 0].astype(str), adv_truth.iloc[:, 1].astype(str)))
     adv = adversary.reset_index(drop=True)
     if len(adv) > max_adversary:
@@ -138,3 +157,4 @@ def insider_attack(original: pd.DataFrame, protected: pd.DataFrame, rowmap: pd.D
         cand, used = m.candidates({"date": d[:10], "place": p})
         tally.add(world, cand, used, world.id_map.get(rid, ""), True, has_sens)
     return tally.result(has_sens)
+

@@ -53,3 +53,39 @@ def test_cli_fails_closed_without_rowmap(tmp_path: Path):
     (tmp_path / "rel" / "rowmap_ed_visits.csv").unlink()
     assert main(["--kit", str(kit), "--release", str(tmp_path / "rel"), "--label", "t", "--out", str(tmp_path / "o.json")]) != 0
     assert not (tmp_path / "o.json").exists()
+
+
+def _move_rowmap(tmp_path: Path, dest: Path) -> Path:
+    dest.mkdir(parents=True, exist_ok=True)
+    return Path(str(dest / "rowmap_ed_visits.csv")) if (tmp_path / "rel" / "rowmap_ed_visits.csv").replace(dest / "rowmap_ed_visits.csv") else dest
+
+
+def test_cli_accepts_a_scoring_dir_next_to_the_release(tmp_path: Path):
+    kit = _mini_kit(tmp_path)
+    scoring = tmp_path / "rel.scoring"
+    _move_rowmap(tmp_path, scoring)
+    out = tmp_path / "o.json"
+    base = ["--kit", str(kit), "--release", str(tmp_path / "rel"), "--label", "t", "--out", str(out)]
+    assert main(base) != 0  # no rowmap in the release dir and none named: refused
+    assert main(base + ["--scoring-dir", str(scoring)]) == 0
+    assert json.loads(out.read_text(encoding="utf-8"))["insider"]["evaluated"] is True
+
+
+def test_cli_accepts_an_explicit_rowmap_and_does_not_fall_back(tmp_path: Path):
+    kit = _mini_kit(tmp_path)
+    scoring = tmp_path / "elsewhere"
+    _move_rowmap(tmp_path, scoring)
+    out = tmp_path / "o.json"
+    base = ["--kit", str(kit), "--release", str(tmp_path / "rel"), "--label", "t", "--out", str(out)]
+    assert main(base + ["--rowmap", f"ed_visits={scoring / 'rowmap_ed_visits.csv'}"]) == 0
+    # a planted rowmap in the release dir must not win over an explicit scoring dir that lacks one
+    (tmp_path / "rel" / "rowmap_ed_visits.csv").write_text("protected_row,original_record_id\n", encoding="utf-8")
+    out.unlink()
+    assert main(base + ["--scoring-dir", str(tmp_path / "empty_scoring")]) != 0
+    assert not out.exists()
+
+
+def test_cli_refuses_a_bad_row_map(tmp_path: Path):
+    kit = _mini_kit(tmp_path)
+    (tmp_path / "rel" / "rowmap_ed_visits.csv").write_text("protected_row,original_record_id\n", encoding="utf-8")
+    assert main(["--kit", str(kit), "--release", str(tmp_path / "rel"), "--label", "t", "--out", str(tmp_path / "o.json")]) != 0

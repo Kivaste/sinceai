@@ -9,7 +9,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from pets_attacker.boundary import (
+    BoundaryError,
     attacker_importers,
     attacker_reads_truth,
     truth_references,
@@ -81,3 +84,41 @@ def test_unparseable_file_fails_closed(tmp_path: Path):
     _plant(tmp_path, "pets_release/broken.py", 'import pets_attacker\nP = "truth/x.csv"\ndef (:\n')
     assert any(h.endswith("broken.py") for h in attacker_importers(tmp_path / "src"))
     assert any(h.endswith("broken.py") for h in truth_references(tmp_path / "src"))
+
+
+def test_unparseable_file_without_matching_text_is_still_a_violation(tmp_path: Path):
+    _plant(tmp_path, "pets_release/innocent.py", "def (:\n")
+    assert any(h.endswith("innocent.py") for h in attacker_importers(tmp_path / "src"))
+    assert any(h.endswith("innocent.py") for h in truth_references(tmp_path / "src"))
+
+
+@pytest.mark.parametrize("fn", [attacker_importers, truth_references, attacker_reads_truth])
+def test_missing_or_empty_scan_root_is_an_error(tmp_path: Path, fn):
+    with pytest.raises(BoundaryError):
+        fn(tmp_path / "nope")
+    (tmp_path / "empty").mkdir()
+    with pytest.raises(BoundaryError):
+        fn(tmp_path / "empty")
+
+
+def test_constant_name_dynamic_import_is_caught(tmp_path: Path):
+    _plant(tmp_path, "pets_release/c1.py", 'import importlib\nMOD = "pets_attacker.personas"\nimportlib.import_module(MOD)\n')
+    assert any(h.endswith("c1.py") for h in attacker_importers(tmp_path / "src"))
+
+
+def test_unresolvable_dynamic_import_is_a_violation_unless_allowlisted(tmp_path: Path):
+    body = "import importlib\ndef load(name):\n    return importlib.import_module(name)\n"
+    _plant(tmp_path, "pets_release/dyn.py", body)
+    _plant(tmp_path, "pets_release/fstr.py", 'import importlib\nimportlib.import_module(f"{PKG}.x")\n')
+    _plant(tmp_path, "pets_release/checks/registry.py", body)
+    hits = attacker_importers(tmp_path / "src")
+    assert any(h.endswith("dyn.py") for h in hits)
+    assert any(h.endswith("fstr.py") for h in hits)
+    assert not any(h.endswith("registry.py") for h in hits)  # the one allowlisted discovery site
+
+
+def test_allowlisted_dynamic_site_must_not_mention_the_attacker(tmp_path: Path):
+    _plant(tmp_path, "pets_release/checks/registry.py",
+           'import importlib\n# pets_attacker\ndef load(n):\n    return importlib.import_module(n)\n')
+    assert any(h.endswith("registry.py") for h in attacker_importers(tmp_path / "src"))
+

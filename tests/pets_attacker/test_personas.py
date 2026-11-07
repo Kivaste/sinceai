@@ -6,7 +6,12 @@ import pandas as pd
 import pytest
 
 from pets_attacker.linkage import QI
-from pets_attacker.personas import AGGREGATE_KEYS, broker_attack, insider_attack
+from pets_attacker.personas import (
+    AGGREGATE_KEYS,
+    MappingError,
+    broker_attack,
+    insider_attack,
+)
 
 REC = [f"v{i}" for i in range(8)]
 PERSON = ["p0", "p1", "p2", "p3", "p4", "p5", "p0", "p1"]  # p0, p1 visit twice
@@ -105,3 +110,53 @@ def test_output_is_aggregate_only():
     assert set(out) == set(AGGREGATE_KEYS)
     for k, v in out.items():
         assert v is None or isinstance(v, (bool, int, float)), k
+
+
+def test_single_target_ladder_release_is_certain():
+    orig = pd.DataFrame({"visit_id": ["v0"], "arrival_ts": ["2025-03-20T10:10:00"], "municipality": ["Kaarina"], "icd10_primary": ["J10.1"]})
+    prot = pd.DataFrame({"arrival_ts": ["2025-03-01T10:00"], "municipality": ["other"], "icd10_primary": ["J10"]})
+    rm = pd.DataFrame({"protected_row": ["0"], "original_record_id": ["v0"]})
+    ident = pd.DataFrame({"record_id": ["v0"], "person_id": ["p0"]})
+    adv = pd.DataFrame({"adv_row_id": ["a0"], "t": ["2025-03-20T10:10:00"], "p": ["Kaarina"]})
+    atruth = pd.DataFrame({"adv_row_id": ["a0"], "person_id": ["p0"]})
+    qis = [QI("time", ("t",), ("arrival_ts",), window=(1, 1)), QI("exact", ("p",), ("municipality",))]
+    out = broker_attack(adv, atruth, prot, rm, ident, qis, original=orig, record_key="visit_id", sensitive="icd10_primary")
+    assert out["reidentification_rate"] == 1.0 and out["attribute_inference_rate"] == 1.0  # truncated ICD is a prefix
+
+
+@pytest.mark.parametrize("mutate", [
+    lambda rm: rm.iloc[0:0],                                              # empty
+    lambda rm: rm.iloc[:-1],                                              # incomplete
+    lambda rm: pd.concat([rm, rm.iloc[:1]], ignore_index=True),           # duplicate protected row
+    lambda rm: rm.assign(original_record_id=["v0"] * len(rm)),            # duplicate record ids
+    lambda rm: rm.assign(original_record_id=["zz"] + list(rm.original_record_id[1:])),  # unknown record
+    lambda rm: rm.assign(protected_row=["x"] + list(rm.protected_row[1:])),             # non-integer row
+    lambda rm: rm.assign(protected_row=[str(i + 1) for i in range(len(rm))]),           # out of range
+])
+def test_bad_row_maps_are_refused(mutate):
+    prot, rm = _identity_release([0, 1, 2, 3, 4, 5, 6, 7])
+    with pytest.raises(MappingError):
+        insider_attack(_original(), prot, mutate(rm), _identity(), date_col="arrival_ts", place_col="municipality",
+                       record_key="visit_id", sensitive="icd10_primary")
+    with pytest.raises(MappingError):
+        broker_attack(_adv([]), pd.DataFrame({"adv_row_id": [], "person_id": []}), prot, mutate(rm), _identity(),
+                      [QI("exact", ("profile_city",), ("municipality",))])
+
+
+def test_row_map_missing_columns_or_identity_gaps_are_refused():
+    prot, rm = _identity_release([0, 1, 2, 3, 4, 5, 6, 7])
+    with pytest.raises(MappingError):
+        insider_attack(_original(), prot, rm.rename(columns={"protected_row": "r"}), _identity(), date_col="arrival_ts",
+                       place_col="municipality", record_key="visit_id")
+    with pytest.raises(MappingError):
+        insider_attack(_original(), prot, rm, _identity().iloc[:-1], date_col="arrival_ts", place_col="municipality",
+                       record_key="visit_id")
+
+
+def test_zero_targets_is_not_evaluated():
+    prot, rm = _identity_release([0, 1, 2, 3, 4, 5, 6, 7])
+    adv = _adv([("a0", "Nobody", "Turku", "2025-01-01T10:00:00")])
+    atruth = pd.DataFrame({"adv_row_id": ["a0"], "person_id": ["pX"]})
+    out = broker_attack(adv, atruth, prot, rm, _identity(), [QI("exact", ("profile_city",), ("municipality",))])
+    assert out["evaluated"] is False and out["n_targets"] == 0
+

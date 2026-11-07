@@ -13,7 +13,7 @@ from pathlib import Path
 import pandas as pd
 
 from .linkage import qis_from_spec
-from .personas import broker_attack, insider_attack
+from .personas import MappingError, broker_attack, insider_attack
 from .truth import load_adversary_truth, load_identity, load_rowmap
 
 DOMAIN, TABLE, RECORD_KEY = "health", "ed_visits", "visit_id"
@@ -23,11 +23,18 @@ def _csv(path: Path) -> pd.DataFrame:
     return pd.read_csv(path, dtype=str, keep_default_na=False)
 
 
-def run(kit: Path, release: Path, label: str) -> dict:
-    rowmap_path = release / f"rowmap_{TABLE}.csv"
+def _rowmap_path(release: Path, scoring_dir: Path | None, rowmaps: dict) -> Path:
+    """Explicit --rowmap wins, then --scoring-dir, else the release folder (kit-baseline layout). No fallback."""
+    if TABLE in rowmaps:
+        return rowmaps[TABLE]
+    return (scoring_dir if scoring_dir is not None else release) / f"rowmap_{TABLE}.csv"
+
+
+def run(kit: Path, release: Path, label: str, scoring_dir: Path | None = None, rowmaps: dict | None = None) -> dict:
+    rowmap_path = _rowmap_path(release, scoring_dir, rowmaps or {})
     prot_path = release / f"{TABLE}.csv"
     if not rowmap_path.is_file() or not prot_path.is_file():
-        raise FileNotFoundError("release folder needs ed_visits.csv and rowmap_ed_visits.csv")
+        raise FileNotFoundError("release needs ed_visits.csv and a row map (release dir, --scoring-dir or --rowmap)")
     protected, rowmap = _csv(prot_path), load_rowmap(rowmap_path)
     original = _csv(kit / "data" / DOMAIN / f"{TABLE}.csv")
     identity = load_identity(kit, DOMAIN, TABLE)
@@ -52,12 +59,22 @@ def main(argv=None) -> int:
     ap.add_argument("--release", required=True, type=Path)
     ap.add_argument("--label", required=True)
     ap.add_argument("--out", required=True, type=Path)
+    ap.add_argument("--scoring-dir", type=Path, help="folder holding rowmap_<table>.csv (e.g. <out>.scoring)")
+    ap.add_argument("--rowmap", action="append", default=[], metavar="TABLE=PATH", help="explicit row map for a table")
     a = ap.parse_args(argv)
+    rowmaps = {}
+    for item in a.rowmap:
+        table, sep, path = item.partition("=")
+        if not sep or not table or not path:
+            print("attacker: refused: bad --rowmap", file=sys.stderr)
+            return 2
+        rowmaps[table] = Path(path)
     try:
-        res = run(a.kit, a.release, a.label)
-    except (FileNotFoundError, KeyError, ValueError) as e:
+        res = run(a.kit, a.release, a.label, a.scoring_dir, rowmaps)
+    except (FileNotFoundError, KeyError, ValueError, MappingError) as e:
         print(f"attacker: refused: {type(e).__name__}", file=sys.stderr)
         return 2
     a.out.parent.mkdir(parents=True, exist_ok=True)
     a.out.write_text(json.dumps(res, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return 0
+

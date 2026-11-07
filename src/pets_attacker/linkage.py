@@ -99,6 +99,9 @@ def _interval_one(raw: str):
         if re.fullmatch(r"\d{4}-\d{2}-\d{2}", raw):
             a = pd.Timestamp(raw)
             return a.to_datetime64(), (a + pd.Timedelta(days=1)).to_datetime64()
+        if re.fullmatch(r"\d{4}-\d{2}-\d{2}[T ]\d{2}:00", raw):  # hour bucket (ts.hour)
+            a = pd.Timestamp(raw)
+            return a.to_datetime64(), (a + pd.Timedelta(hours=1)).to_datetime64()
         if re.match(r"\d{4}-\d{2}-\d{2}[T ]\d{1,2}:\d{2}", raw):
             a = pd.Timestamp(raw)
             if a.tzinfo is not None:
@@ -148,6 +151,24 @@ def _age_one(raw: str, birth: bool):
         return None
 
 
+_MONTH_HOUR = re.compile(r"(\d{4})-(\d{2})-01T(\d{2}):00")
+
+
+def _month_hour_keys(col: pd.Series) -> np.ndarray:
+    """year*10^4+month*10^2+hour for ts.month_hour cells (YYYY-MM-01THH:00), else -1."""
+    out = np.full(len(col), -1, dtype=np.int64)
+    for i, raw in enumerate(col.fillna("").astype(str).str.strip().tolist()):
+        m = _MONTH_HOUR.fullmatch(raw)
+        if m:
+            out[i] = int(m.group(1)) * 10_000 + int(m.group(2)) * 100 + int(m.group(3))
+    return out
+
+
+def _hour_keys(a0, a1) -> np.ndarray:
+    hours = pd.date_range(pd.Timestamp(a0).floor("h"), pd.Timestamp(a1), freq="h")
+    return (hours.year * 10_000 + hours.month * 100 + hours.hour).to_numpy(dtype=np.int64)
+
+
 class Matcher:
     """Index a protected table once; ask for the candidate rows of each adversary record."""
 
@@ -158,7 +179,9 @@ class Matcher:
         for i, q in enumerate(qis):
             col = protected[q.prot[0]]
             if q.kind == "exact":
-                self.d[i] = np.array([_norm(v) for v in col.tolist()], dtype=object)
+                vals = np.array([_norm(v) for v in col.tolist()], dtype=object)
+                known = set(vals) - {"", "other"}  # released places; "other" = grouped non-top-N
+                self.d[i] = (vals, known)
             elif q.kind == "sex":
                 self.d[i] = np.array(["" if _blank(v) else _SEX.get(str(v).strip().lower(), "") for v in col.tolist()], dtype=object)
             elif q.kind == "postcode":
@@ -166,7 +189,7 @@ class Matcher:
             elif q.kind == "age":
                 self.d[i] = _age_interval(col, q.prot[0])
             elif q.kind == "time":
-                self.d[i] = parse_interval(col)
+                self.d[i] = parse_interval(col) + (_month_hour_keys(col),)
             elif q.kind == "name":
                 full = protected[list(q.prot)].fillna("").astype(str).agg(" ".join, axis=1).tolist()
                 index: dict = {}
@@ -207,7 +230,12 @@ class Matcher:
                 a = _norm(v) if q.kind == "exact" else ("" if _blank(v) else _SEX.get(str(v).strip().lower(), ""))
                 if not a:
                     continue
-                mask &= (self.d[i] == a) | (self.d[i] == "")
+                if q.kind == "exact":
+                    vals, known = self.d[i]
+                    ok = (vals == a) | (vals == "") | ((vals == "other") & (a not in known))
+                else:
+                    ok = (self.d[i] == a) | (self.d[i] == "")
+                mask &= ok
             elif q.kind == "postcode":
                 v = row.get(q.adv[0])
                 a = re.sub(r"\D", "", "" if _blank(v) else str(v))
@@ -239,12 +267,16 @@ class Matcher:
                 before, after = q.window if q.window else (24, 24)
                 a0 = (t0 - pd.Timedelta(hours=before)).to_datetime64()
                 a1 = (t1 + pd.Timedelta(hours=after) - (pd.Timedelta(1, 'ns') if t1 > t0 else pd.Timedelta(0))).to_datetime64()
-                s, e = self.d[i]
-                known = ~np.isnat(s)
+                s, e, mh = self.d[i]
+                known = ~np.isnat(s) & (mh < 0)
                 ok = np.ones(self.n, bool)
                 ok[known] = (s[known] <= a1) & (np.maximum(e[known], s[known]) >= a0)
+                is_mh = mh >= 0
+                if is_mh.any():
+                    ok[is_mh] = np.isin(mh[is_mh], _hour_keys(a0, a1))
                 mask &= ok
             used += 1
         return np.flatnonzero(mask), used
+
 
 
