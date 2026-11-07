@@ -12,12 +12,20 @@ class Frame:
     gold: dict  # record_id -> list of {start,end,label}; [] when gold-absent
     conversation_of: dict = field(default_factory=dict)  # record_id -> conversation id
     gold_dropped: dict = field(default_factory=lambda: {"ids": 0, "spans": 0})  # gold for ids not in texts
+    turn_meta: dict = field(default_factory=dict)  # record_id -> (seq, speaker); conversation order + speaker
+
+    def meta(self, tid) -> tuple:
+        return self.turn_meta.get(tid, ("", ""))
+
+    def order_key(self, tid) -> tuple:
+        seq = self.meta(tid)[0]
+        return (self.conversation_of.get(tid, ""), (0, int(seq), "") if seq.isdigit() else (1, 0, seq), tid)
 
 
 def build_frame(turns, conversations, gold, split: str = "train") -> Frame:
     """turns: iterable of {turn_id, conversation_id, text}; conversations: {conversation_id, split}."""
     keep = {c["conversation_id"] for c in conversations if c["split"] == split}
-    texts, g, conv = {}, {}, {}
+    texts, g, conv, meta = {}, {}, {}, {}
     for t in turns:
         if t["conversation_id"] not in keep:
             continue
@@ -25,7 +33,8 @@ def build_frame(turns, conversations, gold, split: str = "train") -> Frame:
         texts[tid] = t["text"] if isinstance(t["text"], str) else ""
         g[tid] = [dict(s) for s in gold.get(tid, [])]
         conv[tid] = t["conversation_id"]
-    return Frame(texts=texts, gold=g, conversation_of=conv)
+        meta[tid] = (str(t.get("seq") or ""), str(t.get("speaker") or ""))
+    return Frame(texts=texts, gold=g, conversation_of=conv, turn_meta=meta)
 
 
 def load_spans(path) -> dict:
@@ -80,4 +89,5 @@ def subset(frame: Frame, ids) -> Frame:
         texts={i: frame.texts[i] for i in ids},
         gold={i: frame.gold.get(i, []) for i in ids},
         conversation_of={i: frame.conversation_of[i] for i in ids},
+        turn_meta={i: frame.turn_meta[i] for i in ids if i in frame.turn_meta},
     )

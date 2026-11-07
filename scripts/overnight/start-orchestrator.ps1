@@ -22,6 +22,8 @@ param(
   [string]$Agent = 'build',
   [string]$Title,
   [int]$StaleMinutes = 25,
+  # First prompt for the new session. Default: resume-prompt.md (test-handover.ps1 passes a harmless one).
+  [string]$PromptFile,
   [switch]$Force,
   [switch]$DryRun
 )
@@ -32,6 +34,7 @@ $HbPath = Join-Path $StateDir 'heartbeat.json'
 $StatePath = Join-Path $StateDir 'watchdog-state.json'
 $LockPath = Join-Path $StateDir 'orchestrator.lock'
 $PromptPath = Join-Path $PSScriptRoot 'resume-prompt.md'
+if ($PromptFile) { $PromptPath = $PromptFile }
 $HbScript = Join-Path $PSScriptRoot 'heartbeat.ps1'
 $NowUtc = (Get-Date).ToUniversalTime()
 $tag = $(if ($DryRun) { '[DRYRUN] ' } else { '' })
@@ -123,7 +126,9 @@ if ($blockers.Count -gt 0 -and -not $Force) {
 # ---------- build requests ----------
 $body = [ordered]@{ title = $Title; agent = $Agent; model = (Parse-Model $Model); location = [ordered]@{ directory = $RepoRoot } } | ConvertTo-Json -Compress -Depth 4
 $header = "[start-orchestrator $($NowUtc.ToString('o'))] Fresh orchestrator start. Previous tracked orchestrator: $(if ($oldId) { $oldId } else { 'none' }) (do not use it). Your first action: run scripts/overnight/heartbeat.ps1 -Phase resume -ClaimSession.`n`n"
-$text = $header + (Get-Content -Raw $PromptPath)
+# A custom -PromptFile is sent verbatim: the header tells the session to write the LIVE heartbeat, which a test must not do.
+# ReadAllText, not Get-Content: a bare Get-Content string carries PSPath note properties that ConvertTo-Json serialises.
+if ($PromptFile) { $text = [IO.File]::ReadAllText($PromptPath, [Text.Encoding]::UTF8) } else { $text = $header + (Get-Content -Raw $PromptPath) }
 $promptBody = @{ text = $text; delivery = 'queue' } | ConvertTo-Json -Compress
 
 if ($DryRun) {
@@ -153,6 +158,16 @@ Write-JsonAtomic $StatePath ([ordered]@{ step = 0; last_action_utc = $null; sess
 $res = OcApi @('post', "/api/session/$newId/prompt", '--data', $promptBody)
 if (-not $res) { Write-Error "prompt to $newId failed; session exists but has no brief (the watchdog will nudge it, or re-run with -Force)"; exit 1 }
 Write-Output "sent resume-prompt.md to $newId (delivery=queue)"
+
+# Retire the old orchestrator explicitly: a finishing child can wake an interrupted parent session, and there must never
+# be two orchestrators. The retirement notice is queued, so it is the first thing the old session reads if anything wakes it.
+if ($Force -and $oldId -and $oldId -ne $newId) {
+  $retire = "RETIRED at $((Get-Date).ToString('HH:mm')) EET: you have been replaced by orchestrator session $newId (heartbeat.json now names it). " +
+            "Do NOT dispatch, review, merge, close, comment, push or edit anything from now on, even if a subagent reports back to you. " +
+            "Reply with the single word 'retired' and end your turn. The new orchestrator picks up your in-flight sessions via the API."
+  $rb = @{ text = $retire; delivery = 'queue' } | ConvertTo-Json -Compress
+  if (OcApi @('post', "/api/session/$oldId/prompt", '--data', $rb)) { Write-Output "queued retirement notice to old orchestrator $oldId" } else { Write-Output "WARN: could not queue retirement notice to $oldId" }
+}
 Write-Output ''
 Write-Output "Session id: $newId"
 Write-Output "Attach in the TUI:  cd `"$RepoRoot`"; opencode --session $newId"

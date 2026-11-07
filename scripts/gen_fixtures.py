@@ -6,13 +6,20 @@ names, sized so the required utility tasks (H-U2/4/6/7/8, CS-U1/3/4/5) run and s
 Every value comes from vocabularies defined in this file and one seeded PRNG. The script reads no
 input file and no environment variable, so the same code always writes byte-identical CSVs.
 
-    python scripts/gen_fixtures.py [--out tests/fixtures/minikit]
+    python scripts/gen_fixtures.py [--out tests/fixtures/minikit] [--refusals-out DIR] [--manifest-out DIR]
+    python scripts/gen_fixtures.py --all     # also rewrite tests/fixtures/refusals and manifest/release
+
+The refusal fixtures (hand-made synthetic values) and the manifest release (via
+tests/fixtures/manifest/build_fixture.py) are covered by tests/gen_fixtures/test_refusal_manifest_fixtures.py,
+which fails if the committed files drift from this generator.
 """
 
 from __future__ import annotations
 
 import argparse
 import csv
+import importlib.util
+import json
 import random
 import unicodedata
 from collections import Counter
@@ -557,6 +564,202 @@ def _customer_service(dest: Path, rng: random.Random, used_hetu: set[str]) -> No
     _write(out / "turns.csv", TURN_COLUMNS, turn_rows)
 
 
+# --------------------------------------------------------------------------- refusal fixtures (#78)
+# Hand-made synthetic values only. Tokens are arbitrary 64-hex strings, not derived from any kit row.
+DEFAULT_REFUSALS_OUT = Path(__file__).resolve().parents[1] / "tests" / "fixtures" / "refusals"
+DEFAULT_MANIFEST_OUT = Path(__file__).resolve().parents[1] / "tests" / "fixtures" / "manifest" / "release"
+MANIFEST_BUILDER = Path(__file__).resolve().parents[1] / "tests" / "fixtures" / "manifest" / "build_fixture.py"
+
+VISIT_TOKENS = [
+    "06619ba0591cf75e7556a1378416802045f643f6137df32012b91a27e6bd72f8",
+    "4d53348646a9d95170d328d9bae67678222657ce64c0da30321f0f96f88298a4",
+    "74fd3c06c6fcf03e5b7addbabd218d7036af91f1865488e5492f4d35d49e54dd",
+]
+NOTE_TOKENS = [
+    "8ca52710c8f77ad36a5fa2c52e4a2863e2190b69280b6ef158e4d04c5d130592",
+    "61732e3dac1df1d4fda199c40118161eeb70b8796632e65f0ea12ea49fa77c01",
+    "c23165370b97817086e1f736565480498662ee69b29afc50a6f7bcc124be7d1c",
+]
+PLANTED_HEX64 = "9393f686aecfd69f08d63f8b81be86cd43f0019c1f1e608cebdf9fc62cf03c42"
+VISIT_HEADER = ["visit_token", "age_band", "arrival_ts", "municipality_group", "los_minutes"]
+VISIT_BODY = [
+    ["30-34", "2025-03-01T14:00", "north", "125"],
+    ["90+", "2025-02-01T08:00", "south", "40"],
+    ["5-9", "2025-01-01T23:00", "other", "300"],
+]
+NOTE_HEADER = ["note_token", "visit_token", "note_text"]
+NOTE_TEXTS = ["Potilas tuli [PERSON_1] kanssa, kipu rinnassa.", "Patient reports fever since yesterday.", ""]
+
+REFUSAL_CONTRACT = {
+    "files": {
+        "notes.csv": {
+            "columns": {
+                "note_text": {"form": "text", "params": {"nullable": True}},
+                "note_token": {"form": "hex64", "params": {}},
+                "visit_token": {"form": "hex64", "params": {}},
+            },
+            "required": ["note_token", "visit_token"],
+        },
+        "visits.csv": {
+            "columns": {
+                "age_band": {"form": r"^(\d{1,2}-\d{1,2}|90\+)$", "params": {}},
+                "arrival_ts": {"form": r"^\d{4}-\d{2}-01T\d{2}:00$", "params": {}},
+                "los_minutes": {"form": "integer", "params": {}},
+                "municipality_group": {"form": "enum", "params": {"values": ["north", "other", "south"]}},
+                "visit_token": {"form": "hex64", "params": {}},
+            },
+            "required": ["visit_token", "age_band"],
+        },
+    },
+    "qi": [{"column": "age_band", "derived_from": "date_of_birth", "table": "visits"}],
+    "tokens": [
+        {"column": "visit_token", "scope": "release", "table": "visits"},
+        {"column": "note_token", "scope": "release", "table": "notes"},
+        {"column": "visit_token", "scope": "release", "table": "notes"},
+    ],
+}
+
+
+def _violation(file: str, column, locations: list[int]) -> dict:
+    return {"column": column, "count": 1, "file": file, "locations": locations}
+
+
+def _refusal_cases() -> dict[str, dict]:
+    """Each case: expected.json content plus the two tables (header, rows)."""
+    visits = [VISIT_HEADER, [[VISIT_TOKENS[i]] + VISIT_BODY[i] for i in range(3)]]
+    notes_rows = [[NOTE_TOKENS[i], VISIT_TOKENS[i], NOTE_TEXTS[i]] for i in range(3)]
+    notes = [NOTE_HEADER, notes_rows]
+
+    def with_note(i: int, text: str) -> list:
+        rows = [list(r) for r in notes_rows]
+        rows[i][2] = text
+        return [NOTE_HEADER, rows]
+
+    def visits_with(mutate) -> list:
+        header, rows = list(VISIT_HEADER), [list(r) for r in visits[1]]
+        mutate(header, rows)
+        return [header, rows]
+
+    def add_column(name: str, values: list[str]):
+        def mutate(header, rows):
+            header.append(name)
+            for r, v in zip(rows, values):
+                r.append(v)
+        return mutate
+
+    def rename_first(header, rows):
+        header[0] = "visit_id"
+
+    def raw_birth_date(header, rows):
+        rows[2][1] = "1984-05-17"
+
+    cases = {
+        "valid": ({"failing": {}, "refused": False}, visits, notes),
+        "card_in_cell": (
+            {"failing": {"rescan.payment-cards": [_violation("notes.csv", "note_text", [1])]},
+             "planted": "4111 1111 1111 1111", "refused": True},
+            visits, with_note(1, "Maksoi kortilla 4111 1111 1111 1111 eilen."),
+        ),
+        "empty_table": (
+            {"failing": {"release.empty-tables": [_violation("notes.csv", None, [])]}, "refused": True},
+            visits, [NOTE_HEADER, []],
+        ),
+        "extra_column": (
+            {"failing": {"contract.columns": [_violation("visits.csv", "unlisted-column#5", [])]}, "refused": True},
+            visits_with(add_column("postcode", ["20100"] * 3)), notes,
+        ),
+        "hex64_outside_token": (
+            {"failing": {"release.token-hex64": [_violation("notes.csv", "note_text", [0])]},
+             "planted": PLANTED_HEX64, "refused": True},
+            visits, with_note(0, f"Ref {PLANTED_HEX64} attached."),
+        ),
+        "raw_birth_date_in_band": (
+            {"failing": {"contract.forms": [_violation("visits.csv", "age_band", [2])]},
+             "planted": "1984-05-17", "refused": True},
+            visits_with(raw_birth_date), notes,
+        ),
+        "renamed_identifier_column": (
+            {"failing": {"contract.columns": [
+                _violation("visits.csv", "unlisted-column#0", []),
+                _violation("visits.csv", "visit_token", []),
+            ]}, "refused": True},
+            visits_with(rename_first), notes,
+        ),
+        "row_map_column": (
+            {"failing": {
+                "contract.columns": [_violation("visits.csv", "unlisted-column#5", [])],
+                "release.row-maps": [_violation("visits.csv", "protected_row", [])],
+            }, "refused": True},
+            visits_with(add_column("protected_row", ["0", "1", "2"])), notes,
+        ),
+    }
+    return {name: {"expected": e, "visits": v, "notes": n} for name, (e, v, n) in cases.items()}
+
+
+def _write_json(path: Path, obj) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes((json.dumps(obj, indent=2, sort_keys=True) + "\n").encode("utf-8"))
+
+
+def generate_refusals(dest) -> Path:
+    """Write ``contract.json`` and one ``<case>/{expected.json,release/{visits,notes}.csv}`` per case."""
+    dest = Path(dest)
+    _write_json(dest / "contract.json", REFUSAL_CONTRACT)
+    for name, case in sorted(_refusal_cases().items()):
+        _write_json(dest / name / "expected.json", case["expected"])
+        _write(dest / name / "release" / "visits.csv", *case["visits"])
+        _write(dest / name / "release" / "notes.csv", *case["notes"])
+    return dest
+
+
+def generate_manifest(dest) -> Path:
+    """Write the manifest fixture release by running the committed, deterministic ``build_fixture.build``."""
+    dest = Path(dest)
+    spec = importlib.util.spec_from_file_location("manifest_fixture_builder", MANIFEST_BUILDER)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    mod.build(dest)
+    return dest
+
+
+REFUSALS_STATIC = frozenset({".gitattributes", "README.md"})  # hand-written, not generator output
+
+
+def _tree(folder: Path, skip=frozenset()) -> dict[str, bytes]:
+    return {
+        p.relative_to(folder).as_posix(): p.read_bytes()
+        for p in sorted(folder.rglob("*"))
+        if p.is_file() and p.relative_to(folder).as_posix() not in skip
+    }
+
+
+def drift(generate_fn, committed, skip=frozenset()) -> list[str]:
+    """Problems between ``committed`` and a fresh ``generate_fn`` run: missing, extra and changed files.
+
+    An empty list means byte-identical. A missing ``committed`` folder is itself a problem.
+    """
+    import tempfile
+
+    committed = Path(committed)
+    if not committed.is_dir():
+        return [f"missing folder: {committed}"]
+    with tempfile.TemporaryDirectory() as tmp:
+        fresh = _tree(generate_fn(Path(tmp) / "fresh"))
+    have = _tree(committed, skip)
+    problems = [f"missing: {n}" for n in sorted(fresh.keys() - have.keys())]
+    problems += [f"extra: {n}" for n in sorted(have.keys() - fresh.keys())]
+    problems += [f"changed: {n}" for n in sorted(fresh.keys() & have.keys()) if fresh[n] != have[n]]
+    return problems
+
+
+def check_refusals(committed=DEFAULT_REFUSALS_OUT) -> list[str]:
+    return drift(generate_refusals, committed, REFUSALS_STATIC)
+
+
+def check_manifest(committed=DEFAULT_MANIFEST_OUT) -> list[str]:
+    return drift(generate_manifest, committed)
+
+
 # --------------------------------------------------------------------------- entry points
 def generate(dest) -> Path:
     """Write the synthetic mini-kit under ``dest`` (health/ and customer_service/). Idempotent."""
@@ -570,8 +773,26 @@ def generate(dest) -> Path:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--out", type=Path, default=DEFAULT_OUT, help="destination folder")
+    parser.add_argument("--refusals-out", type=Path, default=None,
+                        help="also write the refusal fixtures here")
+    parser.add_argument("--manifest-out", type=Path, default=None,
+                        help="also write the manifest fixture release here")
+    parser.add_argument("--all", action="store_true",
+                        help="regenerate minikit, refusals and manifest at their committed locations")
+    parser.add_argument("--check", action="store_true",
+                        help="exit 1 if the committed refusals or manifest fixtures differ from a fresh run")
     args = parser.parse_args(argv)
+    if args.check:
+        problems = check_refusals() + check_manifest()
+        print("\n".join(problems))
+        return 1 if problems else 0
+    refusals_out = args.refusals_out or (DEFAULT_REFUSALS_OUT if args.all else None)
+    manifest_out = args.manifest_out or (DEFAULT_MANIFEST_OUT if args.all else None)
     generate(args.out)
+    if refusals_out:
+        generate_refusals(refusals_out)
+    if manifest_out:
+        generate_manifest(manifest_out)
     return 0
 
 

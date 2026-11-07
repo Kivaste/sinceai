@@ -93,6 +93,22 @@ git log --oneline -20 <integration-branch>
 
 Then read the newest entries in `docs/decision-log.md`, and uninstall the task.
 
+## Utilization monitor (maximum parallelism)
+
+The watchdog only keeps the orchestrator alive; it does not notice an orchestrator that is busy but leaves work undispatched. `utilization-check.ps1` does, every 5 minutes (scheduled task `sinceai-utilization-monitor`, 14 h, 2-minute limit; it is separate from the watchdog and never touches its state).
+
+- **Idle work** = (a) open `ready-for-agent` issues with no open native blockers (`issues/<n>/dependencies/blocked_by`), no live session whose title references them and no branch ahead of integration → *dispatch implementer*; (b) `origin/ticket/*` branches ahead of `integration/pets-release` whose issue is open, with no live session referencing them and a last commit older than 5 minutes → *dispatch review, or merge*.
+- Session titles are classified implement / fix / review / merge (child sessions only). `#NN` is issue NN; a bare `NN` (or `22B`) is ticket NN, mapped through `.scratch/local-spec/issue-map.json`. Branches: `ticket/fuNN-*` is issue NN, `ticket/NN-*` is ticket NN. Excluded: issue #1 (spec), issue #32 / `ticket/31-llm` and `ticket/story-drafts` (side lane), `ready-for-human`, closed issues.
+- **Nudge** (queued through `send-to-orchestrator.ps1`, one message listing every item and asking to dispatch all of them in one turn) only if idle work exists, mean CPU (3 samples) < 70%, live implement+fix sessions < 16, the last nudge was ≥ 10 minutes ago (`utilization-state.json`), phase is not `done`, and the orchestrator is not inactive-and-idle > 25 minutes (that case is the watchdog's).
+- Every run writes one line to `.scratch/local-overnight/utilization.log`: action, reason, CPU, sessions by kind, idle items. Errors are logged and exit 3; a named mutex prevents overlapping runs. If a flagged item is blocked in a way GitHub doesn't record, the orchestrator should add the blocker as an issue dependency so the monitor stops flagging it.
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/overnight/utilization-check.ps1 -DryRun   # decision + message, nothing sent
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/overnight/install-utilization.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/overnight/uninstall-utilization.ps1
+Get-Content .scratch/local-overnight/utilization.log -Tail 10
+```
+
 ## Failure modes
 
 | Covered | How |
