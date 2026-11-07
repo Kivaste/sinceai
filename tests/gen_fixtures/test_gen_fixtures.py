@@ -246,7 +246,7 @@ def test_identifiers_live_in_namespaces_the_kit_cannot_use(tmp_path, gen):
 
     checks = [
         ("health", "ed_visits", "visit_id", r"SYNV-\d{6}$"),
-        ("health", "ed_visits", "patient_hetu", r"\d{6}[-A]9\d\d[0-9A-Y]$"),
+        ("health", "ed_visits", "patient_hetu", r"\d{6}[BY]9\d\d[0-9A-Y]$"),
         ("health", "ed_visits", "home_address", r"Synth[A-Za-z]+ \d+$"),
         ("health", "ed_visits", "attending_physician_id", r"SYNP-\d{3}$"),
         ("health", "lab_results", "lab_id", r"SYNL-\d{6}$"),
@@ -255,7 +255,7 @@ def test_identifiers_live_in_namespaces_the_kit_cannot_use(tmp_path, gen):
         ("health", "published_weekly_stats", "stat_id", r"SYNS-\d{6}$"),
         ("customer_service", "customers", "customer_id", r"SYNC-\d{5}$"),
         ("customer_service", "customers", "customer_number", r"SYN\d{7}$"),
-        ("customer_service", "customers", "hetu", r"\d{6}[-A]9\d\d[0-9A-Y]$"),
+        ("customer_service", "customers", "hetu", r"\d{6}[BY]9\d\d[0-9A-Y]$"),
         ("customer_service", "customers", "street_address", r"Synth[A-Za-z]+ \d+$"),
         ("customer_service", "customers", "contract_number", r"SYN-CN-\d{6}$"),
         ("customer_service", "conversations", "conversation_id", r"SYNQ-\d{5}$"),
@@ -296,7 +296,7 @@ def _iban_valid(value: str) -> bool:
 
 
 def _century(sign: str) -> int:
-    return {"+": 1800, "-": 1900, "A": 2000}[sign]
+    return {"+": 1800, "-": 1900, "A": 2000, "Y": 1900, "B": 2000}[sign]
 
 
 def test_every_hetu_is_valid_and_matches_the_birth_date(tmp_path, gen):

@@ -255,10 +255,10 @@ def _phone(rng: random.Random) -> str:
 
 
 def _hetu(rng: random.Random, dob: datetime, female: bool, used: set[str]) -> str:
-    """Valid, unique identity code for one person: real century sign, the person's own birth date,
+    """Valid, unique identity code for one person: century sign from the newer B-F / U-Y sets (valid, rarely used), the person's own birth date,
     mod-31 check character, and an individual number in the reserved 900-999 test range."""
     base = f"{dob.day:02d}{dob.month:02d}{dob.year % 100:02d}"
-    sign = "A" if dob.year >= 2000 else "-"
+    sign = "B" if dob.year >= 2000 else "Y"  # 2023 century signs (B-F = 2000s, U-Y = 1900s)
     start = rng.randint(900, 998)
     for step in range(100):
         ind = 900 + (start - 900 + step) % 99
