@@ -98,11 +98,13 @@ def test_without_a_miss_nothing_is_masked(world, tmp_path):
 # Each plant is synthetic, missed by the redactor, and found only by the named cell-level check.
 
 ORIGINAL_NAME = "Zorblax Quindarius"  # a synthetic customers.full_name
+ORIGINAL_HANDLE = "ADMIN_77"  # a synthetic customers.customer_number, shaped like a placeholder
 
 
 def _with_customers(kit):
     (kit / "data" / "customer_service" / "customers.csv").write_text(
-        f"customer_id,full_name\nu1,{ORIGINAL_NAME}\n", encoding="utf-8", newline="")
+        f"customer_id,customer_number,full_name\nu1,{ORIGINAL_HANDLE},{ORIGINAL_NAME}\n", encoding="utf-8",
+        newline="")
 
 
 @pytest.mark.parametrize(("text", "label"), [
@@ -130,6 +132,48 @@ def test_the_cell_checks_read_decoded_span_values_not_json_syntax(world, tmp_pat
     assert texts["t6"] == "my username is [USERNAME_1] thanks"
     assert [s["label"] for s in spans["t6"]] == ["USERNAME"]
     assert idx["customerServiceEval"]["maskedTurns"] == 0
+
+
+# Round 2 (Sol Standards r1): only recognised placeholders [<LABEL>_<n>] (LABEL in the fixed table, n >= 1) are
+# hidden from the cell rescans; any other bracketed shape stays visible, so an original value inside it is caught.
+@pytest.mark.parametrize(("shape", "label"), [
+    ("[ZORBLAX_QUINDARIUS]", "PERSON"),            # an original value written as a bracketed word
+    ("[ZORBLAX_QUINDARIUS_7]", "PERSON"),          # invented label with a number
+    ("[ZORBLAXQUINDARIUS]", "PERSON"),             # bare bracketed word
+    ("[ZORBLAX_QUINDARIUS_0]", "PERSON"),          # bad numbering
+    (f"[{ORIGINAL_HANDLE}]", "ACCOUNT_NUMBER"),    # a real-looking handle in placeholder shape (Grok r1)
+], ids=["bracketed-original", "invented-label", "bare-word", "bad-numbering", "handle"])
+def test_an_unrecognised_bracketed_identifier_is_caught(world, tmp_path, shape, label):
+    text = f"ask {shape} now"
+    kit, rel = _kit_with_turn(world, tmp_path, "t6", text)
+    _with_customers(kit)
+    _p, texts, spans, idx = _bundle(kit, rel, tmp_path / "pets_submission")
+    assert shape not in texts["t6"], "an original value inside an unrecognised bracket shape shipped"
+    assert spans["t6"] == [{"start": 0, "end": len(text), "label": label}]
+    assert idx["customerServiceEval"]["maskedTurns"] == 1
+
+
+def test_a_duplicate_key_spans_line_refuses(world, tmp_path, monkeypatch):
+    """Both eval files are read back with the repo's strict readers; a duplicate key (which json.loads silently
+    collapses) refuses. The packager never writes one, so the serialiser is wrapped (build seam)."""
+    from pets_release.submission import cs_eval
+
+    real = cs_eval._serialise
+
+    def duplicated(texts, spans):
+        csv_bytes, jsonl = real(texts, spans)
+        lines = jsonl.decode("utf-8").splitlines(keepends=True)
+        lines[0] = lines[0].replace('{"record_id":', '{"record_id":"x","record_id":', 1)
+        return csv_bytes, "".join(lines).encode("utf-8")
+
+    monkeypatch.setattr(cs_eval, "_serialise", duplicated)
+    kit, rel = world
+    out = tmp_path / "s"
+    with pytest.raises(SubmissionRefused) as e:
+        build_submission(kit=Kit(kit), releases=[rel], out=out, master=MasterKey.from_text(TEST_KEY), partial=True,
+                         scorecard=lambda *a, **k: pytest.fail("must refuse before scoring"))
+    assert e.value.code == "cs_eval_format"
+    assert not out.exists()
 
 
 def test_an_original_value_as_a_turn_id_refuses(world, tmp_path):
@@ -182,6 +226,23 @@ def test_a_text_check_missing_from_the_registry_refuses(world, tmp_path, monkeyp
 
     kept = tuple(c for c in all_checks() if c.name != "text.ip-addresses")
     assert _refused(world, tmp_path, monkeypatch, kept) == "cs_eval_checks_unavailable"
+
+
+@pytest.mark.parametrize("label", ["crc32:customers.full_name", "md5:customers.no_such_column", "md5:"],
+                         ids=["unknown-algorithm", "unknown-column", "empty"])
+def test_an_unmapped_checker_label_refuses(world, tmp_path, monkeypatch, label):
+    """A hit whose label has no span-label mapping refuses (never guessed as SECRET, Grok r1). The production
+    unkeyed-hashes check only emits mapped labels, so it is replaced at the registry by one that flags the first
+    eval turn with ``label``."""
+    from pets_release.checks.records import Outcome, Violation
+    from pets_release.checks.registry import all_checks
+
+    def flag(release, contract, context):
+        return Outcome(n=1, violations=(Violation("producer.unkeyed-hashes", label, "high",
+                                                  "customer_service_eval_redacted.csv", "text", 1, (0,)),))
+
+    patched = tuple(replace(c, run=flag) if c.name == "producer.unkeyed-hashes" else c for c in all_checks())
+    assert _refused(world, tmp_path, monkeypatch, patched) == "cs_eval_unlabelled_hit"
 
 
 def test_a_text_check_that_errors_refuses(world, tmp_path, monkeypatch):

@@ -56,9 +56,13 @@ _CELL_CONTRACT = {
 # Cell-check labels that are not span labels -> the span label of a whole masked turn.
 _CHECK_LABELS = {"RAW_TIMESTAMP": "DATE", "HEX64_OUTSIDE_TOKEN": "SECRET"}
 # producer.original-values labels are "<table>.<column>" of a CS-S1 direct identifier -> its span label.
-_IDENTIFIER_LABELS = {"full_name": "PERSON", "agent_name": "PERSON", "street_address": "ADDRESS", "email": "EMAIL",
-                      "phone": "PHONE", "iban": "IBAN", "hetu": "NATIONAL_ID", "customer_id": "ACCOUNT_NUMBER",
-                      "customer_number": "ACCOUNT_NUMBER", "contract_number": "ACCOUNT_NUMBER"}
+_IDENTIFIER_LABELS = {
+    "conversations.agent_name": "PERSON", "conversations.customer_id": "ACCOUNT_NUMBER",
+    "customers.full_name": "PERSON", "customers.street_address": "ADDRESS", "customers.email": "EMAIL",
+    "customers.phone": "PHONE", "customers.iban": "IBAN", "customers.hetu": "NATIONAL_ID",
+    "customers.customer_id": "ACCOUNT_NUMBER", "customers.customer_number": "ACCOUNT_NUMBER",
+    "customers.contract_number": "ACCOUNT_NUMBER"}
+_HASH_ALGORITHMS = ("md5", "sha1", "sha256")  # producer.unkeyed-hashes labels: "<algo>:<table>.<column>"
 _BRACKETED = re.compile(r"\[[A-Z_0-9]+\]")  # candidate placeholders; parse_placeholder decides
 INDEPENDENCE_NOTE = ("reduced for masked turns: the production checks that flagged a turn also decided its masking, "
                      "so no independent check confirms those turns (D29/D37)")
@@ -189,28 +193,25 @@ def masking_effect(kit: Kit, turns, convs, passes, context: dict) -> dict:
 
 def _text_checks() -> list:
     """The gate's registered text checks, every one of them; any missing or an untrustworthy registry refuses."""
-    from pets_release.checks import registry
     from pets_release.checks.text import HEALTH_CHECK, TEXT_CHECKS
 
-    want = {*TEXT_CHECKS, HEALTH_CHECK}
-    try:
-        got = {c.name: c for c in registry.all_checks() if c.name in want}
-    except registry.RegistryError:
-        raise SubmissionRefused("cs_eval_checks_unavailable") from None
-    if set(got) != want:
-        raise SubmissionRefused("cs_eval_checks_unavailable")
-    return [got[n] for n in sorted(want)]
+    return _registered({*TEXT_CHECKS, HEALTH_CHECK})
 
 
 def _cell_checks() -> list:
     """The gate's cell-level production checks that apply to the eval bytes (#148): every per-label rescan, raw
     timestamps, 64-hex outside tokens, original-value survival and unkeyed hashes. Key material is scanned over
     the whole bundle by the packager; the structural/contract/k checks have no eval-file counterpart."""
-    from pets_release.checks import registry
     from pets_release.checks.cells.labels import LABEL_CHECKS
     from pets_release.checks.producer.values import ORIGINAL_VALUES, UNKEYED_HASHES
 
-    want = {*LABEL_CHECKS, ORIGINAL_VALUES, UNKEYED_HASHES}
+    return _registered({*LABEL_CHECKS, ORIGINAL_VALUES, UNKEYED_HASHES})
+
+
+def _registered(want: set) -> list:
+    """The registered checks named in ``want``, sorted; any missing or an untrustworthy registry refuses."""
+    from pets_release.checks import registry
+
     try:
         got = {c.name: c for c in registry.all_checks() if c.name in want}
     except registry.RegistryError:
@@ -235,37 +236,55 @@ def producer_context(kit: Kit) -> dict:
 
 
 _SPAN_KEYS = {"start", "end", "label"}
+_PLACEHOLDER_MASK = " ¦ "  # the gate text normaliser's mask: neither a hit nor a bridge between two fragments
+
+
+def _hide_placeholders(text: str) -> str:
+    """``text`` with each recognised placeholder replaced by the mask; anything else is left as written."""
+    return _BRACKETED.sub(lambda m: _PLACEHOLDER_MASK if parse_placeholder(m.group(0)) else m.group(0), text)
 
 
 def _decode_line(line: str) -> tuple[str, list]:
-    """(record_id, decoded strings of the spans) of one spans line, decoded strictly; refuses any other shape."""
+    """(record_id, spans) of one spans line, decoded with the repo's strict JSON loader (duplicate keys and
+    NaN/Infinity refuse); refuses any other shape."""
+    from pets_release.manifest.canonical import loads_strict
+
     try:
-        rec = json.loads(line)
+        rec = loads_strict(line)
     except ValueError:
         raise SubmissionRefused("cs_eval_format") from None
     if not isinstance(rec, dict) or set(rec) != {"record_id", "spans"} or not isinstance(rec["record_id"], str) \
             or not isinstance(rec["spans"], list):
         raise SubmissionRefused("cs_eval_format")
-    strings = []
     for s in rec["spans"]:
         if not isinstance(s, dict) or set(s) != _SPAN_KEYS or not isinstance(s["label"], str) \
                 or any(type(s[k]) is not int for k in ("start", "end")):
             raise SubmissionRefused("cs_eval_format")
-        strings.append(s["label"])
-    return rec["record_id"], strings
+    return rec["record_id"], rec["spans"]
 
 
 def _parse_export(redacted: bytes, spans: bytes) -> tuple[list, list, list]:
-    """(turn rows, spans lines, decoded spans lines) as a reader of the exact bytes recovers them; refuses
-    anything ambiguous. Decoded lines undo the JSON escaping (``\\t``, ``\\u001f``) that hides text from a raw scan."""
+    """(turn rows, spans lines, decoded spans lines) as the repo's strict readers recover the exact bytes (CSV: every
+    column a string, no NA inference; JSONL: the strict loader); refuses anything ambiguous, including bytes that do
+    not re-serialise identically from what was read. Decoded lines undo the JSON escaping (``\\t``, ``\\u001f``)
+    that hides text from a raw scan."""
+    import pandas as pd
+
     try:
-        rows = list(csv.reader(io.StringIO(redacted.decode("utf-8"), newline="")))
+        df = pd.read_csv(io.BytesIO(redacted), dtype=str, keep_default_na=False, na_filter=False, encoding="utf-8")
         lines = spans.decode("utf-8").split("\n")
-    except UnicodeDecodeError:
+    except (UnicodeDecodeError, ValueError):  # pandas' ParserError and EmptyDataError are ValueErrors
         raise SubmissionRefused("cs_eval_format") from None
-    if not rows or rows[0] != EXPORT_HEADER or any(len(r) != 2 for r in rows[1:]) or lines[-1] != "":
+    if list(df.columns) != EXPORT_HEADER or lines[-1] != "":
         raise SubmissionRefused("cs_eval_format")
-    return rows[1:], lines[:-1], [_decode_line(x) for x in lines[:-1]]
+    rows = df.values.tolist()
+    lines = lines[:-1]
+    decoded = [_decode_line(x) for x in lines]
+    texts = {t: x for t, x in rows}
+    spans_of = dict(decoded)
+    if len(texts) != len(rows) or len(spans_of) != len(lines) or _serialise(texts, spans_of) != (redacted, spans):
+        raise SubmissionRefused("cs_eval_format")  # what was read is not exactly what is published
+    return rows, lines, decoded
 
 
 def _write_csv(path: Path, header: list, rows: list) -> None:
@@ -303,17 +322,16 @@ def _scan(redacted: bytes, spans: bytes, order: dict, checks: tuple, context: di
         id_rows = [[t] for t in ids] + [[d[0]] for d in decoded]
         _write_csv(stage / _IDS_FILE, ["id"], id_rows)
         # The raw spans lines and every decoded string value in them.
-        values = [[s] for d in decoded for s in d[1]]
+        values = [[s["label"]] for d in decoded for s in d[1]]
         _write_csv(stage / _SPANS_FILE, ["line"], [[x] for x in lines] + values)
         found = _run(stage, _CONTRACT, {"phase": "gate"}, text_checks)
         # The cell-level production checks (#148) on the redacted file's exact bytes and the same ID view. They are
         # per-value validators, so they read the spans file's decoded string values, never its JSON syntax (a raw
         # '"label":"USERNAME","start":' reads as a username). A turn-text hit is reported against the turns file
-        # so one masking path handles both stages. Placeholders are masked the way the gate's text normaliser masks
-        # them (they are the fixed placeholder table, not content: "username is [USERNAME_1]" is no username).
-        from pets_release.checks.text._normalise import MASK as GATE_MASK
-        from pets_release.checks.text._normalise import PLACEHOLDER_RE
-        _write_csv(cells / _EXPORT_FILE, EXPORT_HEADER, [[t, PLACEHOLDER_RE.sub(GATE_MASK, x)] for t, x in rows])
+        # so one masking path handles both stages. Only recognised placeholders ([<LABEL>_<n>], LABEL in the fixed
+        # table, n >= 1) are hidden ("username is [USERNAME_1]" is no username); every other bracketed shape stays
+        # visible to every check.
+        _write_csv(cells / _EXPORT_FILE, EXPORT_HEADER, [[t, _hide_placeholders(x)] for t, x in rows])
         _write_csv(cells / _IDS_FILE, ["id"], id_rows)
         _write_csv(cells / _SPANS_FILE, ["line"], values)
         for v in _run(cells, _CELL_CONTRACT, {"phase": "gate", **context}, cell_checks):
@@ -327,9 +345,11 @@ def _span_label(check_label: str) -> str:
     """The span label (and so the placeholder type) of a checker hit; an unmapped label refuses (fail closed)."""
     if check_label in PLACEHOLDER_TYPE:
         return check_label
-    if ":" in check_label:  # producer.unkeyed-hashes: "<algo>:<table>.<column>", an identifier's digest
-        return "SECRET"
-    label = _CHECK_LABELS.get(check_label) or _IDENTIFIER_LABELS.get(check_label.rpartition(".")[2])
+    algo, sep, ident = check_label.partition(":")
+    if sep:  # an unkeyed digest of a known identifier column is a SECRET; anything else is unmapped
+        label = "SECRET" if algo in _HASH_ALGORITHMS and ident in _IDENTIFIER_LABELS else None
+    else:
+        label = _CHECK_LABELS.get(check_label) or _IDENTIFIER_LABELS.get(check_label)
     if label is None:
         raise SubmissionRefused("cs_eval_unlabelled_hit")
     return label
