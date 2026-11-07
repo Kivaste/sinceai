@@ -50,10 +50,9 @@ revision it was built at (see its manifest); docs-only commits after it do not c
   share of PERSONS. Never mix them up. Per-person k is authoritative (D22: the scorecard is blind to the renamed `age_band`).
 - A baseline task the kit publishes as null (B2-k H-U6/H-U7/H-U8) renders `—`: that baseline cannot answer it.
 
-**Pending #52:** the measurer fixes (origin/ticket/fu52-measurer) are merged into this branch and the numbers above were
-produced with them, but #52 is not yet on the integration branch. Affected numbers, to re-fill if #52 changes before
-it merges: every `measured.baselines.*` row, every `measured.privacy.before.*` value, and the `person_k.*` rows.
-Utility before/after (H-U2..H-U8) and the gate/inventory counts are not affected.
+**#52:** the numbers above were produced with the #52 measurer (origin/ticket/fu52-measurer, round 3). If #52 changes
+again before it merges, re-fill every `measured.baselines.*` row, every `measured.privacy.before.*` value and the
+`person_k.*` rows. `k_below_5_share` is row-weighted over the tables scored for k.
 
 **Residual risks to say out loud:** the D22 scorecard defect (Beat 6); linkage-attackers and attribute-inference rates
 are `not_measured` in this release (no attacker run is wired), so no linkage rate is claimed; recipient-mode verify
