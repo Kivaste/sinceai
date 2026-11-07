@@ -1,6 +1,7 @@
 """Planted content-free artefacts tested through the real close-gate CLI."""
 
 import json
+import shutil
 from pathlib import Path
 
 import pytest
@@ -33,7 +34,8 @@ def evidence(close_gate):
     manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
     gate_path.write_text(json.dumps(gate), encoding="utf-8")
     (folder / "run.log").write_text(
-        f"revision={head}\nrun exit=0\nverify exit=0\nverify-full exit=0\n", encoding="utf-8")
+        f"revision={head}\nRELEASED: release (scoring: release.scoring)\n"
+        "run exit=0\nverify exit=0\nverify-full exit=0\n", encoding="utf-8")
     body = body.replace(fields["Artefacts"], str(folder)).replace(
         "N/A: test-only encoding fixture", "gate 1/1 pass; verify (limited) exit 0; verify --full exit 0")
     return run, body, folder, manifest_path, gate_path
@@ -142,7 +144,8 @@ def test_claimed_verify_needs_revision_bound_exit_zero(evidence, defect):
         text += "revision=" + "0" * 40 + "\n"
     log.write_text(text, encoding="utf-8")
     if defect == "missing-log":
-        log.rename(folder / "planted.log")
+        log.unlink()
+        (folder / "planted.log").write_text("verify exit=0\nverify-full exit=0\n", encoding="utf-8")
     result = run("body-file", body)
     assert result.returncode == 1, result.stdout + result.stderr
     assert "verify" in result.stdout
@@ -161,12 +164,13 @@ def test_na_cannot_hide_gate_or_verify_claims(close_gate, claim):
     assert "N/A must not claim gate/verify outcomes" in result.stdout
 
 
-def test_documentation_report_with_explicit_gate_verify_na_passes(close_gate):
-    """Rule: existing documentation-only reports need no release records."""
+def test_embedded_gate_verify_na_is_not_an_explicit_exemption(close_gate):
+    """Rule: only an Outcome starting N/A: reason exempts machine records."""
     run, body = close_gate
     result = run("body-file", body.replace("N/A: test-only encoding fixture",
         "Quick start commands exited 0. Gate/verify: N/A, documentation-only scope."))
-    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "release manifest missing" in result.stdout
 
 
 def test_na_ticket_still_passes(close_gate):
@@ -205,12 +209,13 @@ def test_regular_file_is_not_an_artefact_folder(evidence):
     assert "Artefacts folder" in result.stdout
 
 
-def test_tooling_real_run_without_release_claims_needs_no_release_records(close_gate):
-    """Rule: release records are required for release claims, not tooling runs."""
+def test_outcome_without_gate_verify_keywords_still_requires_records(close_gate):
+    """Rule: avoiding gate/verify wording cannot bypass machine validation."""
     run, body = close_gate
     result = run("body-file", body.replace("N/A: test-only encoding fixture",
         "Close-gate CLI read-only: issue checks exited 0; evidence gaps=0."))
-    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "release manifest missing" in result.stdout
 
 
 def test_not_applicable_checks_are_named_and_not_counted_as_passes(evidence):
@@ -229,7 +234,7 @@ def test_not_applicable_checks_are_named_and_not_counted_as_passes(evidence):
 
 
 @pytest.mark.parametrize("tier", ["limited", "full"])
-def test_only_claimed_verify_tier_is_required_in_utf16_log(evidence, tier):
+def test_limited_always_required_and_full_required_when_claimed_in_utf16_log(evidence, tier):
     run, body, folder, _, _ = evidence
     log = folder / "run.log"
     text = log.read_text(encoding="utf-8")
@@ -238,7 +243,6 @@ def test_only_claimed_verify_tier_is_required_in_utf16_log(evidence, tier):
         text = text.replace("verify-full exit=0\n", "")
     else:
         body = body.replace("; verify (limited) exit 0", "")
-        text = text.replace("verify exit=0\n", "")
     log.write_text(text, encoding="utf-16")
     result = run("body-file", body)
     assert result.returncode == 0, result.stdout + result.stderr
@@ -254,4 +258,79 @@ def test_second_planted_manifest_cannot_replace_wrong_revision(evidence):
     manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
     result = run("body-file", body)
     assert result.returncode == 1, result.stdout + result.stderr
-    assert "exactly one release manifest required" in result.stdout
+    assert "manifest revision" in result.stdout
+
+
+def test_multi_release_folder_validates_every_manifest(evidence):
+    """Seam: CLI; several bound releases are not an ambiguous identity."""
+    run, body, folder, manifest_path, gate_path = evidence
+    for name in ("measured-default", "measured-acme"):
+        (folder / name).mkdir()
+        (folder / (name + ".scoring")).mkdir()
+        shutil.copyfile(manifest_path, folder / name / manifest_path.name)
+        shutil.copyfile(gate_path, folder / (name + ".scoring") / gate_path.name)
+        text = (folder / "run.log").read_text(encoding="utf-8").replace(
+            "RELEASED: release (", f"RELEASED: {name} (")
+        (folder / (name + ".log")).write_text(text, encoding="utf-8")
+    body = body.replace("; verify (limited) exit 0; verify --full exit 0", "")
+    result = run("body-file", body)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout.count("pass=1 not_applicable=0 fail=0 error=0") == 3
+
+
+@pytest.fixture
+def shared_logs(evidence):
+    run, body, folder, manifest_path, gate_path = evidence
+    head = json.loads(manifest_path.read_text(encoding="utf-8"))["bindings"]["toolRevision"]
+    for name in ("measured-default", "measured-acme"):
+        (folder / name).mkdir()
+        (folder / (name + ".scoring")).mkdir()
+        shutil.copyfile(manifest_path, folder / name / manifest_path.name)
+        shutil.copyfile(gate_path, folder / (name + ".scoring") / gate_path.name)
+    manifest_path.parent.rename(folder / "release-health-s1")
+    gate_path.parent.rename(folder / "release-health-s1.scoring")
+    log = folder / "run.log"
+    text = log.read_text(encoding="utf-8").replace("RELEASED: release (", "RELEASED: release-health-s1 (")
+    log.unlink()
+    (folder / "arbitrary-health.log").write_text(text, encoding="utf-16")
+    (folder / "measured.log").write_text(
+        f"revision={head}\ndirty=False\n"
+        "== measured-default\nRELEASED: measured-default (measured)\n"
+        "wire exit=0\nverify exit=0\nverify-full exit=0\n"
+        "== measured-acme\nRELEASED: measured-acme (measured)\n"
+        "wire exit=0\nverify exit=0\nverify-full exit=0\n", encoding="utf-16")
+    return run, body, folder
+
+
+def test_shared_log_binds_each_release_by_identity(shared_logs):
+    """Seam: CLI; #120's three releases use two arbitrarily named logs."""
+    run, body, _ = shared_logs
+    result = run("body-file", body)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout.count("pass=1 not_applicable=0 fail=0 error=0") == 3
+
+
+def test_planted_extra_manifest_with_wrong_revision_fails(evidence):
+    run, body, folder, manifest_path, _ = evidence
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["bindings"]["toolRevision"] = "0" * 40
+    other = folder / "planted" / "privacy_manifest.json"
+    other.parent.mkdir()
+    other.write_text(json.dumps(manifest), encoding="utf-8")
+    result = run("body-file", body)
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "manifest revision" in result.stdout
+
+
+def test_no_verify_claim_still_requires_limited_tier_record(shared_logs):
+    """Seam: CLI; gate-only prose cannot hide a release's missing tier."""
+    run, body, folder = shared_logs
+    body = body.replace("; verify (limited) exit 0; verify --full exit 0", "")
+    log = folder / "measured.log"
+    text = log.read_text(encoding="utf-16")
+    # The first release is good; the second must not borrow its tier record.
+    text = text.rsplit("verify exit=0\n", 1)
+    log.write_text("".join(text), encoding="utf-16")
+    result = run("body-file", body)
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "verify (limited) exit 0 record missing" in result.stdout

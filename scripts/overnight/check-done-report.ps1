@@ -65,7 +65,7 @@ Need ($b -match '(?mi)affected-tests\.ps1[^\r\n]*(?:\u2192|->)\s*exit\s*0') 'Aff
 
 # Real-run evidence: release claims require machine records, not just prose.
 $rev = Field 'Revision'; $art = Field 'Artefacts'; $outc = Field 'Outcome'
-$notApplicable = $outc -and ($outc -match '^N/A:\s*\S' -or $outc -match '(?i)\bgate/verify:\s*N/A[,;:]?\s*\S')
+$notApplicable = $outc -and $outc -match '^N/A:\s*\S'
 if ($notApplicable) {
   $claimsOutcome = $outc -match '(?i)\b(?:gate|verify)(?:\s*(?:\((?:limited|full)\)|--full|limited|full))?[\s:=]+(?:\d|exit\b|pass(?:ed)?\b|fail(?:ed)?\b|error\b|success(?:ful(?:ly)?)?\b)'
   Need (-not $claimsOutcome) 'Real-run evidence: N/A must not claim gate/verify outcomes'
@@ -74,8 +74,7 @@ else {
   Need ($rev -and $head -and $rev.StartsWith($head.Substring(0, [Math]::Min(12, $head.Length)))) 'Real-run evidence: Revision missing or not the reported Head'
   Need ($art -and (Test-Path -LiteralPath $art -PathType Container)) "Real-run evidence: Artefacts folder missing or not found on disk ($art)"
   Need ($outc -and $outc -notmatch '(?i)\b(skipp|error|not run|unknown|timeout)') 'Real-run evidence: Outcome missing or reports skipped/errored/not-run checks'
-  $releaseClaims = $outc -match '(?i)(?<![\w-])(?:gate|verify)\b'
-  if ($releaseClaims -and $art -and (Test-Path -LiteralPath $art -PathType Container)) {
+  if ($art -and (Test-Path -LiteralPath $art -PathType Container)) {
     try {
       $evidenceOutput = @(& python (Join-Path $PSScriptRoot 'check-release-evidence.py') $art $head $outc 2>$null)
       $evidenceExit = $LASTEXITCODE

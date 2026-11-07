@@ -93,43 +93,67 @@ def gate_records(manifest, gate):
 def verify_records(folder, release_name, head, outcome):
     claims = list(re.finditer(r"\bverify(?:\s*(--full|\(full\)|-full|full|\(limited\)|limited))?",
                               outcome, flags=re.IGNORECASE))
-    if not claims:
-        return []
-    tiers = {"full" if match[1] and "full" in match[1].lower() else "limited" for match in claims}
-    # Log identity follows the release, not whichever filename happens to exist.
-    log_name = "run.log" if release_name == "release" else release_name.removeprefix("release-") + ".log"
-    try:
-        raw = (folder / log_name).read_bytes()
-        text = raw.decode("utf-16" if raw.startswith((b"\xff\xfe", b"\xfe\xff")) else "utf-8-sig")
+    # Limited verification is mandatory; prose can add full, never remove limited.
+    tiers = {"limited"} | {"full" for match in claims if match[1] and "full" in match[1].lower()}
+    # Scripts may share a log across releases. Filename is not identity: a
+    # revision header and a RELEASED marker bind subsequent tier records.
+    exits = {tier: [] for tier in tiers}
+    for path in sorted(folder.glob("*.log")):
+        try:
+            raw = path.read_bytes()
+            text = raw.decode("utf-16" if raw.startswith((b"\xff\xfe", b"\xfe\xff")) else "utf-8-sig")
+        except (OSError, UnicodeError):
+            return ["verify evidence log unreadable"]
         lines = text.splitlines()
-    except (OSError, UnicodeError):
-        return ["verify evidence log missing or unreadable"]
-    revisions = [line for line in lines if line.startswith("revision=")]
-    if revisions != [f"revision={head}"]:
-        return ["verify evidence revision missing, ambiguous or not Head"]
+        revisions = [line for line in lines if line.startswith("revision=")]
+        if revisions != [f"revision={head}"]:
+            continue
+        current = None
+        revision_seen = False
+        section = None
+        for line in lines:
+            if line == f"revision={head}":
+                revision_seen = True
+                current = None
+            elif line.startswith("== "):
+                section = line[3:]
+                current = None
+            elif line.startswith("RELEASED: "):
+                match = re.fullmatch(r"RELEASED: (.+?) \([^\r\n]*\)", line)
+                current = match[1] if match and revision_seen else None
+                if section is not None and current != section:
+                    current = None
+            elif current == release_name:
+                match = re.fullmatch(r"(verify|verify-full) exit=(.*)", line)
+                if match:
+                    tier = "full" if match[1] == "verify-full" else "limited"
+                    if tier in exits:
+                        exits[tier].append(match[2])
     problems = []
     for tier in sorted(tiers):
-        prefix = "verify-full exit=" if tier == "full" else "verify exit="
-        exits = [line for line in lines if line.startswith(prefix)]
-        if exits != [prefix + "0"] or lines.index(exits[0]) < lines.index(revisions[0]):
+        if exits[tier] != ["0"]:
             problems.append(f"verify ({tier}) exit 0 record missing, ambiguous or unsuccessful")
     return problems
 
 
 def check(folder, head, outcome):
-    # One release identity, never a recursive search for a planted passing file.
+    # Every immediate release is an obligation, never a candidate to pick by
+    # presence. Validate all revision bindings before reading paired reports.
     manifests = sorted(folder.glob("*/privacy_manifest.json"))
-    if len(manifests) != 1:
-        return ["exactly one release manifest required"]
-    manifest = read_json(manifests[0])
-    if manifest["bindings"]["toolRevision"] != head:
+    if not manifests:
+        return ["release manifest missing"]
+    bound = [(path, read_json(path)) for path in manifests]
+    if any(manifest["bindings"]["toolRevision"] != head for _, manifest in bound):
         return ["manifest revision does not equal Head"]
-    gate_path = manifests[0].parent.with_name(manifests[0].parent.name + ".scoring") / "gate_report.json"
-    try:
-        gate_records(manifest, read_json(gate_path))
-    except (OSError, ValueError, KeyError, TypeError):
-        return ["gate report missing, unreadable, malformed or unsuccessful"]
-    return verify_records(folder, manifests[0].parent.name, head, outcome)
+    problems = []
+    for path, manifest in bound:
+        gate_path = path.parent.with_name(path.parent.name + ".scoring") / "gate_report.json"
+        try:
+            gate_records(manifest, read_json(gate_path))
+        except (OSError, ValueError, KeyError, TypeError):
+            problems.append("gate report missing, unreadable, malformed or unsuccessful")
+        problems.extend(verify_records(folder, path.parent.name, head, outcome))
+    return problems
 
 
 if __name__ == "__main__":
