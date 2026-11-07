@@ -399,8 +399,27 @@ class _Search:
         return sorted(n for n, m in lifts.items() if not _num(m.get("lift")) or m["lift"] > bound)
 
     def lift_regress(self, ev, cur_ev) -> list:
-        """Feasibility (D64): attributes a candidate pushes over the bound that the current plan holds under it."""
-        return sorted(set(self.lift_over(ev["lift"])) - set(self.lift_over(cur_ev["lift"])))
+        """Feasibility (D64), the one rule every adoption path uses: bounded attributes that make the candidate
+        inadmissible. Unmeasured in the candidate: always. Under the bound (or not released) in the current plan:
+        the candidate must stay at or under the bound. Over the bound in the current plan: the candidate must not
+        raise it (a move that lowers it is allowed, so the search can still repair it). Schema names only."""
+        if self.p.attribute_lift is None:
+            return []
+        bound = self.p.attribute_lift["max_lift"]
+        cur = cur_ev["lift"]
+        out = []
+        for n, m in sorted(ev["lift"].items()):
+            v = m.get("lift")
+            if not _num(v):
+                out.append(n)
+                continue
+            c = cur[n].get("lift") if n in cur else None
+            if n not in cur or (_num(c) and c <= bound):
+                if v > bound:
+                    out.append(n)
+            elif _num(c) and v > c:
+                out.append(n)
+        return out
 
     def lift_text(self, lifts) -> str:
         if self.p.attribute_lift is None:
@@ -543,7 +562,7 @@ class _Search:
             over = self.lift_regress(ev, cur_ev)  # D64: never adopt a move over the attribute-lift bound
             ok = not fails and better and not over
             why = "adopted" if ok else ("rejected (" + ",".join(fails) + " below 0.9 or not ok)" if fails
-                                        else "rejected (attribute lift above bound: " + ",".join(over) + ")" if over
+                                        else "rejected (attribute lift over the bound, raised or unmeasured: " + ",".join(over) + ")" if over
                                         else "rejected (objective not improved)")
             step = self.record(cand, cur, ev, ok, f"{desc}: {why}")
             if ok:
@@ -613,7 +632,7 @@ class _Search:
                 over = self.lift_regress(ev, cur_ev)
                 ok = not fails and not over and self.objective(ev, cand) < self.objective(cur_ev, cur)
                 why = "adopted" if ok else ("rejected (" + ",".join(fails) + " below 0.9 or not ok)" if fails
-                                            else "rejected (attribute lift above bound: " + ",".join(over) + ")"
+                                            else "rejected (attribute lift over the bound, raised or unmeasured: " + ",".join(over) + ")"
                                             if over else "rejected (objective not improved)")
                 step = self.record(cand, cur, ev, ok, f"sacrifice: rung step {self._name(self.unit_of[key])} "
                                    f"{rs['from']} -> {rs['to']} (k shortfall {at_from:.6f} above budget): {why}")
@@ -676,7 +695,7 @@ class _Search:
         fails = self.failing(ev["results"])
         why = "adopted" + (" (sacrificing " + ",".join(fails) + ")" if fails else "") if ok else (
             "rejected (" + ",".join(fails) + " not a waivable sacrifice)" if fails and not self.sacrifice_ok(
-                ev["results"], cand, base) else "rejected (attribute lift above bound: " + ",".join(over) + ")"
+                ev["results"], cand, base) else "rejected (attribute lift over the bound, raised or unmeasured: " + ",".join(over) + ")"
             if over else "rejected (objective not improved)")
         step = self.record(cand, cur, ev, ok, f"{desc}: {why}")
         return (ev if ok else None), step

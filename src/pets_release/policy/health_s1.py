@@ -85,8 +85,14 @@ LIFT_REASON = (f"lift = attacker accuracy / base-rate accuracy, at most {MAX_LIF
                f"icd10 at chapter level scores H-U4 0.0, so it stays at 3 characters, and every QI is already at "
                f"the coarsest rung its check accepts; there the diagnosis lift measures just above 2.0, and 2.0 "
                f"refused the release. los_minutes, which the search can coarsen, is binned at least "
-               f"{LOS_BIN_MIN} minutes wide (10-minute bins measure about 3.4). A plan over the bound is refused, "
+               f"{LOS_BIN_MIN} minutes wide (10-minute bins measure 2.92). A plan over the bound is refused, "
                f"never relaxed")
+# The manifest note; the run appends the enforced lift per attribute (run.narrative, from the search's final step).
+LIFT_NOTE = (f"D64: lift (accuracy from QIs / base rate) at most {MAX_LIFT} for icd10_primary, los_minutes, else "
+             f"refused. Producer population estimator (exact QI classes, all released rows), not #139's sampled "
+             f"attacker (rates: attribute-inference-redteam). icd10 lift disclosed, not reduced: chapter "
+             f"coding fails H-U4. los: {LOS_BIN_MIN}-min bins, H-U2 0.967 -> 0.920 (kit). 2.0 refused the real "
+             f"kit; {MAX_LIFT}, just above the irreducible icd10 lift, awaits a human decision.")
 ATTRIBUTE_LIFT = {"max_lift": MAX_LIFT, "attacker": LIFT_ATTACKER, "reason": LIFT_REASON,
                   "attributes": [{"table": "ed_visits", "column": "icd10_primary"},
                                  {"table": "ed_visits", "column": "los_minutes"}]}
@@ -115,11 +121,7 @@ POLICY = ScenarioPolicy(
                  "withheld 0.043 / 0.099. The search withholds it and the cap holds, so the justified non-QI "
                  "fallback is not taken; H-U7 0.983 either way (it selects CRP by test_code)"},
         {"id": "attribute-lift-bound", "status": "open",
-         "note": f"D64: attribute-inference lift (attacker accuracy / base-rate accuracy) at most {MAX_LIFT} for "
-                 f"icd10_primary and los_minutes, enforced by the search on the released visits (search log, final "
-                 f"step); a plan over it is refused. icd10 stays at 3 characters (chapter level fails H-U4); "
-                 f"los_minutes is binned at least {LOS_BIN_MIN} minutes wide. Residual against the stated attacker: "
-                 f"each attribute-inference-redteam-<column> entry over its -baseline entry"},
+         "note": LIFT_NOTE},
         {"id": "lab-test-code-identity", "status": "open",
          "note": "test_code is released exact for H-U7 and is not a detector QI, yet carries the same test identity "
                  "as test_name: a person's set of lab tests could single them out to someone who knows their test "

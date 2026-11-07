@@ -66,7 +66,8 @@ GROUPS = 4
 def grouped_qis(folder):
     """Edit the synthetic copy so the search can reach k: each person gets one of GROUPS QI profiles (the
     birth date, municipality and arrival hour of a representative row), consistent across that person's visits;
-    arrival dates and every other column are left as they are."""
+    arrival dates are left as they are, and ``dominant_sensitive`` then gives 3 of every 5 visits one diagnosis
+    and one stay (D64: the lift bound); every other column is left as it is."""
     import pandas as pd
 
     p = folder / "ed_visits.csv"

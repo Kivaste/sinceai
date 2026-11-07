@@ -48,6 +48,19 @@ def _pet(entry) -> tuple[str, dict]:
     return "generalisation", {"rung": rung}
 
 
+LIFT_NOTE_ID = "attribute-lift-bound"  # D64 (#157)
+
+
+def _lift_text(search) -> str:
+    """The enforced producer lift per bounded attribute (aggregates, 4 decimals) from the search's final step."""
+    al = (search or {}).get("attribute_lift")
+    if not al:
+        return " Enforced lift: not measured (no search run)."
+    parts = [f"{n.split('.', 1)[-1]} {m['lift']:.4f}" if isinstance(m.get("lift"), (int, float)) else
+             f"{n.split('.', 1)[-1]} not measured" for n, m in sorted(al["measured"].items())]
+    return " Enforced lift: " + (", ".join(parts) or "no bounded attribute released") + "."
+
+
 def build_narrative(*, policy, plan, scenario_ids, suppression: dict, k: int, purpose=None, search=None,
                     rung_steps=()) -> dict:
     """``purpose``: the accepted ``run.purpose.PurposeResult``; fills ``measured.utility`` and the sacrifices'
@@ -95,9 +108,10 @@ def build_narrative(*, policy, plan, scenario_ids, suppression: dict, k: int, pu
         scored = scores(purpose)
     risks = []
     for n in policy.residual_notes:
-        rate = not_measured(n["note"][:500]) if n["status"] == "open" else {"status": "not_applicable",
-                                                                            "reason": "no free text released"}
-        risks.append({"risk": n["id"], "kind": "note", "label": None, "rate": rate, "description": n["note"][:500]})
+        text = n["note"] + (_lift_text(search) if n["id"] == LIFT_NOTE_ID else "")
+        rate = not_measured(text[:500]) if n["status"] == "open" else {"status": "not_applicable",
+                                                                       "reason": "no free text released"}
+        risks.append({"risk": n["id"], "kind": "note", "label": None, "rate": rate, "description": text[:500]})
     risks += [
         {"risk": "recipient-verify-tamper-limitation", "kind": "tamper_limitation", "label": None,
          "rate": {"status": "not_applicable", "reason": "structural property of recipient-mode verify"},
