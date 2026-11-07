@@ -130,7 +130,10 @@ _NEN_MIN_STEM = 4
 # or "e" there is a North-Germanic -sen name (Hansen, Petersen, Thoresen).
 _NEN_STEM_VOWELS = "aiouyäö"
 # Phone extension ("x12", "ext. 3", "extension 3") and everything after it.
-_EXTENSION = re.compile(r"(?<![^\W\d_])(?:extension|ext|x)(?![^\W\d_]).*", re.IGNORECASE | re.DOTALL)
+_EXTENSION = re.compile(
+    r"(?<=[0-9])[\s.,;:#-]*(?<![^\W\d_])(?:extension|ext|x)(?![^\W\d_]).*",
+    re.IGNORECASE | re.DOTALL,
+)  # only a marker that follows digits of the base number
 
 # Context-only (used by the Pseudonymiser in conversation scope): a word equal
 # to a name already seen in the same conversation plus one of these endings.

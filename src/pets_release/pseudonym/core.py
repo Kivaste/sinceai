@@ -1,4 +1,4 @@
-﻿"""Keyed pseudonyms: HMAC-SHA256 over NUL-separated fields."""
+"""Keyed pseudonyms: HMAC-SHA256 over NUL-separated fields."""
 
 from __future__ import annotations
 
@@ -60,7 +60,7 @@ class Scope:
 
 _AMBIGUOUS = object()
 # Values that must carry an identity; an empty one would share a valid token.
-_NON_EMPTY_LABELS = frozenset({RECORD_KEY, "NATIONAL_ID"})
+_NON_EMPTY_LABELS = frozenset({RECORD_KEY, "NATIONAL_ID", "PHONE"})
 
 
 def _bases(word: str) -> set[str]:

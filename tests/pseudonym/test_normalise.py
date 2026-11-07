@@ -363,3 +363,16 @@ def test_secret_key_eq_and_hash_are_consistent():
     a, b = SecretKey(b"k" * 32, "x"), SecretKey(b"k" * 32, "y")
     assert (a == b) and hash(a) == hash(b)
     assert hash(m) == hash(SecretKey(b"k" * 32, "z"))
+
+
+@pytest.mark.parametrize("a,b", [("x12 040 123 4567", "0401234567"), ("ext 3 0401234567", "0401234567")])
+def test_leading_extension_marker_does_not_swallow_the_number(a, b):
+    assert normalise(a, "PHONE") != ""
+    assert normalise(a, "PHONE") != normalise("x99 0409999999", "PHONE")
+
+
+@pytest.mark.parametrize("value", ["x12", "ext. 5", "extension", "x", "(0)", "n/a"])
+def test_phone_without_national_digits_is_refused_not_a_shared_token(value):
+    p = pseudonymiser_for(MasterKey.from_text(TEST_KEY))
+    with pytest.raises(ValueError):
+        p.token(value, label="PHONE", scope=REL)
