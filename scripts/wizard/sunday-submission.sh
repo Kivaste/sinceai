@@ -282,90 +282,84 @@ write_env SOURCE_ZIP "$SOURCE_ZIP"
 stage "Fill the sinceai.app submission"
 open_url 'https://sinceai.app'
 step "Open your team's submission. Each field below goes on the Windows clipboard in order."
-story_file="$REPO_ROOT/docs/story/01-names-taglines.md"
-recommended=()
-if [[ -f "$story_file" ]]; then
-  # Accept a recommended table row with named columns, or labelled recommended lines.
-  # If the format is ambiguous, never guess the team's choice.
-  parsed=$(python - "$story_file" <<'PY'
-import re
-import sys
-from pathlib import Path
+story_keys=(PROJECT_NAME PROJECT_TAGLINE DESCRIPTION BUILT_WITH)
+story_files=(name.txt tagline.txt description.md built-with.txt)
+REPOSITORY_URL='https://github.com/Kivaste/sinceai'
+video_changed=0
+while true; do
+  # Never read drafts: the finalisation ticket supplies header-free, resolved copy.
+  for index in "${!story_keys[@]}"; do
+    field=${story_keys[$index]}
+    story_file="$REPO_ROOT/docs/story/final/${story_files[$index]}"
+    if [[ -f "$story_file" ]]; then
+      if value=$(python -c 'import sys; from pathlib import Path; print(Path(sys.argv[1]).read_text(encoding="utf-8-sig").strip(), end="")' "$story_file" 2>/dev/null); then
+        printf -v "$field" '%s' "$value"
+      else
+        warn "Cannot read finalised ${story_files[$index]}; fix the file before retrying."
+        printf -v "$field" '%s' ''
+      fi
+    else
+      warn "Missing docs/story/final/${story_files[$index]}; run the story-finalisation ticket first."
+      ask "$field" "Or enter finalised $field manually (not draft copy):"
+    fi
+  done
 
-lines = Path(sys.argv[1]).read_text(encoding="utf-8-sig").splitlines()
-clean = lambda s: re.sub(r"[*`_]", "", s).strip()
-pair = {}
-headers = []
-for line in lines:
-    if "|" in line:
-        cells = [clean(x) for x in line.strip().strip("|").split("|")]
-        lower = [x.casefold() for x in cells]
-        if any(x in ("name", "project", "project name") for x in lower) and "tagline" in lower:
-            headers = lower
-        elif "recommend" in line.casefold() and len(cells) == len(headers) and headers:
-            for key, value in zip(headers, cells):
-                if key in ("name", "project", "project name"):
-                    pair["name"] = value
-                elif key == "tagline":
-                    pair["tagline"] = value
-    if "recommend" in line.casefold():
-        text = clean(line).lstrip("#- ")
-        for key, label in (("name", r"(?:project\s+)?name"), ("tagline", "tagline")):
-            match = re.search(rf"{label}\s*(?:\(recommended\))?\s*:\s*(.+)", text, re.I)
-            if match:
-                pair[key] = re.sub(r"\s*\(?recommended\)?\s*$", "", match[1], flags=re.I).strip()
-if pair.get("name") and pair.get("tagline"):
-    print(pair["name"])
-    print(pair["tagline"])
-PY
-  ) || exit 1
-  if [[ -n "$parsed" ]]; then mapfile -t recommended <<< "$parsed"; fi
-fi
-if (( ${#recommended[@]} == 2 )); then
-  PROJECT_NAME=${recommended[0]}
-  PROJECT_TAGLINE=${recommended[1]}
-else
-  warn 'Could not parse both RECOMMENDED choices. Open docs/story/01-names-taglines.md and copy them manually.'
-  open_url "$(cygpath -w "$story_file")"
-  ask PROJECT_NAME 'Recommended project name (from the file):'
-  ask PROJECT_TAGLINE 'Recommended tagline (from the file):'
-fi
-[[ -n "$PROJECT_NAME" && -n "$PROJECT_TAGLINE" ]] || { warn 'Name and tagline are required.'; exit 1; }
+  # Validate ALL fields before the first clipboard write; never paste partial copy.
+  invalid=0
+  video_invalid=0
+  for field in "${story_keys[@]}" REPOSITORY_URL VIDEO_URL; do
+    value=${!field}
+    field_invalid=0
+    if [[ -z "$value" ]]; then
+      warn "$field is empty; finalised text is required."
+      field_invalid=1
+    fi
+    if [[ "$value" == *'<!--'* || "$value" == *'-->'* || "$value" == *'{{'* || "$value" == *'}}'* ]]; then
+      warn "$field contains an HTML comment marker or unresolved placeholder; finalise it before copying."
+      field_invalid=1
+    fi
+    case "$field" in
+      PROJECT_NAME) limit=80 ;;
+      PROJECT_TAGLINE) limit=140 ;;
+      DESCRIPTION) limit=5000 ;;
+      *) limit=0 ;;
+    esac
+    if (( limit > 0 )); then
+      length=$(printf '%s' "$value" | python -c 'import sys; print(len(sys.stdin.read()))')
+      say "$field: $length characters (maximum $limit)."
+      if (( length > limit )); then
+        warn "$field exceeds its $limit-character limit; copying is blocked."
+        field_invalid=1
+      fi
+    fi
+    if [[ "$field" == VIDEO_URL && "$value" != https://* ]]; then
+      warn 'VIDEO_URL must be an HTTPS URL.'
+      field_invalid=1
+    fi
+    if (( field_invalid )); then
+      invalid=1
+      if [[ "$field" == VIDEO_URL ]]; then video_invalid=1; fi
+    fi
+  done
+  if (( invalid == 0 )); then break; fi
+  warn 'No fields were copied. Fix the finalised files or manual entries, then re-run stage 5.'
+  if ! confirm 'Re-run stage 5 input and validation now?'; then exit 1; fi
+  if (( video_invalid )); then
+    ask VIDEO_URL 'Correct the video URL (HTTPS, no comment markers or placeholders):'
+    video_changed=1
+  fi
+done
+write_env BUILT_WITH "$BUILT_WITH"
+if (( video_changed )); then write_env VIDEO_URL "$VIDEO_URL"; fi
 printf '%s' "$PROJECT_NAME" | clip.exe
 pause 'Paste the project name; press Enter for the tagline.'
 printf '%s' "$PROJECT_TAGLINE" | clip.exe
 pause 'Paste the tagline; press Enter for the description.'
-description_file="$REPO_ROOT/docs/story/02-description.md"
-if [[ -f "$description_file" ]]; then
-  DESCRIPTION=$(python - "$description_file" <<'PY'
-import re
-import sys
-from pathlib import Path
-
-lines = Path(sys.argv[1]).read_text(encoding="utf-8-sig").splitlines()
-while lines and (not lines[0].strip() or lines[0].startswith("#") or
-                 re.search(r"char(?:acter)?[- ]?count|\bcharacters?\s*:", lines[0], re.I)):
-    lines.pop(0)
-print("\n".join(lines).strip(), end="")
-PY
-  ) || exit 1
-else
-  warn 'Description file is missing. Open docs/story/02-description.md and copy the body manually.'
-  open_url "$(cygpath -w "$description_file")"
-  ask DESCRIPTION 'Paste the description body (one line), without its character-count header:'
-fi
-[[ -n "$DESCRIPTION" ]] || { warn 'Description is empty.'; exit 1; }
-description_length=$(printf '%s' "$DESCRIPTION" | python -c 'import sys; print(len(sys.stdin.read()))')
-say "Description: $description_length characters."
-if (( description_length > 5000 )); then warn 'Description exceeds 5,000 characters; shorten it in the form before submitting.'; fi
 printf '%s' "$DESCRIPTION" | clip.exe
 pause 'Paste the description body; press Enter for Built-with.'
-ask BUILT_WITH 'Built-with [default Python, pandas, pytest, OpenCode, Claude; editable]:'
-BUILT_WITH=${BUILT_WITH:-'Python, pandas, pytest, OpenCode, Claude'}
-write_env BUILT_WITH "$BUILT_WITH"
 printf '%s' "$BUILT_WITH" | clip.exe
 pause 'Paste Built-with; press Enter for the repository link.'
-printf '%s' 'https://github.com/Kivaste/sinceai' | clip.exe
+printf '%s' "$REPOSITORY_URL" | clip.exe
 pause 'Paste the repository link; press Enter for the video URL.'
 printf '%s' "$VIDEO_URL" | clip.exe
 pause 'Paste the video URL; press Enter for the final checklist.'
