@@ -1,4 +1,4 @@
-"""Follow-up #89 through the real CLI (seam: `pets-release run` / `pets-release verify`). Synthetic rows only.
+﻿"""Follow-up #89 through the real CLI (seam: `pets-release run` / `pets-release verify`). Synthetic rows only.
 
 Rule: the HEALTH-S1 hand plan releases arrival_ts at ts.month_hour. It moves to ts.hour_of_day (coarser than
 month, sacrifice-only) only as the policy-enumerated rung sacrifice, only when per-person k measured at
@@ -58,7 +58,7 @@ def _manifest(out):
 
 
 def _arrival(out):
-    return pd.read_csv(out / "ed_visits.csv", dtype=str, keep_default_na=False)["arrival_ts"]
+    return pd.read_csv(out / "ed_visits.csv", dtype=str, keep_default_na=False, na_filter=False)["arrival_ts"]
 
 
 def _just(m, column):

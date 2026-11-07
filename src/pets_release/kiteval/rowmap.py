@@ -1,4 +1,4 @@
-"""Row-map validation. A row map is a scoring aid; the kit trusts it blindly, we do not.
+﻿"""Row-map validation. A row map is a scoring aid; the kit trusts it blindly, we do not.
 
 Two strengths of check:
 - Structural (no lineage given): the map covers exactly rows 0..n-1 once each, with distinct,
@@ -41,7 +41,7 @@ def validate_row_map(rowmap, *, protected_rows: int, source_keys: Iterable[str],
                      expected_lineage: Lineage | None = None) -> None:
     """Raise RowMapRejected unless the map is valid (see module docstring)."""
     if isinstance(rowmap, (str, Path)):
-        rowmap = pd.read_csv(rowmap, dtype=str, keep_default_na=False)
+        rowmap = pd.read_csv(rowmap, dtype=str, keep_default_na=False, na_filter=False)
     if not isinstance(rowmap, pd.DataFrame) or any(c not in rowmap.columns for c in COLUMNS):
         raise RowMapRejected("structure")
     rows = rowmap["protected_row"].astype(str).str.strip()
