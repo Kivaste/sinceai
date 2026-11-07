@@ -701,3 +701,17 @@ CS-S1 chain done-report + 4 reviews (23 + #53/#54/#56/#92) -> merge -> #63 -> 25
   - ticket/fu121-readme-examples (#121): approved, with a native blocked-by #117 edge and a comment from 14:40. It is flagged only because of the #129 monitor defect, which is parked until the pin. Not dispatchable.
   - #80 round 1: Sol Standards (high, reproduced on the synthetic minikit), Sol Spec and Grok Spec all CHANGES REQUIRED. A withheld value held by 5 or more rows is exempt from the self-scan. Round 2 is with the Opus implementer (ses_e49de156): drop the frequency exemption, red first. Grok Standards is pending.
 - **Evidence:** issue #121 comment; review sessions ses_e49c2940, ses_e49c27a9, ses_e49c2662.
+
+### Sat 15:52 - train 22 red (#30); #135 filed; #132 round 2; #80 Grok
+
+- **When:** Sat 15:46-15:52 EET
+- **Decision:**
+  1. Train 22 was red on #30 at merged sha ee655fe: fast tier exit 1, 2 failed, 2653 passed. The culprits are two repo-wide guards: raw key bytes read in submission/guards.py (tests/run/test_context_keys.py), and the submission CLI entry point missing from the offline matrix (tests/offline/test_entrypoints.py). Reset, nothing pushed. Round 5 is with the Opus fixer (ses_e49d9d21). pets_submission at 16:00 slips until #30 merges.
+  2. Defect class found twice (train 15 tripped tests/policy; train 22 tripped tests/run and tests/offline guards): affected-tests.ps1 doesn't select repo-wide guard tests. Filed #135 (Sol), parked until the pin (native blocked-by #117). Stopgap: all 8 running implementers were told to also run `tests/policy tests/offline/test_entrypoints.py tests/run/test_context_keys.py` and report its exit code.
+  3. #132 round 1:
+     - Sol Spec: CHANGES REQUIRED (evidence only; the red and mutation exit codes were not cleanly captured).
+     - Sol Standards: CHANGES REQUIRED, high. Any anchored regex is accepted for `text` rungs, which hides a column from the text checks; reproduced with production code. Fail-open in verify.
+     - Both go to the Opus implementer (ses_e49de3e3): a clean rerun at eed24a7, then round 2 (exact `text` form required for text-backed rungs; red at the verify CLI). Grok's two reviews are pending.
+  4. #80: Grok Standards APPROVE (it rates the frequency cut a documented trade-off). Sol Standards high, Sol Spec and Grok Spec all CHANGES REQUIRED. The majority and the issue's Fix line stand, so round 2 continues to remove the exemption.
+- **Why:** Close and merge only on evidence; fail-closed on the verify path before the pin (D46).
+- **Evidence:** merger ses_e49c2c85; review sessions ses_e49bf33d, ses_e49bf194, ses_e49c2aa4; #135.
