@@ -75,3 +75,17 @@ Each entry records:
 - **Decision:** (1) DeepSeek reviews take 25+ min each and ~20 ran at once, many for heads already superseded by fix rounds; interrupted the 11 superseded DeepSeek sessions so current-head reviews get capacity. Rule from now on: a review is dispatched only for a ticket's current head; the old-head review is cancelled when a fix lands. (2) Ticket 15's import guard was turning into an arms race with reviewers (aliases, constants, allowlisted files). Replaced with two simple fail-closed guards (static text rule + runtime import/audit-hook check); runtime-computed import names are a stated residual risk. (3) Ticket 12's implementer tuned rules from frequent kit tokens (seen in ≥10 conversations, no row values displayed): accepted once as aggregate-level; no further tuning from kit-derived tokens. (4) Ticket 08: some "not evaluated" scorecard results are benign for our releases (no released QI overlaps adversary knowledge; text table withheld) and are accepted only from an explicit reason-code allowlist and reported as not_applicable.
 - **Why:** Keep the merge pipeline moving toward the Sat 09:00 story kit; avoid unbounded hardening of a validation-only guard.
 - **Evidence:** session interrupt responses ×11; review verdicts in the ticket threads once closed.
+
+### Sat 02:48 — review convergence rule; first merges
+
+- **When:** Sat 02:48 EET
+- **Decision:** (1) Review rounds were not converging (each GPT round finds a new edge case). From the next round on, a reviewer returns CHANGES REQUIRED only for high-severity defects that break an acceptance criterion, the fail-closed rule, or leak values; everything else is listed as non-blocking and filed as a follow-up issue at merge. (2) Merged 14 (`0008cdc`, 22 tests green) and 01 (`83efaa0`, 62 green); follow-ups #40 and #41 filed; ticket 20 (detector, #21) dispatched on Sonnet once 01 landed. (3) 02 now merges after 04, because the assertion→check binding is enforced by importing 04's map (no duplicated table, no "when importable" fallback).
+- **Why:** Sat 09:00 story kit needs 04/06 → 16/17 → 21 → 22; endless rounds on non-critical edges put that at risk.
+- **Evidence:** #15 and #2 done-reports; follow-up issues #40, #41.
+
+### Sat 02:53 — model switch: GPT reviewer → xai/grok-4.7#medium
+
+- **When:** Sat 02:53 EET
+- **Decision:** `openai/gpt-6.1-sol` returned `subscription_sharing_usage_limit_exceeded`. New ticket reviews pair `opencode-go/deepseek-v4.1-flash` with `xai/grok-4.7#medium` (a third family, not Claude, so still independent of every implementer). GPT reviews already returned stay valid for their heads. Retry GPT for the final integration `/code-review` if the limit has reset.
+- **Why:** Two-family review is mandatory; Grok is the roster's remaining non-Claude family.
+- **Evidence:** 08 r5 GPT review session error.
