@@ -13,6 +13,14 @@ Each entry records:
 
 ## Entries
 
+### Sat 08:20 - STATUS SUMMARY (D16 08:30 checkpoint; only non-append exception)
+
+- **Done:** 50 issues closed. All spec tickets 01-22, 24, 26, 27, 28 and 30 are merged. **Story kit (22) merged `15b2a42` at ~07:50 and integration merged into `main` (`f8665e2`, full suite 2230 passed).** The HEALTH-S1 real-kit release passes the gate (40/40), both verify tiers and pets-eval (composite 0.9695, privacy 1.0, utility 0.9352). Must-fixes merged since 06:00: #52, #55, #57, #58, #59, #60, #64, #70, #75, #76, #82, plus #48.
+- **In flight:** 23 CS-S1 (fixture release green; real-kit gate still refuses on the secret/username checks, owned by #53 r3 and #54 r3, and on #92 split secrets); 25 search (HEALTH-S1 search release passes; re-merging 24's final head); 29 packager (approved; Merge after 23/25); 31 LLM (side lane, 14:00 gate); must-fix wave #61/#62/#84/#71 (in review), #63 (approved; merges after 23), #56 (after #53), #92 (after #54); follow-ups #67/#68 (review), #72-#74, #77/#79.
+- **Parked / human:** #33-#39 (human tasks).
+- **Critical path:** CS-S1 (23) is now the critical path, with 25 and 29 merging after it. Search go/no-go is at 12:00: 25 is green for HEALTH-S1 and its CS-S1 part depends on 23.
+- **Risks:** (1) Reviewer capacity: `opencode-go` (Gemini, Luna) and the opencode free tier (DeepSeek, GLM) are over quota; Sol is back since 08:06 after an auth expiry; only Grok + Sol remain. (2) CS-S1 gate secrets/usernames: the gate and redactor rules are converging, but both are in their 3rd and final review round. (3) The open rule-audit follow-ups (#65, #66, #69, #78, #80, #81, #83, #85, #87-#91, #93, #94) run only on spare capacity unless they touch fail-closed or leak behaviour.
+
 ### Sat 00:15 — planning interview complete; see docs/decisions.md D6–D17
 
 - **When:** Sat 00:15 EET
@@ -159,3 +167,10 @@ Each entry records:
 - **Decision:** (1) `openai/gpt-6.1-sol` now fails with "authentication token is expired" (probe confirmed), and `opencode-go` is over its quota. D13f (human, 07:20 per AGENTS.md) asks for Grok + Sol on every ticket. Until Sol is re-authenticated (#86, ready-for-human), the second reviewer is `opencode/deepseek-v4.1-flash-free` (a non-Claude, non-Grok family that answered the probe). Reviews already returned stand. (2) Must-fix wave from final-review and rule-audit pass 1, dispatched as six implementers grouped by owned files: #59+#60+#58 (verify/run), #61+#62+#84+#71 (producer/context/writer; branched from #57, merges after it), #63 (CS contract), #64+#82 (kiteval/offline guard), #75 (attacker), #70 (detect test). #56 waits on #53 (same files). (3) CS-S1 real-kit gate blockers: the `ipAddresses` assertion stays strict; the CS-S1 release (not the eval redaction file, which follows the gold convention) also redacts private IPs. The redactor's HEALTH coverage is aligned to the gate's own lexicon (redactor matches its independent checker; no kit-derived words). A missing `healthInTextRequired` must fail closed (added to #56). (4) Ticket 23 was continued in a fresh session, because inherited sessions can't be messaged.
 - **Why:** Keep two-family review while two providers are down; clear the fail-open findings before the freeze; make the CS-S1 release pass without weakening an assertion.
 - **Evidence:** probe sessions ses_e4b9b9571ffe8yYDuBvWr5C0qi (Sol, error) and ses_e4b9b922effebMm9j3PKLh68rm (DeepSeek free, ok); issues #56, #58-#64, #70, #71, #75, #82, #84, #86.
+
+### Sat 08:05 - story kit merged; ticket 24 merged; merges #52, #70, #75/#76, 28
+
+- **When:** Sat 07:15-08:05 EET
+- **Decision:** (1) Ticket 22 (story kit, #23) merged `15b2a42` on Grok + DeepSeek approvals (round 3), full suite green on the merged result (2192 passed, 8 skipped). The real-kit HEALTH-S1 release passes both verify tiers, and the story kit is in the out folder. Integration → main merge dispatched (§2 checkpoint). (2) Ticket 24 minimiser merged `faa726c` (round 3, Grok + DeepSeek). Its worktree is kept because 25 builds on it. (3) Merged #52 `d902df0`, #70 `6f6bae6`, #75/#76 `6559731`, 28 `dee7d18`. Follow-up #91 filed. (4) #64/#82 approved, but the merge failed (an import conflict and the new `measure.wire` entry point is not offline-guarded); sent back. #61 wave: Grok found two high fail-open paths in the manifest value scan (unscanned count fields; `bindings`/`signature` skipped wholesale); sent back. (5) #63 approved by both reviewers. It merges after 23, because its branch carries 23's commits. Stitching surfaces 95 split-secret hits in CS-S1, filed as must-fix #92 (redactor, after #54). (6) 29 packager approved by both reviewers; it waits on 23/25 (Merge after).
+- **Why:** Story kit checkpoint; clear the merge queue.
+- **Evidence:** #23, #25, #29, #52, #70, #75, #76 done-reports; `git log --merges origin/integration/pets-release`.
