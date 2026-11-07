@@ -348,7 +348,9 @@ class _Search:
         plan = self.plan_of(cand)
         rv, pk = R.risk_vector(self.p, plan, self.k_view(prot), self.src, self.kspec, self.k)
         if self.k is not None and pk is None:  # #118: under a k target every candidate carries a measured PersonK
-            pk, _ = R.person_k(self.k_view(prot), plan, self.p, self.src, self.kspec, self.k)  # raises if missing
+            pk, _ = R.person_k(self.k_view(prot), plan, self.p, self.src, self.kspec, self.k)
+            if pk is None:
+                raise R.PersonKMissing("PersonK missing: per-person k not measured")
         if self.risk_extra is not None:
             extra = self.risk_extra(plan, prot)
             for c in self.p.risk_vector:
@@ -839,7 +841,9 @@ class _Search:
         units_before, rounds = None, 0
         while True:
             cur = apply_suppression(full, self._expand(dropped_p))
-            pk, _ = R.person_k(cur, plan, self.p, self.src, self.kspec, self.k)  # raises if PersonK is missing
+            pk, _ = R.person_k(cur, plan, self.p, self.src, self.kspec, self.k)
+            if pk is None:  # #118: never a success-shaped break (0 of 0 persons suppressed)
+                raise R.PersonKMissing("PersonK missing: per-person k not measured")
             if units_before is None:
                 units_before = len(pk.per_person) + pk.unidentified
             rows = sorted(set(pk.below_rows) | set(pk.unidentified_rows))
