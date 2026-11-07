@@ -1,0 +1,274 @@
+term,lang,label,match,boundary,notes
+diabete,en,HEALTH,prefix,phrase,condition
+diabetes,fi,HEALTH,prefix,phrase,condition
+tyypin 1,fi,HEALTH,prefix,phrase,condition
+tyypin 2,fi,HEALTH,prefix,phrase,condition
+astma,fi,HEALTH,prefix,phrase,condition
+asthma,en,HEALTH,prefix,phrase,condition
+allergi,fi,HEALTH,prefix,phrase,condition
+allerg,en,HEALTH,prefix,phrase,condition
+syöpä,fi,HEALTH,prefix,phrase,condition
+syöv,fi,HEALTH,prefix,phrase,condition
+cancer,en,HEALTH,prefix,phrase,condition
+cancern,sv,HEALTH,prefix,phrase,condition
+leukemi,fi,HEALTH,prefix,phrase,condition
+masennu,fi,HEALTH,prefix,phrase,condition
+masentun,fi,HEALTH,prefix,phrase,condition
+depress,en,HEALTH,prefix,phrase,condition
+ahdistu,fi,HEALTH,prefix,phrase,condition
+ahdistus,fi,HEALTH,prefix,phrase,condition
+anxiety,en,HEALTH,prefix,phrase,condition
+ångest,sv,HEALTH,prefix,phrase,condition
+burnout,en,HEALTH,prefix,phrase,condition
+uupumus,fi,HEALTH,prefix,phrase,condition
+työuupum,fi,HEALTH,prefix,phrase,condition
+epilepsi,fi,HEALTH,prefix,phrase,condition
+epilep,en,HEALTH,prefix,phrase,condition
+migreeni,fi,HEALTH,prefix,phrase,condition
+migraine,en,HEALTH,prefix,phrase,condition
+migrän,sv,HEALTH,prefix,phrase,condition
+dementia,fi,HEALTH,prefix,phrase,condition
+dementi,sv,HEALTH,prefix,phrase,condition
+alzheimer,fi,HEALTH,prefix,phrase,condition
+parkinson,fi,HEALTH,prefix,phrase,condition
+ms-tauti,fi,HEALTH,prefix,phrase,condition
+multiple sclerosis,en,HEALTH,prefix,phrase,condition
+skleroosi,fi,HEALTH,prefix,phrase,condition
+sydänsairau,fi,HEALTH,prefix,phrase,condition
+sydänvika,fi,HEALTH,prefix,phrase,condition
+sydänvaiva,fi,HEALTH,prefix,phrase,condition
+sydäninfarkti,fi,HEALTH,prefix,phrase,condition
+infarkti,fi,HEALTH,prefix,phrase,condition
+sydänkohtau,fi,HEALTH,prefix,phrase,condition
+heart condition,en,HEALTH,prefix,phrase,condition
+heart attack,en,HEALTH,prefix,phrase,condition
+heart disease,en,HEALTH,prefix,phrase,condition
+hjärtsjukdom,sv,HEALTH,prefix,phrase,condition
+hjärtinfarkt,sv,HEALTH,prefix,phrase,condition
+aivoverenkierto,fi,HEALTH,prefix,phrase,condition
+aivohalvau,fi,HEALTH,prefix,phrase,condition
+aivoinfarkti,fi,HEALTH,prefix,phrase,condition
+stroke,en,HEALTH,prefix,phrase,condition
+verenpainetauti,fi,HEALTH,prefix,phrase,condition
+korkea verenpaine,fi,HEALTH,prefix,phrase,condition
+high blood pressure,en,HEALTH,prefix,phrase,condition
+kolesteroli,fi,HEALTH,prefix,phrase,condition
+cholesterol,en,HEALTH,prefix,phrase,condition
+kilpirauhas,fi,HEALTH,prefix,phrase,condition
+thyroid,en,HEALTH,prefix,phrase,condition
+nivelrikko,fi,HEALTH,prefix,phrase,condition
+niveltulehdus,fi,HEALTH,prefix,phrase,condition
+reuma,fi,HEALTH,prefix,phrase,condition
+arthritis,en,HEALTH,prefix,phrase,condition
+fibromyalgi,fi,HEALTH,prefix,phrase,condition
+selkävaiva,fi,HEALTH,prefix,phrase,condition
+selkäsairau,fi,HEALTH,prefix,phrase,condition
+crohn,fi,HEALTH,prefix,phrase,condition
+keliakia,fi,HEALTH,prefix,phrase,condition
+coeliac,en,HEALTH,prefix,phrase,condition
+celiac,en,HEALTH,prefix,phrase,condition
+colitis,en,HEALTH,prefix,phrase,condition
+vatsavaiva,fi,HEALTH,prefix,phrase,condition
+munuaisten vajaatoiminta,fi,HEALTH,prefix,phrase,condition
+munuaissairau,fi,HEALTH,prefix,phrase,condition
+kidney disease,en,HEALTH,prefix,phrase,condition
+kidney failure,en,HEALTH,prefix,phrase,condition
+dialyysi,fi,HEALTH,prefix,phrase,condition
+dialysis,en,HEALTH,prefix,phrase,condition
+maksasairau,fi,HEALTH,prefix,phrase,condition
+hepatiitti,fi,HEALTH,prefix,phrase,condition
+hiv,en,HEALTH,prefix,phrase,condition
+tuberkuloosi,fi,HEALTH,prefix,phrase,condition
+covid,en,HEALTH,prefix,phrase,condition
+koronatartun,fi,HEALTH,prefix,phrase,condition
+autismi,fi,HEALTH,prefix,phrase,condition
+autism,en,HEALTH,prefix,phrase,condition
+adhd,fi,HEALTH,prefix,phrase,condition
+kaksisuuntainen,fi,HEALTH,prefix,phrase,condition
+bipolar,en,HEALTH,prefix,phrase,condition
+skitsofreni,fi,HEALTH,prefix,phrase,condition
+schizophreni,en,HEALTH,prefix,phrase,condition
+psykoosi,fi,HEALTH,prefix,phrase,condition
+psykoos,fi,HEALTH,prefix,phrase,condition
+ptsd,en,HEALTH,prefix,phrase,condition
+traumaperäinen,fi,HEALTH,prefix,phrase,condition
+syömishäiriö,fi,HEALTH,prefix,phrase,condition
+anoreksia,fi,HEALTH,prefix,phrase,condition
+bulimia,fi,HEALTH,prefix,phrase,condition
+eating disorder,en,HEALTH,prefix,phrase,condition
+uniapnea,fi,HEALTH,prefix,phrase,condition
+sleep apnea,en,HEALTH,prefix,phrase,condition
+unettomuus,fi,HEALTH,prefix,phrase,condition
+insomnia,en,HEALTH,prefix,phrase,condition
+kuulovamma,fi,HEALTH,prefix,phrase,condition
+heikkokuulo,fi,HEALTH,prefix,phrase,condition
+huonokuulo,fi,HEALTH,prefix,phrase,condition
+huonosti kuule,fi,HEALTH,prefix,phrase,condition
+kuulee huonosti,fi,HEALTH,prefix,phrase,condition
+kuulen huonosti,fi,HEALTH,prefix,phrase,condition
+hard of hearing,en,HEALTH,prefix,phrase,condition
+deaf,en,HEALTH,prefix,phrase,condition
+hörselnedsättning,sv,HEALTH,prefix,phrase,condition
+sokea,fi,HEALTH,prefix,phrase,condition
+sokeus,fi,HEALTH,prefix,phrase,condition
+näkövamma,fi,HEALTH,prefix,phrase,condition
+heikkonäköinen,fi,HEALTH,prefix,phrase,condition
+huononäköinen,fi,HEALTH,prefix,phrase,condition
+visually impaired,en,HEALTH,prefix,phrase,condition
+synskada,sv,HEALTH,prefix,phrase,condition
+liikuntavamma,fi,HEALTH,prefix,phrase,condition
+halvaantun,fi,HEALTH,prefix,phrase,condition
+halvaus,fi,HEALTH,prefix,phrase,condition
+paralyz,en,HEALTH,prefix,phrase,condition
+paralys,en,HEALTH,prefix,phrase,condition
+kehitysvamma,fi,HEALTH,prefix,phrase,condition
+down-syndr,fi,HEALTH,prefix,phrase,condition
+down syndrome,en,HEALTH,prefix,phrase,condition
+raskaana,fi,HEALTH,prefix,phrase,condition
+raskaus,fi,HEALTH,prefix,phrase,condition
+pregnan,en,HEALTH,prefix,phrase,condition
+gravid,sv,HEALTH,prefix,phrase,condition
+synnytys,fi,HEALTH,prefix,phrase,condition
+hedelmöityshoito,fi,HEALTH,prefix,phrase,condition
+keskenmeno,fi,HEALTH,prefix,phrase,condition
+miscarriage,en,HEALTH,prefix,phrase,condition
+päihde,fi,HEALTH,prefix,phrase,condition
+alkoholisti,fi,HEALTH,prefix,phrase,condition
+alcoholic,en,HEALTH,prefix,phrase,condition
+addiction,en,HEALTH,prefix,phrase,condition
+riippuvuus,fi,HEALTH,prefix,phrase,condition
+vieroitus,fi,HEALTH,prefix,phrase,condition
+huumeriippu,fi,HEALTH,prefix,phrase,condition
+sairaslom,fi,HEALTH,prefix,phrase,condition
+sick leave,en,HEALTH,prefix,phrase,condition
+sjukskriv,sv,HEALTH,prefix,phrase,condition
+sairaalassa,fi,HEALTH,prefix,phrase,context
+sairaalaan,fi,HEALTH,prefix,phrase,context
+sairaalahoito,fi,HEALTH,prefix,phrase,context
+hospitalised,en,HEALTH,prefix,phrase,context
+hospitalized,en,HEALTH,prefix,phrase,context
+in hospital,en,HEALTH,prefix,phrase,context
+på sjukhus,sv,HEALTH,prefix,phrase,context
+leikkaus,fi,HEALTH,prefix,phrase,context
+leikkauk,fi,HEALTH,prefix,phrase,context
+leikattiin,fi,HEALTH,prefix,phrase,context
+surgery,en,HEALTH,prefix,phrase,context
+kemoterapia,fi,HEALTH,prefix,phrase,context
+sytostaatti,fi,HEALTH,prefix,phrase,context
+chemo,en,HEALTH,prefix,phrase,context
+sädehoito,fi,HEALTH,prefix,phrase,context
+radiotherapy,en,HEALTH,prefix,phrase,context
+fysioterapia,fi,HEALTH,prefix,phrase,context
+terapia,fi,HEALTH,prefix,phrase,context
+therapy,en,HEALTH,prefix,phrase,context
+psykiatri,fi,HEALTH,prefix,phrase,context
+psychiatr,en,HEALTH,prefix,phrase,context
+mielenterveys,fi,HEALTH,prefix,phrase,context
+mental health,en,HEALTH,prefix,phrase,context
+psykoterapia,fi,HEALTH,prefix,phrase,context
+kuulolaite,fi,HEALTH,prefix,phrase,aid
+kuulokoje,fi,HEALTH,prefix,phrase,aid
+hearing aid,en,HEALTH,prefix,phrase,aid
+hörapparat,sv,HEALTH,prefix,phrase,aid
+pyörätuoli,fi,HEALTH,prefix,phrase,aid
+pyörätuol,fi,HEALTH,prefix,phrase,aid
+wheelchair,en,HEALTH,prefix,phrase,aid
+rullstol,sv,HEALTH,prefix,phrase,aid
+rollaattori,fi,HEALTH,prefix,phrase,aid
+rollator,en,HEALTH,prefix,phrase,aid
+kävelykeppi,fi,HEALTH,prefix,phrase,aid
+kainalosauva,fi,HEALTH,prefix,phrase,aid
+insuliini,fi,HEALTH,prefix,phrase,aid
+insulin,en,HEALTH,prefix,phrase,aid
+sydämentahdistin,fi,HEALTH,prefix,phrase,aid
+pacemaker,en,HEALTH,prefix,phrase,aid
+happikone,fi,HEALTH,prefix,phrase,aid
+cpap,en,HEALTH,prefix,phrase,aid
+proteesi,fi,HEALTH,prefix,phrase,aid
+prosthe,en,HEALTH,prefix,phrase,aid
+verensokeri,fi,HEALTH,prefix,phrase,aid
+blood sugar,en,HEALTH,prefix,phrase,aid
+blodsocker,sv,HEALTH,prefix,phrase,aid
+lääkitys,fi,HEALTH,prefix,phrase,aid
+medication,en,HEALTH,prefix,phrase,aid
+reseptilääke,fi,HEALTH,prefix,phrase,aid
+antidepress,fi,HEALTH,prefix,phrase,aid
+opioid,fi,HEALTH,prefix,phrase,aid
+kipulääke,fi,HEALTH,prefix,phrase,aid
+painkiller,en,HEALTH,prefix,phrase,aid
+kroonista,fi,HEALTH,prefix,phrase,aid
+kroonisen,fi,HEALTH,prefix,phrase,aid
+chronic,en,HEALTH,prefix,phrase,aid
+kronisk,sv,HEALTH,prefix,phrase,aid
+sairaus,fi,HEALTH,prefix,phrase,aid
+sairastan,fi,HEALTH,prefix,phrase,aid
+sairastaa,fi,HEALTH,prefix,phrase,aid
+diagnoosi,fi,HEALTH,prefix,phrase,aid
+diagnosed,en,HEALTH,prefix,phrase,aid
+diagnos,sv,HEALTH,prefix,phrase,aid
+vammainen,fi,HEALTH,prefix,phrase,aid
+vammaisuus,fi,HEALTH,prefix,phrase,aid
+disabled,en,HEALTH,prefix,phrase,aid
+disability,en,HEALTH,prefix,phrase,aid
+kuolinpesä,fi,HEALTH,prefix,phrase,context
+dödsfall,sv,HEALTH,prefix,phrase,context
+saattohoito,fi,HEALTH,prefix,phrase,context
+palliativ,fi,HEALTH,prefix,phrase,context
+hospice,en,HEALTH,prefix,phrase,context
+minulla on,fi,HEALTH,cue,phrase,clause starter kept inside the HEALTH span
+mulla on,fi,HEALTH,cue,phrase,clause starter kept inside the HEALTH span
+mulle on,fi,HEALTH,cue,phrase,clause starter kept inside the HEALTH span
+minulle on,fi,HEALTH,cue,phrase,clause starter kept inside the HEALTH span
+sairastan,fi,HEALTH,cue,phrase,clause starter kept inside the HEALTH span
+olen sairastunut,fi,HEALTH,cue,phrase,clause starter kept inside the HEALTH span
+olen saanut,fi,HEALTH,cue,phrase,clause starter kept inside the HEALTH span
+olen diagnosoitu,fi,HEALTH,cue,phrase,clause starter kept inside the HEALTH span
+I have,fi,HEALTH,cue,phrase,clause starter kept inside the HEALTH span
+I've got,fi,HEALTH,cue,phrase,clause starter kept inside the HEALTH span
+I am diagnosed with,fi,HEALTH,cue,phrase,clause starter kept inside the HEALTH span
+I was diagnosed with,fi,HEALTH,cue,phrase,clause starter kept inside the HEALTH span
+I suffer from,fi,HEALTH,cue,phrase,clause starter kept inside the HEALTH span
+I have been diagnosed with,fi,HEALTH,cue,phrase,clause starter kept inside the HEALTH span
+jag har,fi,HEALTH,cue,phrase,clause starter kept inside the HEALTH span
+jag lider av,fi,HEALTH,cue,phrase,clause starter kept inside the HEALTH span
+hän sairastaa,fi,HEALTH,cue,phrase,clause starter kept inside the HEALTH span
+hänellä on,fi,HEALTH,cue,phrase,clause starter kept inside the HEALTH span
+mieheni sairastaa,fi,HEALTH,cue,phrase,clause starter kept inside the HEALTH span
+vaimollani on,fi,HEALTH,cue,phrase,clause starter kept inside the HEALTH span
+mieheni on,fi,HEALTH,cue,phrase,clause starter kept inside the HEALTH span
+vaimoni on,fi,HEALTH,cue,phrase,clause starter kept inside the HEALTH span
+äitini on,fi,HEALTH,cue,phrase,clause starter kept inside the HEALTH span
+isäni on,fi,HEALTH,cue,phrase,clause starter kept inside the HEALTH span
+lapsellani on,fi,HEALTH,cue,phrase,clause starter kept inside the HEALTH span
+my husband has,fi,HEALTH,cue,phrase,clause starter kept inside the HEALTH span
+my wife has,fi,HEALTH,cue,phrase,clause starter kept inside the HEALTH span
+my mother has,fi,HEALTH,cue,phrase,clause starter kept inside the HEALTH span
+my father has,fi,HEALTH,cue,phrase,clause starter kept inside the HEALTH span
+he has,fi,HEALTH,cue,phrase,clause starter kept inside the HEALTH span
+she has,fi,HEALTH,cue,phrase,clause starter kept inside the HEALTH span
+koska,fi,HEALTH,stopword,phrase,connective not included in the HEALTH span
+että,fi,HEALTH,stopword,phrase,connective not included in the HEALTH span
+kun,fi,HEALTH,stopword,phrase,connective not included in the HEALTH span
+mutta,fi,HEALTH,stopword,phrase,connective not included in the HEALTH span
+ja,fi,HEALTH,stopword,phrase,connective not included in the HEALTH span
+ettei,fi,HEALTH,stopword,phrase,connective not included in the HEALTH span
+because,fi,HEALTH,stopword,phrase,connective not included in the HEALTH span
+that,fi,HEALTH,stopword,phrase,connective not included in the HEALTH span
+but,fi,HEALTH,stopword,phrase,connective not included in the HEALTH span
+and,fi,HEALTH,stopword,phrase,connective not included in the HEALTH span
+when,fi,HEALTH,stopword,phrase,connective not included in the HEALTH span
+since,fi,HEALTH,stopword,phrase,connective not included in the HEALTH span
+så,fi,HEALTH,stopword,phrase,connective not included in the HEALTH span
+men,fi,HEALTH,stopword,phrase,connective not included in the HEALTH span
+och,fi,HEALTH,stopword,phrase,connective not included in the HEALTH span
+eli,fi,HEALTH,stopword,phrase,connective not included in the HEALTH span
+joten,fi,HEALTH,stopword,phrase,connective not included in the HEALTH span
+niin,fi,HEALTH,stopword,phrase,connective not included in the HEALTH span
+kuten,fi,HEALTH,stopword,phrase,connective not included in the HEALTH span
+sillä,fi,HEALTH,stopword,phrase,connective not included in the HEALTH span
+jotta,fi,HEALTH,stopword,phrase,connective not included in the HEALTH span
+mikäli,fi,HEALTH,stopword,phrase,connective not included in the HEALTH span
+jos,fi,HEALTH,stopword,phrase,connective not included in the HEALTH span
+if,fi,HEALTH,stopword,phrase,connective not included in the HEALTH span
+so,fi,HEALTH,stopword,phrase,connective not included in the HEALTH span
+however,fi,HEALTH,stopword,phrase,connective not included in the HEALTH span

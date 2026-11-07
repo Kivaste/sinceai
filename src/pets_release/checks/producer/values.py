@@ -6,7 +6,8 @@ Original-value survival is a hit when any of these holds for a cell:
   - whole-cell equality (case-folded, whitespace collapsed) with an original value, any length;
   - the original's alphanumeric-compact form (case-folded, separators removed) of at least
     SUBSTRING_MIN (8) characters occurs anywhere in the cell's compact form, with no token
-    boundary required (cells that are a single 32+ hex digest are left to the hash check);
+    boundary required (in a cell that is a single 32+ hex digest, only originals of at least
+    DIGEST_SUBSTRING_MIN (12) compact characters, to keep chance matches negligible);
   - a token n-gram equals an original of at least 4 normalised characters (or its compact form
     of at least 6 characters).
 Shorter originals inside longer text are not hits; that floor is deliberate (false refusals).
@@ -32,6 +33,8 @@ import json
 import re
 from collections import defaultdict
 
+import pandas as pd
+
 from pets_release.checks.records import Outcome
 from pets_release.checks.registry import register
 
@@ -56,6 +59,7 @@ _HEX_LENS = (32, 40, 64)
 # reversible-hash check covers it, and a digit run inside a keyed digest is chance.
 _DIGEST = re.compile(r"[0-9a-fA-F]{32,}")
 SUBSTRING_MIN = 8
+DIGEST_SUBSTRING_MIN = 12
 
 
 def _tokens(s: str) -> list[str]:
@@ -128,7 +132,11 @@ def _source_values(context):
         if df is None or ident["column"] not in df.columns:
             raise CheckError("identifier column missing from source")
         label = f"{ident['table']}.{ident['column']}"
-        vals = {v for v in df[ident["column"]].tolist() if isinstance(v, str) and v.strip()}
+        raw = df[ident["column"]].tolist()
+        # an empty cell (None / NaN) is skipped; any other non-string value is an error
+        if any(not isinstance(v, str) and v is not None and not pd.isna(v) for v in raw):
+            raise CheckError("source identifier column holds non-string values")
+        vals = {v for v in raw if isinstance(v, str) and v.strip()}
         out.append((label, vals))
     return out
 
@@ -178,13 +186,15 @@ def run_original_values(release, contract, context) -> Outcome:
     def match(text):
         found = set(whole_cell.get(_whole(text), ()))
         c = _compact(text)
-        if not _DIGEST.fullmatch(text.strip()):
-            for i in range(len(c) - SUBSTRING_MIN + 1):
-                cands = prefix.get(c[i : i + SUBSTRING_MIN])
-                if cands:
-                    for cv, label in cands:
-                        if c.startswith(cv, i):
-                            found.add(label)
+        # a single hex digest cell is still substring-scanned, but only for originals long
+        # enough (DIGEST_SUBSTRING_MIN) that a chance match inside a digest is negligible
+        floor = DIGEST_SUBSTRING_MIN if _DIGEST.fullmatch(text.strip()) else SUBSTRING_MIN
+        for i in range(len(c) - SUBSTRING_MIN + 1):
+            cands = prefix.get(c[i : i + SUBSTRING_MIN])
+            if cands:
+                for cv, label in cands:
+                    if len(cv) >= floor and c.startswith(cv, i):
+                        found.add(label)
         toks = _tokens(text)
         ctoks = [_compact(t) for t in toks]
         whole = _compact(text)
