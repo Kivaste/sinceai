@@ -130,13 +130,14 @@ def test_body_substitute_requires_explicit_test_mode_despite_planted_file(done_r
 
 
 @pytest.mark.parametrize("arrow", ["\u2192", "->"], ids=["unicode", "ascii"])
-def test_valid_report_passes_body_file_and_gh(done_report_cli, arrow):
+@pytest.mark.parametrize("via_gh", [False, True], ids=["body-file", "gh"])
+def test_complete_substitute_report_is_not_a_close_pass(done_report_cli, arrow, via_gh):
     body, run = done_report_cli
     report = body.replace("ARROW", arrow)
-    for via_gh in (False, True):
-        result = run(report, via_gh=via_gh)
-        assert result.returncode == 0, result.stdout + result.stderr
-        assert "PASS #102" in result.stdout
+    result = run(report, via_gh=via_gh)
+    assert result.returncode == 3, result.stdout + result.stderr
+    assert "SUBSTITUTE-ONLY: evidence complete, not a close pass" in result.stdout
+    assert "PASS #" not in result.stdout
 
 
 @pytest.mark.parametrize("arrow", ["\u2192", "->"], ids=["unicode", "ascii"])
