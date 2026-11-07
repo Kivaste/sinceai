@@ -22,6 +22,10 @@ Failure rows (trigger -> result):
                                                      -> RELEASED at 0e0fc58; must refuse
   a withheld note (paramName-shaped, one row) planted as a pets[].params map KEY (#149)
                                                      -> RELEASED at 7b21bc5 (keys unscanned); must refuse
+  the writer's context has no `source` (#149, folded Standards finding)
+                                                     -> at 7b21bc5 the source scan silently scanned nothing (refusal
+                                                        only via other checks' not_run); must refuse with its own
+                                                        content-free reason selfscan:source-missing
   honest hand release: a source category value occurs inside a column-name string (e.g. inventory[].column)
                                                      -> released (no false positive)
   (identifier values, e.g. patient_name or a raw visit_id, are already refused by producer.original-values in
@@ -154,6 +158,27 @@ def test_withheld_note_as_manifest_map_key_refuses(tmp_path, monkeypatch, capsys
     reasons = json.loads(report)["reasons"]
     assert reasons == ["selfscan:manifest-value"]  # the planted key passed every earlier check; only the scan refuses
     assert KEY_NOTE not in report
+
+
+def test_missing_source_context_refuses_source_missing(tmp_path, monkeypatch, capsys):
+    """#149 (folded Standards finding): a write whose context has no ``source`` cannot run the source-value scan.
+    Unknown is a fail: the self-scan itself refuses with ``selfscan:source-missing`` (content-free), rather than
+    silently scanning nothing and relying on another check's not_run."""
+    from pets_release.run import pipeline
+
+    build_kit(tmp_path / "kit", coarse_qis)
+    real = pipeline.write_release
+
+    def sourceless(cand, out, master, kit, *, context=None):
+        return real(cand, out, master, kit, context={k: v for k, v in (context or {}).items() if k != "source"})
+
+    monkeypatch.setattr(pipeline, "write_release", sourceless)
+    code, out = _run(tmp_path, monkeypatch, None)
+    capsys.readouterr()
+    assert code == 1
+    assert not out.exists()
+    reasons = json.loads((out.parent / "rel.scoring" / "refusal_report.json").read_text(encoding="utf-8"))["reasons"]
+    assert "selfscan:source-missing" in reasons
 
 
 def test_honest_release_with_category_inside_column_name_releases(tmp_path, monkeypatch, capsys):
