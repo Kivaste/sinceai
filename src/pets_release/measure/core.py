@@ -101,35 +101,39 @@ def _row_count(v) -> int:
 
 
 def _weighted_k_share(summary: dict):
-    """Row-weighted share of rows with k<5: sum(rate * rows) / sum(rows) over the released tables.
+    """Row-weighted share of rows with k<5 over the tables scored for k: (share, sorted table names).
 
-    Fails closed (risk_rows) if a rate has no table entry, a table's row count is missing or not a positive
-    int, or a released table reports no rate while another does. None when no table reports the rate."""
+    Weighted tables are the released tables that report a k<5 rate; a released table with no rate is not
+    scored for k and is excluded. Fails closed (risk_rows) if a rate has no released table entry or a
+    weighted table's row count is missing, non-int, bool or <= 0. (None, []) when no table reports a rate."""
     rates = {k[: -len(K_BELOW_5_SUFFIX)]: _finite(v) for k, v in summary["risks"].items()
              if k.endswith(K_BELOW_5_SUFFIX)}
     tables = summary.get("tables")
     if not isinstance(tables, list):
         raise MeasureRejected("risk_rows")
     if not rates:
-        return None  # the kit reports no k<5 rate for this scenario (e.g. no quasi-identifiers): not measured
+        return None, []  # the kit reports no k<5 rate for this scenario: not measured
     rows = {}
     for t in tables:
         if not isinstance(t, dict) or not isinstance(t.get("table"), str):
             raise MeasureRejected("risk_rows")
-        if t.get("status") == "released":
-            if t["table"] not in rates:
-                raise MeasureRejected("risk_rows")
+        if t.get("status") == "released" and t["table"] in rates:
             rows[t["table"]] = _row_count(t.get("rows_protected"))
     if set(rates) - set(rows):
         raise MeasureRejected("risk_rows")
     total = sum(rows.values())
-    return sum(rates[t] * n for t, n in rows.items()) / total
+    return sum(rates[t] * n for t, n in rows.items()) / total, sorted(rows)
 
 
-def _privacy(before: dict, after: dict) -> list[dict]:
-    """Privacy components only: utility and composite are not privacy (utility is in `utility.tasks`)."""
+def _privacy(before: dict, after: dict) -> tuple[list[dict], str]:
+    """Privacy components only (utility and composite are not privacy), plus a note naming the tables the
+    k<5 share was weighted over."""
     comps = [{"component": "privacy", "before": _finite(before["privacy"]), "after": _finite(after["privacy"])}]
-    share_b, share_a = _weighted_k_share(before), _weighted_k_share(after)
+    (share_b, tabs_b), (share_a, tabs_a) = _weighted_k_share(before), _weighted_k_share(after)
+    note = ""
+    if tabs_b or tabs_a:
+        note = (f"; {K_BELOW_5_SHARE} row-weighted over the tables scored for k: "
+                f"before={','.join(tabs_b)} after={','.join(tabs_a)}")
     if share_b is not None or share_a is not None:
         comps.append({"component": K_BELOW_5_SHARE, "before": share_b, "after": share_a})
     for cid, suffix in RISK_AGGREGATES.items():
@@ -142,7 +146,7 @@ def _privacy(before: dict, after: dict) -> list[dict]:
         comps.append({"component": _component_id(key, taken),
                       "before": _finite(before["risks"][key]) if key in before["risks"] else None,
                       "after": _finite(after["risks"][key]) if key in after["risks"] else None})
-    return comps
+    return comps, note
 
 
 def _identity_inputs(original_dir: Path, tables, record_keys: dict, out: Path):
@@ -193,14 +197,15 @@ def measure(scenario, *, root, original_dir, protected_dir, rowmaps: dict, linea
     for s in (before, after):
         _check_summary(s, scenario)
 
-    components = _privacy(before, after) + list(person_k or [])
+    privacy, k_note = _privacy(before, after)
+    components = privacy + list(person_k or [])
     components.sort(key=lambda c: c["component"])
     if len({c["component"] for c in components}) != len(components):
         raise MeasureRejected("component_duplicate")
     source = f"pets-eval scorecard {scenario} via kiteval adapter; baselines: kit results/benchmark.json"
     block = {
         "utility": {"status": "measured", "source": source, "tasks": _utility(before, after)},
-        "privacy": {"status": "measured", "source": source, "components": components},
+        "privacy": {"status": "measured", "source": source + k_note, "components": components},
         "search": search if search is not None else not_measured("search not run for this release"),
         "baselines": {"status": "measured", "source": "kit results/benchmark.json (published)",
                       "rows": baseline_rows(root, scenario, original_dir.name)},

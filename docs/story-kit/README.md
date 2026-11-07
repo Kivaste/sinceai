@@ -30,7 +30,7 @@ Paths are dotted. Lists in the manifest are addressed by their id field.
 | `measured.search.candidates` | search candidate count |
 
 The metric ids are the measurer's (`pets_release.measure.ids`): privacy components `k_below_5_share` (row-weighted
-share of rows with k<5 across tables), `k_below_5_worst_table` (the worst single table, not a row share) and
+share of rows with k<5 over the tables scored for k: released tables reporting a k<5 rate, named in `measured.privacy.source`), `k_below_5_worst_table` (the worst single table, not a row share) and
 `linkage_reid` (worst table), baseline metrics `utility_mean` and `worst_reid`. `tests/measure/test_ids.py` checks that this CSV, the
 fixture manifest and the measurer agree.
 

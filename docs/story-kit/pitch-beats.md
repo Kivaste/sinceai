@@ -57,7 +57,7 @@ Utility, per purpose check, before and after (1.0 = same answer as the original)
 
 Risk, before and after:
 
-- Share of rows with k below 5 (row-weighted across tables): `{{measured.privacy.before.k_below_5_share}}` before, `{{measured.privacy.after.k_below_5_share}}` after.
+- Share of rows with k below 5 (row-weighted over the tables scored for k): `{{measured.privacy.before.k_below_5_share}}` before, `{{measured.privacy.after.k_below_5_share}}` after.
 - Linkage re-identification risk (worst table): `{{measured.privacy.before.linkage_reid}}` before, `{{measured.privacy.after.linkage_reid}}` after.
 
 Against the published baselines (same scenario, mean utility and worst re-identification risk):
