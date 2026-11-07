@@ -10,4 +10,5 @@ python -I "$here\extract_aggregates.py" $Measured $Plain "$here\data.js"
 if ($LASTEXITCODE -ne 0) { throw 'extract failed' }
 $src = [IO.File]::ReadAllText("$here\prototype.src.html")
 $data = [IO.File]::ReadAllText("$here\data.js")
-[IO.File]::WriteAllText("$here\prototype.html", $src.Replace('/*__DATA__*/', $data), (New-Object Text.UTF8Encoding $false))
+$arch = [IO.File]::ReadAllText("$here\architecture.svg")
+[IO.File]::WriteAllText("$here\prototype.html", $src.Replace('/*__DATA__*/', $data).Replace('<!--__ARCH__-->', $arch), (New-Object Text.UTF8Encoding $false))

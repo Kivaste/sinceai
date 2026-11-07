@@ -114,10 +114,41 @@ details.more[open] summary{margin-bottom:10px}
 .C-tabs button{border:0;background:none;padding:10px 16px;font-weight:600;color:var(--muted);border-bottom:3px solid transparent}
 .C-tabs button.on{color:var(--brand);border-color:var(--brand)}
 .C-panel{background:#fff;border:1px solid var(--line);border-top:0;border-radius:0 0 var(--r) var(--r);padding:18px 20px}
-</style>
+/* ===== Variant D: console ===== */
+.D-wrap{padding:16px 22px 100px;max-width:1560px;margin:0 auto}
+.D-head{display:flex;justify-content:space-between;gap:20px;align-items:stretch;margin-bottom:12px}
+.D-meta{display:flex;flex-wrap:wrap;gap:4px 18px;font-size:.92rem;color:var(--muted)} .D-meta b{color:var(--ink)}
+.D-meta code,.D-head code{font-family:Consolas,monospace;background:#eef1f6;padding:0 5px;border-radius:4px;color:var(--ink)}
+.D-proofs{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
+.D-proof{background:var(--met-bg);color:var(--met);font-weight:600;font-size:.88rem;padding:3px 10px;border-radius:999px}
+.D-headr{display:flex;flex-direction:column;align-items:flex-end;gap:8px;min-width:400px}
+.D-badge{border-radius:12px;padding:10px 22px;text-align:center;color:#fff;font-weight:600}
+.D-badge .big{font-size:1.9rem;font-weight:800;letter-spacing:.06em;line-height:1.1}
+.D-badge.ok{background:#047857} .D-badge.bad{background:#b91c1c}
+.D-seg{display:inline-flex;align-items:center;gap:4px;background:#eef1f6;border-radius:10px;padding:3px}
+.D-seg span{padding:0 6px}
+.D-seg button{border:0;background:none;padding:5px 12px;border-radius:8px;font-weight:600;color:var(--muted);font-size:.88rem}
+.D-seg button.on{background:#fff;color:var(--ink);box-shadow:0 1px 3px rgba(0,0,0,.12)}
+.D-seg.big button{font-size:1rem;padding:8px 16px}
+.D-bar{display:flex;justify-content:space-between;align-items:center;gap:20px;padding:12px 18px;margin-bottom:12px;flex-wrap:wrap}
+.D-pipe{display:flex;align-items:center;gap:10px}
+.D-node{border:1px solid var(--line);border-radius:10px;padding:6px 14px;font-weight:700;background:#fff;display:flex;flex-direction:column}
+.D-node span{font-weight:400;font-size:.78rem;color:var(--muted)}
+.D-node em{font-style:normal;font-size:.72rem;background:var(--brand);color:#fff;border-radius:6px;padding:0 6px;margin-left:6px;vertical-align:2px}
+.D-node.this{border:2px solid var(--brand);background:var(--brand-soft)}
+.D-node.off,.D-arrow.off{opacity:.35;text-decoration:line-through}
+.D-arrow{font-size:1.3rem;color:#94a3b8}
+.D-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.D-refusal{border-color:#fca5a5;background:#fff5f5;margin-bottom:12px}
+.D-modes{display:flex;align-items:center;gap:16px;margin:4px 0 14px}
+.D-modes .proto-tag{margin-left:auto}
+.D-replay summary{cursor:pointer;color:var(--brand);font-weight:600}
+.D-replay[open]{flex:1}
+.D-arch svg{width:100%;max-width:1000px;height:auto;display:block;margin:0 auto}</style>
 </head>
 <body>
 <div id="app"></div>
+<template id="arch-svg"><!--__ARCH__--></template>
 <div id="switcher" aria-label="Prototype variant switcher">
   <button id="sw-prev" title="Previous variant (←)">←</button>
   <span id="sw-label"></span>
@@ -248,7 +279,6 @@ function privacyBars(){
   const items = [
     ['Privacy score','higher is safer',H.privacy,true],
     ['Linkage attack success','share of people an attacker re-identifies',H.linkage,false],
-    ['Records in small look-alike groups','kit scorecard; lower is safer',H.smallGroups,false],
   ];
   return items.map(([l,h,v,up]) => `<div class="bar-row pv"><div><b>${l}</b><div class="small muted">${h}</div></div>
     <div><div class="bar-track" style="height:14px;margin-bottom:4px"><div class="bar-before" style="width:${v.before*100}%;background:#f87171"></div></div>
@@ -315,8 +345,7 @@ function wireRun(root){
 }
 
 // ================= Variant A: guided story =================
-function VariantA(){
-  const STEPS = [
+function storySteps(){ return [
     {t:'Risks', head:'This hospital data can identify people', sub:`Four tables, ${F.length} columns. Before protection, an attacker could link ${pct(H.linkage.before)} of patients back to a name.`,
      body:() => {
        const byRole = {}; F.forEach(f => (byRole[f.role] = byRole[f.role]||[]).push(f));
@@ -336,7 +365,9 @@ function VariantA(){
     {t:'Limits', head:'Fit for this use, and honest about the rest', sub:`Every release passes ${gateTotal} automatic safety checks before it leaves. Here is what it is and isn’t good for.`,
      body:() => `<div class="A-grid" style="grid-template-columns:1fr 1fr 1fr"><div class="card"><h3>✅ Fit for</h3><b>${RECIPIENT}</b><div>${PURPOSE}, the 5 questions above</div><h3 style="margin-top:14px">⛔ Not fit for</h3><div class="muted">${DATA.notFitFor.length} other scenarios (e.g. city, finance, education). Different recipient or purpose → new release.</div></div>
        <div class="card"><h3>⚠️ Limits we disclose</h3>${limitsList()}</div><div class="card"><h3>🛡️ Safety gate: ${gatePass}/${gateTotal} passed</h3>${gateSummary(false)}</div></div>`},
-  ];
+  ];}
+function VariantA(){
+  const STEPS = storySteps();
   let i = 0; const root = el(`<div class="A-wrap"></div>`);
   const draw = () => {
     const s = STEPS[i];
@@ -431,8 +462,100 @@ function VariantC(){
   draw(); return root;
 }
 
+// ================= Variant D: console (audit record of ONE pipeline run) =================
+const RUN_ID = 'run-' + DATA.created.slice(0,10) + '-' + DATA.releaseScopeId.slice(0,8);
+// MOCK refusal reasons, keyed by real gate check names; only shown when the "Refused" toggle is on
+const MOCK_REFUSAL = [
+  {check:'rescan.phones', label:'Phone-number re-scan', text:'3 released cells matched a phone-number pattern.'},
+  {check:'text.national-ids', label:'National ID pattern scan', text:'1 released cell matched a national ID pattern.'},
+];
+function VariantD(){
+  const q = new URLSearchParams(location.search);
+  let mode = q.get('mode')==='walk' ? 'walk' : 'cockpit';
+  let step = Math.min(Math.max((+q.get('step')||1)-1,0),4);
+  let refused = q.get('outcome')==='refused';
+  let tab = q.get('tab') || 'checks';
+  let sel = released.find(f=>f.column==='municipality');
+  let toast = '';
+  const STEPS = storySteps();
+  const root = el(`<div class="D-wrap"></div>`);
+  const tabs = {
+    checks:['Research questions', () => purposeBars()],
+    privacy:['Privacy measured', () => `<div style="display:grid;grid-template-columns:1.1fr 1fr;gap:24px"><div>${privacyBars()}<p class="small muted">Group-size (k) figures: <b>pending review</b>, not shown.</p></div><div><b>How the release was found</b>${searchChart(460,210)}</div></div>`],
+    output:['Output preview', () => rowsPreview()],
+    gate:['Safety gate', () => `<div style="columns:2;column-gap:28px">${gateSummary(true)}</div>`],
+    limits:['Scope & limits', () => `<div style="display:grid;grid-template-columns:1.4fr 1fr;gap:20px"><div>${limitsList()}</div><div><p>✅ <b>Fit for:</b> ${RECIPIENT}, ${PURPOSE.toLowerCase()}.</p><p>⛔ <b>Not fit for:</b> ${DATA.notFitFor.length} other scenarios.</p></div></div>`],
+    arch:['Architecture', () => `<div class="D-arch">${document.getElementById('arch-svg').innerHTML}</div>`],
+  };
+  const gp = refused ? gatePass - MOCK_REFUSAL.length : gatePass;
+  const draw = () => {
+    const gp = refused ? gatePass - MOCK_REFUSAL.length : gatePass;
+    const badge = refused
+      ? `<div class="D-badge bad"><div class="big">REFUSED</div><div>exit 1 · pipeline stopped</div></div>`
+      : `<div class="D-badge ok"><div class="big">RELEASED</div><div>exit 0 · published downstream</div></div>`;
+    const proofs = refused
+      ? `<span class="muted">No manifest published · nothing to verify · nothing left the step</span>`
+      : `<span class="D-proof">Manifest signed ✓</span><span class="D-proof">Recipient verify ✓</span><span class="D-proof">Controller verify ✓</span>`;
+    const pipe = `<div class="D-pipe"><div class="D-node">Extract<span>upstream job</span></div><div class="D-arrow">→</div>
+      <div class="D-node this"><div>pets-release <em>this run</em></div><span>exit 0 → publish · 1 → stop · 2 → bad input</span></div><div class="D-arrow ${refused?'off':''}">→</div>
+      <div class="D-node ${refused?'off':''}">Share / export<span>${refused?'skipped: pipeline stopped':'to '+RECIPIENT.toLowerCase()}</span></div></div>`;
+    const actions = `<div class="D-actions"><button class="btn" data-act="Approve sharing" ${refused?'disabled':''}>✓ Approve sharing</button><button class="btn ghost" data-act="Hold">⏸ Hold</button><button class="btn ghost" data-act="Download signed manifest" ${refused?'disabled':''}>⬇ Download signed manifest</button>${toast?`<span class="small muted">${toast}</span>`:''}</div>`;
+    const refusal = refused ? `<div class="card D-refusal"><span class="proto-tag">MOCK REASONS</span><h3 style="margin-top:8px">Why the pipeline stopped (fail-closed)</h3>
+      ${MOCK_REFUSAL.map(r=>`<div style="margin:6px 0"><span class="pill st-fail">Failed</span> <b>${r.label}</b> <span class="muted small">${r.check}</span> · ${r.text}</div>`).join('')}
+      <div class="small muted">Nothing was published. Fix the input or the plan and re-run the pipeline.</div></div>` : '';
+    const kpi = (l,v,sub,cls='') => `<div class="card C-kpi ${cls}"><div class="lbl">${l}</div><div class="val">${v}</div><div class="small muted">${sub}</div></div>`;
+    const kpis = `<div class="C-kpis">${kpi('Privacy',`${pct(H.privacy.before)} → <span style="color:var(--met)">${pct(H.privacy.after)}</span>`,'higher is safer')}
+       ${kpi('Research value',`${pct(H.utility.before)} → ${pct(H.utility.after)}`,'average of 5 questions')}
+       ${kpi('Linkage attack',`${pct(H.linkage.before)} → <span style="color:var(--met)">${pct(H.linkage.after)}</span>`,'people re-identified')}
+       ${kpi('Safety gate',`<span style="color:${refused?'var(--fail)':'inherit'}">${gp}/${gateTotal}</span>`,refused?'checks passed (mock failure)':'checks passed')}
+       ${kpi('Research questions',`${DATA.tasks.filter(t=>checkStatus(t).key==='met').length} met · ${DATA.tasks.filter(t=>checkStatus(t).key==='sac').length} sacrifice`,'of 5 · none failed')}</div>`;
+    let body;
+    if (mode==='walk'){
+      const s = STEPS[step];
+      body = `<div class="A-stepper">${STEPS.map((x,j)=>`<button data-j="${j}" class="${j===step?'on':j<step?'past':''}"><b>Step ${j+1}</b>${x.t}</button>`).join('')}</div>
+        <h1 class="A-head" style="font-size:2rem">${s.head}</h1><p class="A-sub">${s.sub}</p>${s.body()}
+        <div class="A-nav"><button class="btn ghost" data-back ${step===0?'disabled':''}>← Back</button>${step<4?`<button class="btn" data-next>Next: ${STEPS[step+1].t} →</button>`:`<button class="btn" data-mode="cockpit">Open the full record →</button>`}</div>`;
+    } else {
+      const byT = {}; F.forEach(f => (byT[f.table]=byT[f.table]||[]).push(f));
+      const order = {kept:0,pseudonymised:1,coarsened:2,withheld:3};
+      body = `${kpis}<div class="C-main"><div class="card"><div style="display:flex;justify-content:space-between;align-items:baseline"><h2 style="font-size:1.1rem">Field map: what this run did to every column · <span class="muted small">click a tile</span></h2>
+       <div class="legend">${['kept','pseudonymised','coarsened','withheld'].map(x=>`<span><i style="background:var(--${x==='pseudonymised'?'pseudo':x==='coarsened'?'coarse':x})"></i>${TR_LABEL[x]}</span>`).join('')}</div></div>
+       <div class="C-tables">${Object.keys(TABLES).map(tb=>`<div class="C-tbl"><h3>${TABLES[tb]} <span class="muted small">${byT[tb].filter(f=>f.tr!=='withheld').length}/${byT[tb].length} released</span></h3><div class="C-tiles">
+         ${byT[tb].slice().sort((a,b)=>order[a.tr]-order[b.tr]).map(f=>`<button class="C-tile tr-${f.tr} ${f===sel?'sel':''}" data-f="${F.indexOf(f)}">${f.name}</button>`).join('')}</div></div>`).join('')}</div></div>
+       <div class="card" style="border-color:var(--brand)"><div class="small muted">${TABLES[sel.table]} · ${ROLES[sel.role]}</div><h2 style="font-size:1.4rem;margin:4px 0 8px">${sel.name}</h2>${trChip(sel.tr)}
+         <p style="font-size:1.05rem">${sel.why.text}</p>
+         ${sel.why.serves.length?`<div class="small muted">Serves research question</div>${sel.why.serves.map(s=>{const tt=DATA.tasks.find(x=>x.task===s);return `<div style="margin:6px 0"><b>${CHECKS[s]}</b><br>${pct(tt.after)} kept ${statusPill(checkStatus(tt))}</div>`;}).join('')}`:'<div class="small muted">Serves no research question, so it does not leave the step.</div>'}
+         ${sel.tr==='pseudonymised'?'<p class="small" style="color:var(--sac)">Still personal data: the recipient must protect it.</p>':''}</div></div>
+       <div class="C-tabs">${Object.entries(tabs).map(([k,[l]])=>`<button data-tab="${k}" class="${k===tab?'on':''}">${k==='gate'?l+' '+gp+'/'+gateTotal:l}</button>`).join('')}</div>
+       <div class="C-panel">${tabs[tab][1]()}</div>`;
+    }
+    root.innerHTML = `<header class="D-head card"><div class="D-headl"><div class="B-kicker">Audit record · one pipeline run</div>
+        <h1 style="font-size:1.55rem;margin:4px 0 2px">${RUN_ID}</h1>
+        <div class="D-meta"><span>Triggered by <b>CI job <code>release-health-s1</code></b> · demo</span><span>Scenario <b>${DATA.scenario}</b></span><span>Recipient <b>${RECIPIENT}</b> (${SETTING.toLowerCase()})</span><span>Purpose <b>${PURPOSE}</b></span><span>Engine pin <code>${DATA.toolRevision}</code></span></div>
+        <div class="D-proofs">${proofs}</div></div>
+      <div class="D-headr">${badge}<div class="D-seg"><span class="small muted">Prototype state:</span><button data-out="released" class="${refused?'':'on'}">Released</button><button data-out="refused" class="${refused?'on':''}">Refused (mock)</button></div></div></header>
+      <div class="D-bar card">${pipe}${actions}</div>
+      ${refusal}
+      <div class="D-modes"><div class="D-seg big"><button data-mode="cockpit" class="${mode==='cockpit'?'on':''}">Full record</button><button data-mode="walk" class="${mode==='walk'?'on':''}">Walkthrough (5 steps)</button></div>
+        <details class="D-replay"><summary>Replay this run</summary><div style="padding-top:8px">${runWidget('runD')}</div></details><span class="proto-tag">PROTOTYPE D · Console</span></div>
+      ${body}`;
+    const setQ = () => { const u = new URL(location.href); u.searchParams.set('mode', mode==='walk'?'walk':'cockpit'); if(mode==='walk') u.searchParams.set('step', step+1); else ['step','mode','outcome','tab'].forEach(k=>u.searchParams.delete(k));
+      if (refused) u.searchParams.set('outcome','refused'); else u.searchParams.delete('outcome'); if(mode==='cockpit') u.searchParams.set('tab',tab); history.replaceState(null,'',u); };
+    root.querySelectorAll('[data-f]').forEach(b=>b.onclick=()=>{sel=F[+b.dataset.f];draw();});
+    root.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>{tab=b.dataset.tab;setQ();draw();});
+    root.querySelectorAll('[data-mode]').forEach(b=>b.onclick=()=>{mode=b.dataset.mode;setQ();draw();});
+    root.querySelectorAll('[data-out]').forEach(b=>b.onclick=()=>{refused=b.dataset.out==='refused';toast='';setQ();draw();});
+    root.querySelectorAll('[data-act]').forEach(b=>b.onclick=()=>{toast=`Prototype: "${b.dataset.act}" is visual only. Nothing was changed.`;draw();});
+    root.querySelectorAll('[data-j]').forEach(b=>b.onclick=()=>{step=+b.dataset.j;setQ();draw();});
+    const bk=root.querySelector('[data-back]'); if(bk) bk.onclick=()=>{if(step>0){step--;setQ();draw();}};
+    const nx=root.querySelector('[data-next]'); if(nx) nx.onclick=()=>{if(step<4){step++;setQ();draw();}};
+    wireRun(root);
+  };
+  draw(); return root;
+}
+
 // ---------- switcher ----------
-const VARIANTS = [['A','Guided story',VariantA],['B','Narrative report',VariantB],['C','Cockpit',VariantC]];
+const VARIANTS = [['A','Guided story',VariantA],['B','Narrative report',VariantB],['C','Cockpit',VariantC],['D','Console',VariantD]];
 function render(){
   const key = (new URLSearchParams(location.search).get('variant')||'A').toUpperCase();
   const v = VARIANTS.find(x=>x[0]===key) || VARIANTS[0];
@@ -444,7 +567,7 @@ function render(){
 function go(d){
   const cur = VARIANTS.findIndex(x=>x[0]===((new URLSearchParams(location.search).get('variant')||'A').toUpperCase()));
   const nx = VARIANTS[(Math.max(cur,0)+d+VARIANTS.length)%VARIANTS.length][0];
-  const u = new URL(location.href); u.searchParams.set('variant',nx); u.searchParams.delete('step');
+  const u = new URL(location.href); u.searchParams.set('variant',nx); ['step','mode','outcome','tab'].forEach(k=>u.searchParams.delete(k));
   history.replaceState(null,'',u); render();
 }
 document.getElementById('sw-prev').onclick=()=>go(-1);

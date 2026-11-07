@@ -27,8 +27,8 @@ def main(measured_path, plain_path, out_path):
             "reason": j.get("reason"), "outputColumn": j.get("outputColumn"),
         })
     comps = {c["component"]: c for c in m["measured"]["privacy"]["components"]}
-    # allowlist: per-person k figures are hidden (D33 pending)
-    keep = ["privacy", "linkage_reid", "k_below_5_share"]
+    # allowlist: no k-based figures at all (D33 pending, D46)
+    keep = ["privacy", "linkage_reid"]
     privacy = {k: {"before": r(comps[k].get("before"), 2), "after": r(comps[k].get("after"), 2)}
                for k in keep if k in comps}
     tasks = [{"task": t["task"], "before": r(t.get("before")), "after": r(t.get("after")),
@@ -40,13 +40,14 @@ def main(measured_path, plain_path, out_path):
         # composite is not in the manifest components; value from the pin-proof pets-eval scorecard (brief)
         "composite": {"before": 0.28, "after": 0.97},
         "linkage": privacy.get("linkage_reid"),
-        "smallGroups": privacy.get("k_below_5_share"),
     }
     gate = [{"check": c["check"], "status": c["status"], "hits": c["hits"]} for c in m["gate"]["checks"]]
     search = m["measured"]["search"]
     data = {
         "toolRevision": m["bindings"]["toolRevision"][:7],
         "scenario": m["release"]["scenario"],
+        "releaseScopeId": m["release"]["releaseScopeId"],
+        "created": m["release"]["created"],
         "fields": fields,
         "headline": headline,
         "tasks": tasks,
