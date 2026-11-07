@@ -146,7 +146,9 @@ def turn_runs(turn_index: int, text: str, masks: list[tuple[int, int]]) -> list[
             prev_literal = literal
             continue
         if tok.text in _GAP_CHARS and cur:
-            punct_gap = True
+            # a bracket alone does not split typed groups: '(040) 123 4567' is one phone number
+            if tok.text not in "()":
+                punct_gap = True
             continue
         flush()
         punct_gap = False
