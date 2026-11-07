@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from pets_release.checks import all_checks, run_checks
+from pets_release.run.context import person_normaliser
 
 
 class _Via04:
@@ -37,7 +38,7 @@ def _health_ctx(h, visits, persons, labs=None, lab_visits=None):
         "source": source,
         "rowmaps": rowmaps,
         "record_keys": keys,
-        "person": {"table": "ed_visits", "column": "patient_hetu"},
+        "person": {"table": "ed_visits", "column": "patient_hetu", "normalise": person_normaliser()},
         "joins": joins,
     }
 
