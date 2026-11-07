@@ -143,3 +143,38 @@ def make_kit(tmp_path: Path):
 @pytest.fixture
 def cli():
     return run_cli
+
+
+# Test tiers: collection only, never skip or change the default full-suite run.
+SLOW_TESTS_PATH = Path(__file__).resolve().with_name("slow_tests.txt")
+FAST_CLI_SMOKE = frozenset({
+    "tests/run/test_run.py::test_planted_card_number_refuses_via_cli",
+    "tests/run/test_run.py::test_release_passes_gate_and_both_verify_tiers",
+    "tests/run/test_run.py::test_two_runs_byte_identical",
+})
+
+
+def requires_real_kit(item) -> bool:
+    """Fixture names include the transitive closure; synthetic `kit` is not real.
+
+    `kit` is the repo's real-kit marker, including inherited module/class marks.
+    New real-kit fixtures must depend on kit_root (or tests must carry that mark).
+    """
+    return item.get_closest_marker("kit") is not None or "kit_root" in item.fixturenames
+
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_collection_modifyitems(items):
+    """Add marks before pytest's own -m deselection, using the canonical list."""
+    try:
+        measured = {
+            line.strip() for line in SLOW_TESTS_PATH.read_text(encoding="utf-8").splitlines()
+            if line.strip() and not line.lstrip().startswith("#")
+        }
+    except OSError as exc:
+        raise pytest.UsageError("cannot read canonical tests/slow_tests.txt") from exc
+    for item in items:
+        if requires_real_kit(item):
+            item.add_marker(pytest.mark.slow(reason="real-kit"))
+        elif item.nodeid in measured and item.nodeid not in FAST_CLI_SMOKE:
+            item.add_marker(pytest.mark.slow(reason="profile"))
