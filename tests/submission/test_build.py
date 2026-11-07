@@ -297,9 +297,11 @@ def test_refuses_key_material_hidden_by_csv_escaping(world, tmp_path, variant):
     shutil.copytree(kit, k2)
     key = TEST_KEY
     tid = {"quote": key[:9] + '"' + key[9:], "comma": key[:9] + "," + key[9:], "plain": key}[variant]
-    p = k2 / "data" / "customer_service" / "turns.csv"
+    # an unseen column name ships verbatim in unseen_field_labels.csv and is not text-scanned, so only the
+    # key-material scan stands between it and the bundle (a key in a turn id is refused earlier: cs_eval gate)
+    p = k2 / "data" / "unseen" / "export_2025_q4.csv"
     rows = list(csv.reader(io.StringIO(p.read_text("utf-8"), newline="")))
-    rows[1][0] = tid
+    rows[0][0] = tid
     buf = io.StringIO(newline="")
     csv.writer(buf, lineterminator="\n").writerows(rows)
     p.write_text(buf.getvalue(), encoding="utf-8", newline="")

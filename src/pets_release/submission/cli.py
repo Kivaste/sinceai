@@ -64,6 +64,8 @@ def main(argv: list[str]) -> int:
         print(f"scorecard {d['dataset']} ({d['scenario']}): privacy={s['privacy']} utility={s['utility']} "
               f"composite={s['composite']} tasks={len(s['tasks'])} tables={len(s['tables'])}")
     cs = res.index["customerServiceEval"]
-    print(f"cs-eval: conversations={cs['conversations']} turns={cs['turns']} spans={cs['spans']}; "
+    print(f"cs-eval: conversations={cs['conversations']} turns={cs['turns']} spans={cs['spans']} "
+          f"(redactor spans={cs['redactorSpans']}); text checks={len(cs['textChecks'])} "
+          f"masked turns={cs['maskedTurns']} low-severity hits={cs['lowSeverityHits']}; "
           f"unseen columns={res.index['unseen']['columns']}")
     return 0
