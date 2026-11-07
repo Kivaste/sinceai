@@ -21,6 +21,17 @@ param(
   [int]$Workers = 2
 )
 $ErrorActionPreference = 'Stop'
+# Git identity, not path spelling or a planted marker, decides worktree isolation.
+try {
+  $gitDirs = @(& git -C $Worktree rev-parse --path-format=absolute --git-dir --git-common-dir 2>$null)
+  if ($LASTEXITCODE -ne 0 -or $gitDirs.Count -ne 2) { throw 'Git identity unavailable' }
+  $gitDir = [IO.Path]::GetFullPath($gitDirs[0]).Replace('\', '/').TrimEnd('/')
+  $commonDir = [IO.Path]::GetFullPath($gitDirs[1]).Replace('\', '/').TrimEnd('/')
+} catch { "REFUSE: cannot establish linked worktree identity for '$Worktree'"; exit 2 }
+if ([StringComparer]::OrdinalIgnoreCase.Equals($gitDir, $commonDir)) {
+  "REFUSE: '$Worktree' is a main checkout; use a linked worktree for agent work"
+  exit 2
+}
 $changed = @(git -C $Worktree diff --name-only "$Base...HEAD" 2>$null) + @(git -C $Worktree diff --name-only HEAD 2>$null) + @(git -C $Worktree ls-files --others --exclude-standard 2>$null)
 $changed = @($changed | Where-Object { $_ } | ForEach-Object { $_ -replace '\\', '/' } | Sort-Object -Unique)
 $sel = New-Object System.Collections.Generic.HashSet[string]
