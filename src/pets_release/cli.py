@@ -23,6 +23,7 @@ COMMAND_PACKAGES: dict[str, str] = {
     "detect": "pets_release.detect",
     "dashboard": "pets_release.dashboard",
     "submission": "pets_release.submission",
+    "draft-policy": "pets_release.llm",
 }
 HELP = {
     "run": "produce a protected release for a scenario",
@@ -30,6 +31,7 @@ HELP = {
     "detect": "detect personal-data types in a dataset",
     "dashboard": "render the judge dashboard",
     "submission": "build the submission bundle",
+    "draft-policy": "optional: draft a scenario policy from a plain-language request (needs --allow-network)",
 }
 MIN_KEY_LEN = 32
 

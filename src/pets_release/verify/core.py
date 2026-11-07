@@ -151,16 +151,17 @@ def _assertion_problems(manifest: dict, records, scopes: set) -> list[str]:
 def _residual_problems(manifest: dict, records, scopes: set) -> list[str]:
     """Low-severity residual risks re-derived from the fresh records (writer's ``low_severity_risks``) must equal
     the signed ``gate_low_severity`` entries of every check in scope."""
-    from pets_release.writer.assemble import LOW_SEVERITY_KIND, low_severity_risks
+    from pets_release.writer.assemble import LOW_SEVERITY_KIND, low_severity_risks, low_severity_source
 
-    attested_scope = {c["check"]: c["scope"] for c in manifest["gate"]["checks"]}
+    attested_scope = {low_severity_source(c["check"], c["version"], c["scope"]): c["scope"]
+                      for c in manifest["gate"]["checks"]}
     fresh = {r["risk"]: r for r in low_severity_risks(r for r in records if r.scope in scopes)}
     signed = {}
     for r in manifest["residualRisks"]:
         if r["kind"] != LOW_SEVERITY_KIND:
             continue
-        check = r["risk"].split(":")[1] if r["risk"].count(":") >= 2 else None
-        if attested_scope.get(check, "release") in scopes:  # unknown check: in scope, so it must match
+        source = r["rate"].get("source")
+        if attested_scope.get(source, "release") in scopes:  # unknown provenance: must match the re-run
             signed[r["risk"]] = r
     return [f"residualRisks: {risk}: low-severity count differs from the re-run"
             for risk in sorted(set(fresh) | set(signed)) if fresh.get(risk) != signed.get(risk)]

@@ -200,7 +200,7 @@ def test_full_error_check_fails(bed, kit, tb):
 
 def _na_check():
     return Check(name="text.verify-na-stub", version="1.0.0", scope="release", unit="turns",
-                 run=lambda r, c, x: Outcome.not_applicable(), applies_to=("text",))
+                 run=lambda r, c, x: Outcome.not_applicable(), applies_to=("enum",))  # a form the fixture never declares
 
 
 def test_not_applicable_is_accepted_and_counted(bed, tb):
