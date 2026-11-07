@@ -41,7 +41,7 @@ def _low(release, contract, context):
 
 
 def _mk(name, fn, scope="release"):
-    return Check(name=name, version="1", scope=scope, unit="cells", run=fn)
+    return Check(name=name, version="1.0.0", scope=scope, unit="cells", run=fn)
 
 
 def test_check_that_raises_is_error_and_refuses_without_leaking_message(tmp_path):
@@ -122,7 +122,7 @@ def test_cli_refuses_planted_card_and_passes_valid(tmp_path):
     assert r.returncode == 1, r.stderr
     summary = json.loads(r.stdout)
     assert summary["refused"] is True
-    assert {x["check"]: x["status"] for x in summary["records"]}["paymentCards"] == "fail"
+    assert {x["check"]: x["status"] for x in summary["records"]}["rescan.payment-cards"] == "fail"
     assert "4111" not in r.stdout
     good = tmp_path / "good"
     shutil.copytree(FIX / "valid" / "release", good)

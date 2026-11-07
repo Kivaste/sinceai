@@ -4,7 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from pets_release.checks.records import SEVERITIES, CheckRecord, Outcome, Violation
-from pets_release.checks.registry import Check, all_checks
+from pets_release.checks.registry import Check, RegistryError, all_checks
 from pets_release.checks.release import Release
 
 
@@ -12,13 +12,15 @@ from pets_release.checks.release import Release
 class GateResult:
     refused: bool
     records: tuple
+    registry_error: str | None = None  # module/check names only; set when discovery failed
 
     def to_dict(self) -> dict:
-        return {"refused": self.refused, "records": [r.to_dict() for r in self.records]}
+        return {"refused": self.refused, "records": [r.to_dict() for r in self.records],
+                "registryError": self.registry_error}
 
     def summary(self) -> dict:
         """Aggregate-only view: per check status, hits and denominator."""
-        return {"refused": self.refused,
+        return {"refused": self.refused, "registryError": self.registry_error,
                 "records": [{"check": r.check, "version": r.version, "scope": r.scope, "status": r.status,
                              "hits": r.hits, "denominator": dict(r.denominator),
                              "violations": [{k: v for k, v in x.to_dict().items() if k != "locations"}
@@ -64,7 +66,10 @@ def _run_one(chk: Check, release, contract, context) -> CheckRecord:
 def run_checks(release_dir, contract, context=None, *, scope: str | None = None, checks=None) -> GateResult:
     """Run the registry (or ``checks``) over ``release_dir``. See the package docstring."""
     context = dict(context or {})
-    selected = tuple(all_checks() if checks is None else sorted(checks, key=lambda c: c.name))
+    try:
+        selected = tuple(all_checks() if checks is None else sorted(checks, key=lambda c: c.name))
+    except RegistryError as e:  # an untrustworthy registry refuses; nothing runs
+        return GateResult(refused=True, records=(), registry_error=str(e))
     if scope is not None:
         selected = tuple(c for c in selected if c.scope == scope)
     try:

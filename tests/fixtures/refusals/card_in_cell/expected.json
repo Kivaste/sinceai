@@ -1,6 +1,6 @@
 {
   "failing": {
-    "paymentCards": [
+    "rescan.payment-cards": [
       {
         "column": "note_text",
         "count": 1,
