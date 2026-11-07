@@ -1,16 +1,31 @@
 """The pinned scenario policy constrains a release contract (#62). Schema names only; no row values.
 
-A contract cannot set its own privacy target: the k target comes from the policy's ``k_anonymity`` privacy
-target, and every policy QI the contract releases must be listed in ``contract.qi``. The writer refuses on any
-problem before the gate, and manifest validation applies the same rule (every verify tier, the dashboard).
+A contract cannot set its own privacy target:
+
+* the k target comes from the policy's ``k_anonymity`` privacy target;
+* every released column must state its source (output provenance): a released field justification for it
+  (``table`` + ``column`` -> ``outputColumn``) and/or the column's ``params.derived_from`` (``col`` or
+  ``table.col``). No source -> ``no-provenance``; two different sources -> ``provenance-conflict``;
+* the mandatory QI set is derived from that provenance: any released column whose source is a policy QI is a
+  QI whatever its name (also a column named like a policy QI's derived or source name), and must be listed in
+  ``contract.qi``.
+
+The writer refuses on any problem before the gate, and manifest validation applies the same rule (every verify
+tier, the dashboard). Names in problem codes are schema names; one the identifier detectors flag is masked.
 """
 from __future__ import annotations
 
 from collections.abc import Mapping
 
+from pets_release.checks.cells._shape import safe_name
+
 
 def _valid_k(k) -> bool:
     return isinstance(k, int) and not isinstance(k, bool) and k >= 2
+
+
+def _n(name) -> str:
+    return name if safe_name(name) else "<name>"
 
 
 def k_target(policy) -> int | None:
@@ -23,36 +38,55 @@ def k_target(policy) -> int | None:
     return targets[0]["k"]
 
 
-def _justified_outputs(justifications) -> dict:
-    """(table, source column) -> released output column names, from field justifications (decision released)."""
-    out: dict = {}
+def _columns(contract) -> list[tuple[str, str, Mapping]]:
+    """(table stem, released column, column spec) for every contract column."""
+    files = contract.get("files") if isinstance(contract, Mapping) else None
+    out = []
+    if isinstance(files, Mapping):
+        for file, spec in files.items():
+            cols = spec.get("columns") if isinstance(spec, Mapping) else None
+            stem = file[:-4] if isinstance(file, str) and file.endswith(".csv") else str(file)
+            if isinstance(cols, Mapping):
+                out += [(stem, c, s if isinstance(s, Mapping) else {}) for c, s in cols.items()]
+    return sorted(out, key=lambda x: (x[0], str(x[1])))
+
+
+def provenance(contract, justifications) -> tuple[dict, list[str]]:
+    """``({(table, released column): (source table, source column)}, problems)``."""
+    justified: dict = {}
     for fj in justifications or ():
         if isinstance(fj, Mapping) and fj.get("decision") == "released" and isinstance(fj.get("outputColumn"), str):
-            out.setdefault((fj.get("table"), fj.get("column")), set()).add(fj["outputColumn"])
-    return out
+            justified.setdefault((fj.get("table"), fj["outputColumn"]), set()).add((fj.get("table"), fj.get("column")))
+    out, problems = {}, []
+    for stem, col, spec in _columns(contract):
+        sources = set(justified.get((stem, col), ()))
+        params = spec.get("params")
+        df = params.get("derived_from") if isinstance(params, Mapping) else None
+        if df is not None:
+            if not isinstance(df, str) or not df:
+                problems.append(f"contract.files: {_n(stem)}.{_n(col)}: provenance-conflict")
+                continue
+            t, _, c = df.rpartition(".")
+            sources.add((t or stem, c))
+        if not sources:
+            problems.append(f"contract.files: {_n(stem)}.{_n(col)}: no-provenance")
+        elif len(sources) > 1:
+            problems.append(f"contract.files: {_n(stem)}.{_n(col)}: provenance-conflict")
+        else:
+            out[(stem, col)] = next(iter(sources))
+    return out, problems
 
 
 def released_policy_qis(policy, contract: Mapping, justifications=None) -> list[tuple[str, str]]:
-    """(table, released column) of every policy QI the contract releases.
-
-    A policy QI counts as released under its derived name, its source name, or any output column a field
-    justification gives it (so a renamed QI is still recognised). Limitation: a renamed QI whose justification
-    is also omitted or misattributed is not recognised by name here; the writer's own justification rule
-    (every released contract column justified) and person-k over the contract's QIs remain the backstops.
-    """
-    files = contract.get("files") if isinstance(contract, Mapping) else None
-    if not isinstance(files, Mapping):
-        return []
-    outputs = _justified_outputs(justifications)
+    """(table, released column) of every released column that is a policy QI: by provenance (its source is a
+    policy QI) or by name (it carries a policy QI's derived or source name)."""
+    qi_src = {(q["table"], q["column"]) for q in policy.qi}
+    by_name = {(q["table"], name) for q in policy.qi for name in (q["derived"], q["column"])}
+    prov, _ = provenance(contract, justifications)
     out = set()
-    for q in policy.qi:
-        spec = files.get(f"{q['table']}.csv")
-        cols = spec.get("columns") if isinstance(spec, Mapping) else None
-        if not isinstance(cols, Mapping):
-            continue
-        for name in {q["derived"], q["column"], *outputs.get((q["table"], q["column"]), ())}:
-            if name in cols:
-                out.add((q["table"], name))
+    for stem, col, _spec in _columns(contract):
+        if (stem, col) in by_name or prov.get((stem, col)) in qi_src:
+            out.add((stem, col))
     return sorted(out)
 
 
@@ -78,9 +112,10 @@ def contract_policy_problems(scenario: str, contract, justifications=None) -> li
         out.append("contract.k: missing")
     elif not _valid_k(contract["k"]) or contract["k"] != want:
         out.append("contract.k: policy-mismatch")
+    out += provenance(contract, justifications)[1]
     qi = contract.get("qi")
     listed = {(q.get("table"), q.get("column")) for q in qi if isinstance(q, Mapping)} if isinstance(qi, list) else set()
     for table, column in released_policy_qis(policy, contract, justifications):
         if (table, column) not in listed:
-            out.append(f"contract.qi: {table}.{column}: missing-policy-qi")
-    return sorted(out)
+            out.append(f"contract.qi: {_n(table)}.{_n(column)}: missing-policy-qi")
+    return sorted(set(out))

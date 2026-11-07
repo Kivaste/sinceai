@@ -60,12 +60,19 @@ def compute_signature(manifest: dict, signing_key: Any) -> str:
     return digest.hex()
 
 
+def _flagged(part: str) -> bool:
+    from pets_release.checks.cells._shape import flagged
+
+    return flagged(part)
+
+
 def _fmt(path) -> str:
     out = "$"
     for part in path:
         if isinstance(part, int):
             out += f"[{part}]"
-        elif _SAFE_KEY.match(part) and not _DIGIT_RUN.search(part):
+        elif _SAFE_KEY.match(part) and not _DIGIT_RUN.search(part) and not _flagged(part):
+            # a key the identifier detectors flag is masked in every diagnostic (round-2 review, #61)
             out += "." + part
         else:
             out += ".<key>"

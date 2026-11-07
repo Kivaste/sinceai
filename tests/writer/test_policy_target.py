@@ -141,3 +141,47 @@ def test_writer_refuses_renamed_policy_qi_dropped(tmp_path):
     res = write_release(cand, tmp_path / "o" / "rel", MASTER, kit, context=producer_context(cand))
     assert res.status == "refused"
     assert "policy:contract.qi: ed_visits.ab: missing-policy-qi" in res.reasons, res.reasons
+
+
+# --- output provenance (round-2 review, Sol): every released column states its source; a column derived from a
+# policy QI is a QI whatever its name ---------------------------------------------------------------------------
+
+def _with_extra_column(params, justification=None, name="at", src_col="arrival_ts"):
+    from pets_release.writer import ProtectedTable
+
+    base = make_candidate()
+    c = copy.deepcopy(base.contract)
+    cols = c["files"]["ed_visits.csv"]["columns"]
+    cols[name] = {"form": cols[src_col]["form"], "params": params}
+    n = copy.deepcopy(dict(base.narrative))
+    if justification is not None:
+        n["fieldJustifications"] = sorted([*n["fieldJustifications"], justification],
+                                          key=lambda f: (f["table"], f["column"]))
+    tables = tuple(ProtectedTable(name=t.name, frame=t.frame.assign(**{name: t.frame[src_col]}), final=t.final,
+                                  suppressed=t.suppressed) if t.name == "ed_visits.csv" else t for t in base.tables)
+    return make_candidate(contract=c, narrative=n, tables=tables)
+
+
+def _write_cand(tmp_path, cand):
+    kit = make_kit(tmp_path / "kit", cand)
+    return write_release(cand, tmp_path / "o" / "rel", MASTER, kit, context=producer_context(cand))
+
+
+def test_column_derived_from_policy_qi_must_be_a_qi(tmp_path):
+    res = _write_cand(tmp_path, _with_extra_column({"derived_from": "arrival_ts"}))
+    assert res.status == "refused"
+    assert "policy:contract.qi: ed_visits.at: missing-policy-qi" in res.reasons, res.reasons
+
+
+def test_column_without_provenance_refuses(tmp_path):
+    res = _write_cand(tmp_path, _with_extra_column({}))
+    assert res.status == "refused"
+    assert "policy:contract.files: ed_visits.at: no-provenance" in res.reasons, res.reasons
+
+
+def test_conflicting_provenance_refuses(tmp_path):
+    fj = {"table": "ed_visits", "column": "triage", "outputColumn": "at", "decision": "released",
+          "rung": "exact", "floor": "exact", "reason": "synthetic", "source": "hand"}
+    res = _write_cand(tmp_path, _with_extra_column({"derived_from": "arrival_ts"}, justification=fj))
+    assert res.status == "refused"
+    assert "policy:contract.files: ed_visits.at: provenance-conflict" in res.reasons, res.reasons

@@ -40,3 +40,34 @@ def test_omitted_policy_qi_fails_both_tiers(real_bed, verify_cli, tb):
         r = _verify(verify_cli, real_bed, full)
         assert r.returncode == 1, r.stdout
         assert "missing-policy-qi" in r.stdout
+
+
+def _add_column(real_bed, tb, params, name="at", src="arrival_ts"):
+    """Copy a released QI column under a new name, declare it in the contract (not in qi, no justification)."""
+    m = tb.load(real_bed.release)
+
+    def edit(header, rows):
+        i = header.index(src)
+        return [*header, name], [[*r, r[i]] for r in rows]
+
+    tb.edit_csv(real_bed.release, "ed_visits.csv", edit)
+    cols = m["contract"]["files"]["ed_visits.csv"]["columns"]
+    cols[name] = {"form": cols[src]["form"], "params": {**cols[src]["params"], **params}}
+    real_bed.resign(m)
+
+
+def test_unlisted_column_derived_from_policy_qi_fails_both_tiers(real_bed, verify_cli, tb):
+    """Round-2 review (Sol): an extra arrival-derived column outside qi and the justifications."""
+    _add_column(real_bed, tb, {"derived_from": "arrival_ts"})
+    for full in (True, False):
+        r = _verify(verify_cli, real_bed, full)
+        assert r.returncode == 1, r.stdout
+        assert "ed_visits.at: missing-policy-qi" in r.stdout
+
+
+def test_column_without_provenance_fails_both_tiers(real_bed, verify_cli, tb):
+    _add_column(real_bed, tb, {})
+    for full in (True, False):
+        r = _verify(verify_cli, real_bed, full)
+        assert r.returncode == 1, r.stdout
+        assert "ed_visits.at: no-provenance" in r.stdout

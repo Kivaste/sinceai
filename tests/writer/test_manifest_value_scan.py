@@ -82,3 +82,17 @@ def test_metadata_digests_are_not_flagged(tmp_path):
     m2 = copy.deepcopy(m)
     m2["residualRisks"][0]["description"] = "token " + m["signature"]["value"]  # a 64-hex outside metadata
     assert any(e.endswith("identifier-shape:HEX64_OUTSIDE_TOKEN") for e in validate_manifest(m2))
+
+
+def test_flagged_param_keys_never_echoed_in_refusal_report(tmp_path):
+    """Round-2 review (Sol): a flagged map key (and a flagged value's parent key) is masked in every reason."""
+    n = _nar()
+    n["pets"][0]["params"]["passwordHunterTwo"] = "x"
+    n["pets"][0]["params"]["loginAliceSmith"] = "someone@example.com"
+    res = _write(tmp_path, n)
+    assert res.status == "refused"
+    assert any(r.endswith("identifier-shape:SECRET") for r in res.reasons), res.reasons
+    report = b"".join(p.read_bytes() for p in scoring_dir(res.out).iterdir()).decode("utf-8")
+    text = report + "\n".join(res.reasons)
+    for s in ("passwordHunterTwo", "loginAliceSmith", "HunterTwo", "AliceSmith", "someone@example.com"):
+        assert s not in text, s

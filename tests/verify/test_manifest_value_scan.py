@@ -109,3 +109,40 @@ def test_unchanged_real_manifest_has_no_shape_errors(real_bed, tb):
     from pets_release.manifest import validate_manifest
 
     assert validate_manifest(tb.load(real_bed.release)) == []
+
+
+# --- no echo of a flagged map key (round-2 review, Sol) -------------------------------------------------------
+SECRET_KEY = "passwordHunterTwo"  # schema-valid param name that the secrets detector flags (cue + value)
+LOGIN_KEY = "loginAliceSmith"  # username detector: cue + handle
+
+
+def _plant_keys(m):
+    params = m["pets"][0]["params"]
+    params[SECRET_KEY] = "x"
+    params[LOGIN_KEY] = "someone@example.com"  # its value is flagged too: the parent key must not appear in its path
+
+
+def _no_echo(text):
+    for s in (SECRET_KEY, LOGIN_KEY, "HunterTwo", "AliceSmith", "someone@example.com"):
+        assert s not in text, s
+
+
+def test_flagged_keys_never_echoed_by_validation_verify_or_dashboard(real_bed, verify_cli, cli, tb, tmp_path):
+    from pets_release.manifest import validate_manifest
+
+    m = tb.load(real_bed.release)
+    _plant_keys(m)
+    m = real_bed.resign(m)
+    errs = validate_manifest(m)
+    assert any(e.endswith("identifier-shape:SECRET") for e in errs), errs
+    assert any(e.endswith("identifier-shape:USERNAME") for e in errs), errs
+    assert any(e.endswith("identifier-shape:EMAIL") for e in errs), errs
+    _no_echo("\n".join(errs))
+    for args in (["--full", "--kit", real_bed.kit, real_bed.release], [real_bed.release]):
+        r = verify_cli(*args, env=real_bed.env())
+        assert r.returncode == 1, r.stdout
+        assert "identifier-shape:SECRET" in r.stdout
+        _no_echo(r.stdout + r.stderr)
+    d = _dashboard_refuses(cli, real_bed.release, tmp_path)
+    assert "identifier-shape:SECRET" in d.stderr
+    _no_echo(d.stdout + d.stderr)
