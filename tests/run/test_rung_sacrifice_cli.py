@@ -13,6 +13,20 @@ Failure rows (trigger -> wrong result before the fix):
                                                     -> test_hour_of_day_adopted_as_recorded_sacrifice
   C3 manifest with hour_of_day released and the rungStep record removed -> verify passes
                                                     -> test_verify_refuses_hour_of_day_without_record
+
+Follow-up #109. Rule: sacrifices are checked against the rung the bound contract actually applies
+(``contract.files[<table>.csv].columns[<outputColumn>].params.rung``, with that rung's form), never against the
+justification's planned rung; a mismatch or a missing contract rung refuses in the manifest validator, so both
+verify tiers fail.
+  C4 re-signed release whose arrival cells, contract form and params.rung are hour-of-day while the justification
+     still says month+hour and no rungStep is recorded -> limited and full verify exit 0
+                                                    -> test_verify_refuses_contract_rung_not_justified
+  C5 contract column with no params.rung, or whose form is not its rung's form -> verify passes
+                                                    -> test_verify_refuses_missing_or_unsupported_contract_rung
+  C6 extra hour-of-day contract column (derived_from arrival_ts, listed as QI) no justification backs
+     -> verify passes                               -> test_verify_refuses_contract_column_no_justification_backs
+  C7 arrival_ts relabelled keep (justification + contract) with an hour-only regex and cells -> verify passes
+                                                    -> test_verify_refuses_rung_off_the_policy_ladder
 """
 from __future__ import annotations
 
@@ -146,3 +160,118 @@ def test_verify_full_re_measures_k_at_from(spread, tmp_path):
     assert res.returncode == 1, res.stdout + res.stderr
     assert "rungStep: H-U8: re-measure differs from the manifest" in res.stdout
     assert "signature" not in res.stdout
+
+def _resign(m):
+    from pets_release.manifest import canonical_digest, compute_signature
+    from pets_release.pseudonym import MasterKey, manifest_signing_key
+    from run_helpers import TEST_KEY
+
+    m["bindings"]["contractDigest"] = canonical_digest(m["contract"])
+    m["signature"]["value"] = compute_signature(m, manifest_signing_key(MasterKey.from_text(TEST_KEY)))
+
+
+def _forged_hour_of_day(released, tmp_path, *, contract_edit, cells=True):
+    """Copy of the month+hour release (k within budget) with arrival_ts moved to hour-of-day in the cells and the
+    contract only; the justification keeps ts.month_hour and no rungStep is recorded. Bindings and the signature
+    are recomputed, so only a contract-vs-justification rule can tell."""
+    import hashlib
+
+    from pets_release.manifest import canonical_bytes
+
+    _, out, proc = released
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    dst = tmp_path / "rel"
+    shutil.copytree(out, dst)
+    m = _manifest(dst)
+    fj = _just(m, "arrival_ts")
+    assert fj["rung"] == "ts.month_hour" and not any("rungStep" in s for s in m["sacrifices"])
+    if cells:
+        p = dst / "ed_visits.csv"
+        df = pd.read_csv(p, dtype=str, keep_default_na=False, na_filter=False)
+        df[fj["outputColumn"]] = df[fj["outputColumn"]].map(lambda v: v[-5:] if v else v)
+        df.to_csv(p, index=False, encoding="utf-8", lineterminator="\n")
+        m["bindings"]["files"]["ed_visits.csv"] = hashlib.sha256(p.read_bytes()).hexdigest()
+    contract_edit(m["contract"]["files"]["ed_visits.csv"]["columns"][fj["outputColumn"]])
+    _resign(m)
+    (dst / "privacy_manifest.json").write_bytes(canonical_bytes(m))
+    return dst
+
+
+def _to_hour_of_day(col):
+    col["form"] = r"^\d{2}:00$"
+    col["params"]["rung"] = "ts.hour_of_day"
+
+
+def test_verify_refuses_contract_rung_not_justified(released, tmp_path):
+    kit = released[0]
+    dst = _forged_hour_of_day(released, tmp_path, contract_edit=_to_hour_of_day)
+    lim = cli("verify", str(dst))
+    assert lim.returncode == 1, lim.stdout + lim.stderr
+    assert "ed_visits.arrival_ts: rung-contract-mismatch" in lim.stdout
+    full = cli("verify", "--full", "--kit", str(kit), str(dst))
+    assert full.returncode == 1, full.stdout + full.stderr
+    assert "ed_visits.arrival_ts: rung-contract-mismatch" in full.stdout
+
+
+@pytest.mark.parametrize("edit,code", [
+    (lambda col: col["params"].pop("rung"), "rung-contract-missing"),
+    (lambda col: col.update(form="text"), "rung-form-mismatch"),  # still matches every cell
+], ids=["no-contract-rung", "form-not-of-rung"])
+def test_verify_refuses_missing_or_unsupported_contract_rung(released, tmp_path, edit, code):
+    dst = _forged_hour_of_day(released, tmp_path, contract_edit=edit, cells=False)
+    res = cli("verify", str(dst))
+    assert res.returncode == 1, res.stdout + res.stderr
+    assert f"ed_visits.arrival_ts: {code}" in res.stdout
+
+
+def test_verify_refuses_contract_column_no_justification_backs(released, tmp_path):
+    """C6: an extra hour-of-day column derived from arrival_ts (listed as a QI, cells matching its form) that no
+    released justification backs: its rung escapes the sacrifice rule unless every contract column is justified."""
+    import hashlib
+
+    def extra(m, dst):
+        p = dst / "ed_visits.csv"
+        df = pd.read_csv(p, dtype=str, keep_default_na=False, na_filter=False)
+        df["arrival_hour"] = df[_just(m, "arrival_ts")["outputColumn"]].map(lambda v: v[-5:] if v else v)
+        df.to_csv(p, index=False, encoding="utf-8", lineterminator="\n")
+        m["bindings"]["files"]["ed_visits.csv"] = hashlib.sha256(p.read_bytes()).hexdigest()
+        spec = m["contract"]["files"]["ed_visits.csv"]
+        spec["columns"]["arrival_hour"] = {"form": r"^\d{2}:00$", "params": {
+            "derived_from": "arrival_ts", "nullable": True, "rung": "ts.hour_of_day"}}
+        spec["required"] = sorted([*spec["required"], "arrival_hour"])
+        m["contract"]["qi"] = sorted([*m["contract"]["qi"], {"table": "ed_visits", "column": "arrival_hour",
+                                                             "derived_from": "arrival_ts"}],
+                                     key=lambda r: (r["table"], r["column"]))
+
+    from pets_release.manifest import canonical_bytes
+
+    _, out, proc = released
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    dst = tmp_path / "rel"
+    shutil.copytree(out, dst)
+    m = _manifest(dst)
+    extra(m, dst)
+    _resign(m)
+    (dst / "privacy_manifest.json").write_bytes(canonical_bytes(m))
+    res = cli("verify", str(dst))
+    assert res.returncode == 1, res.stdout + res.stderr
+    assert "$.contract.files.ed_visits.csv.columns.arrival_hour: rung-unjustified" in res.stdout
+
+def test_verify_refuses_rung_off_the_policy_ladder(released, tmp_path):
+    """C7: arrival_ts relabelled ``keep`` in both the justification and the contract, with an hour-only regex form
+    (a validator-ID rung may declare a narrower regex) and hour-only cells: a timestamp column must carry a
+    timestamp-ladder rung, or the sacrifice rule is bypassed."""
+    def relabel(col):
+        col["form"] = r"^\d{2}:00$"
+        col["params"]["rung"] = "keep"
+
+    dst = _forged_hour_of_day(released, tmp_path, contract_edit=relabel)
+    from pets_release.manifest import canonical_bytes
+
+    m = _manifest(dst)
+    _just(m, "arrival_ts")["rung"] = "keep"
+    _resign(m)
+    (dst / "privacy_manifest.json").write_bytes(canonical_bytes(m))
+    res = cli("verify", str(dst))
+    assert res.returncode == 1, res.stdout + res.stderr
+    assert "ed_visits.arrival_ts: rung-not-on-ladder" in res.stdout
