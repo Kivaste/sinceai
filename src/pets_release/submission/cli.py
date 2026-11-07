@@ -68,4 +68,12 @@ def main(argv: list[str]) -> int:
           f"(redactor spans={cs['redactorSpans']}); text checks={len(cs['textChecks'])} "
           f"masked turns={cs['maskedTurns']} low-severity hits={cs['lowSeverityHits']}; "
           f"unseen columns={res.index['unseen']['columns']}")
+    eff = cs["maskingEffect"]
+    if eff["status"] == "measured":
+        b, a = eff["before"], eff["after"]
+        print(f"cs-eval masking effect: measured on {eff['turns']} labelled held-out turns, masked={eff['maskedTurns']}: "
+              f"precision {b['precision']} -> {a['precision']}, recall {b['recall']} -> {a['recall']}, "
+              f"F2 {b['f2']} -> {a['f2']}")
+    else:
+        print(f"cs-eval masking effect: not measured ({eff['reason']})")
     return 0
