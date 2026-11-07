@@ -437,3 +437,14 @@ def test_sentence_final_dot_does_not_extend_an_address_into_the_next_turn():
     a = "osoite on maija piste m at posti piste example."
     r = conv(a, "Kiitos paljon")
     assert found(r) == [("t0", 10, len(a) - 1, "EMAIL")]
+
+
+# ---- must-fix #54: a phone number on its own line is not glued to the house number above ----------
+@pytest.mark.parametrize("phone", ["0401234567", "040 123 4567", "+358 40 123 4567"])
+@pytest.mark.parametrize("house", ["Testikatu 12 B 4", "Testikatu 12", "Testgatan 7 A 3"])
+def test_phone_on_own_line_is_not_glued_to_house_number_when_account_cue_is_near(phone, house):
+    text = f"Kiitos tilinumero.\n\nTerveisin,\nMatti\n{house}\n{phone}"
+    r = conv(text)
+    labels = [(text[s["start"]:s["end"]], s["label"]) for s in r.spans]
+    assert (phone, "PHONE") in labels
+    assert all(lab != "ACCOUNT_NUMBER" for _, lab in labels)

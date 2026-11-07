@@ -386,6 +386,20 @@ class StructuredPass:
             if not digits:
                 return
             ctx = _context(view, chain[owner[a]].turn_index, syms[a].start)
+            # a line break inside the run (house number above, phone number on its own line): when the
+            # part after the break is a phone by itself, it is not glued to the digits above it
+            for q in range(a + 1, b):
+                if owner[q] != owner[q - 1] or s[q] not in "0+" or s[q - 1] == "-":
+                    continue
+                gap = view.turns[chain[owner[q]].turn_index].text[syms[q - 1].end:syms[q].start]
+                if "\n" not in gap:
+                    continue
+                tail = s[q:b].replace("-", "").replace("+", "")
+                r_tail = _classify_digits(tail, s[q] == "+", ctx)
+                if r_tail and r_tail[0] == "PHONE":
+                    take(q, b, "PHONE", r_tail[1], _value_key("PHONE", tail, s[q] == "+"))
+                    classify_segment(a, q)
+                    return
             res = _classify_digits(digits, s[a] == "+", ctx)
             if res:
                 take(a, b, res[0], res[1], _value_key(res[0], digits, s[a] == "+"))
