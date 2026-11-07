@@ -125,17 +125,28 @@ sys.argv = {command[2:]!r}
 runpy.run_module("pets_release.ui", run_name="__main__")
 '''
         command = [sys.executable, "-c", code]
+    # A Windows venv launcher can exit as soon as its interpreter child dies.
+    # Announce the actual interpreter PID so taskkill never races that launcher.
+    bootstrap = "import os; print(os.getpid(), flush=True)\n"
+    if command[1] == "-c":
+        bootstrap += command[2]
+    else:
+        bootstrap += (f"import runpy, sys\nsys.argv = {command[2:]!r}\n"
+                      "runpy.run_module('pets_release.ui', run_name='__main__')\n")
+    command = [sys.executable, "-c", bootstrap]
     proc = subprocess.Popen(command, env=env, cwd=ROOT, start_new_session=os.name != "nt",
                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    server_pid = proc.pid
     try:
+        server_pid = int(proc.stdout.readline())
         line = proc.stdout.readline().strip()
         assert line.startswith("http://127.0.0.1:"), "server did not announce a loopback URL"
         yield proc, line, kit, tmp_path / "out"
     finally:
         try:
             if os.name == "nt":
-                if proc.poll() is None:
-                    cleanup = subprocess.run(["taskkill", "/PID", str(proc.pid), "/T", "/F"],
+                if process_is_alive(server_pid):
+                    cleanup = subprocess.run(["taskkill", "/PID", str(server_pid), "/T", "/F"],
                                              capture_output=True, timeout=20, check=False)
                     assert cleanup.returncode == 0, "could not terminate UI test process tree"
             else:
