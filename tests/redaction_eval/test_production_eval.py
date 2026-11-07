@@ -38,7 +38,7 @@ def make_kit(root: Path, n_conv: int = 40) -> Path:
                       "3", "train", ""])
         custs.append([f"CU{c:03d}", "", f"Testi Asiakas{c}", "", "Testikatu 1", "00100", "Testila", "", "", "fi",
                       "", "", "", "", "", "", "", ""])
-        word = f"variant{c % 10}"
+        word = "variant" + "abcdefghij"[c % 10]  # 10 template families (digits would collapse to #)
         rows = [
             (f"my email is user{c}@example.fi {word}", [(f"user{c}@example.fi", "EMAIL")]),
             (f"ok noted {word}", []),
@@ -151,3 +151,13 @@ def test_dev_lexicon_factory_is_fitted_on_development_names_only():
                 conversation_of={"t1": "C1"})
     gz = production.dev_gazetteer(dev)
     assert gz.family == frozenset({"Quenzel"}) and gz.given == frozenset({"Zorbas"})
+
+
+def test_real_cli_reports_conversation_held_out(tmp_path):
+    """#68 through the real CLI."""
+    out = _cli(make_kit(tmp_path / "kit"), "--predictor", "regex-baseline")
+    assert out["split_mode"] == "conversation"
+    assert out["split"]["held_out_conversations"] > 0
+    assert out["split"]["conversations_in_both_partitions"] == 0
+    assert out["turn_held_out"]["satisfies_spec_conversation_boundary"] is False
+    assert "held_out" in out["headline"]

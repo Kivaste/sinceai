@@ -262,11 +262,13 @@ def test_predictor_factory_never_sees_held_out_turns():
         return regex_predictor
 
     rep = evaluate_frames(fr, notes, factory)
-    held = set(split_by_skeleton(fr, mode="turn").held_out_turns)
-    assert held and len(seen) == 1
-    assert not (seen[0] & held)
-    assert rep["split_mode"] == "turn"
-    assert isinstance(rep["conversations_in_both_partitions"], int)
+    held = set(split_by_skeleton(fr).held_out_turns)
+    turn_held = set(split_by_skeleton(fr, mode="turn").held_out_turns)
+    assert held and turn_held and len(seen) == 2
+    assert not (seen[0] & held) and not (seen[1] & turn_held)
+    assert rep["split_mode"] == "conversation"
+    assert rep["split"]["conversations_in_both_partitions"] == 0
+    assert isinstance(rep["turn_held_out"]["conversations_in_both_partitions"], int)
 
 
 def test_person_twice_not_measured_when_variant_missing():

@@ -40,7 +40,10 @@ def main(argv=None) -> int:
                           person_variants=variants, predictor_info=info)
     print(json.dumps({"predictor": info, "split_mode": rep["split_mode"], "split": rep["split"],
                       "precision_floor": rep["precision_floor"], "headline": headline(rep),
-                      "person_twice_held_out": rep["person_twice_held_out"]}, sort_keys=True))
+                      "person_twice_held_out": rep["person_twice_held_out"],
+                      "turn_held_out": {k: rep["turn_held_out"][k] for k in (
+                          "split_mode", "note", "satisfies_spec_conversation_boundary", "split",
+                          "conversations_in_both_partitions")}}, sort_keys=True))
     if rep["passed"] is None:  # floor unset: unknown, never a pass
         return 0 if a.report_only else 2
     return 0 if rep["passed"] else 1
