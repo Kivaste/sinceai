@@ -538,3 +538,35 @@ CS-S1 chain done-report + 4 reviews (23 + #53/#54/#56/#92) -> merge -> #63 -> 25
   3. The monitor ignores native blockers on branch items. This is the second occurrence (13:28, 14:38), filed as #129 (Sol). It is blocked by #125, because #125+#126 edit the same script.
 - **Why:** AGENTS.md: a defect class found twice becomes an automated check. Single owner for the CS-S1 chain (D29). Transparency on unmet targets (D40, D45).
 - **Evidence:** steer message msg_1b605012 to ses_e4aac068; issue comments on #53, #54, #63, #65, #66, #69, #92, #94, #121; #129.
+
+### Sat 14:52 - planning steer 14:50: Sol pre-staging lanes
+
+- **When:** Sat 14:50-14:52 EET (clock from heartbeat; the previous entry's "14:45" was written at about 14:40)
+- **Decision:**
+  1. #63: a Sol session (ses_e49f4e82) merges ticket/23-cs-s1 @ e4ae3fc into ticket/fu63-cs-contract. Rebase fallout only, with a real-kit CS-S1 run on its head. #65, #66 and #69 each contain the fu63 branch, so they are dispatched in parallel once #63's new head is pushed, so the same conflicts aren't resolved four times.
+  2. #80, #88, #93: no branches exist, so there is nothing to pre-stage. #88 is redactor work (D29 chain files) and stays after #24.
+  3. #103 story prep: Sol (ses_e49f4be2) on the new ticket/fu103-story-prep from f98cf62. It covers the D40 five items, the targets table with `{{manifest.*}}` placeholders, claim gates and the D45 statement. Finalisation still waits for section 4.
+  4. README prep filed as #130: Sol (ses_e49f49a4) on the new ticket/fu130-readme-final from #121's head d326ffe. Merge after #121, #117, #24 and #30. The submission section is left to #30's fixer.
+  5. Reviews for all of these: Grok Standards + Sonnet Spec (Sol-written).
+- **Why:** Planning steer 14:50. The dependency graph, not the cap, limits the work; pre-staged branches merge in the train right after #24.
+- **Evidence:** sessions above; worktrees fu103-story-prep and fu130-readme-final.
+
+### Sat 14:48 - utilization nudge (12:48Z): same items as 12:38Z, nothing dispatchable
+
+- **When:** Sat 14:48 EET
+- **Decision:** All 9 items were already answered in the 14:40 entry, with issue comments and native edges. They are re-flagged because the monitor ignores native blockers on branch items (#129). #65, #66 and #69 are additionally sequenced after the #63 rebase session (ses_e49f4e82), per the 14:52 entry. CPU is at 65.3% against the 70% limit.
+- **Why:** No new information; the monitor defect is #129.
+- **Evidence:** 14:40 and 14:52 entries; #129.
+
+### Sat 15:07 - rolling review pass 3 (Spec) findings routed; #131 folded into #110/#113
+
+- **When:** Sat 15:07 EET
+- **Decision:**
+  1. Pass 3 Spec (Sol, 8e93dcf...f98cf62): 2 high and 3 medium. Four of them confirm open tickets, and each is routed to the live owner:
+     - #106 -> ses_e4a0a4c1, steered;
+     - #110 and #113 -> ses_e4a02df0, which adds the reviewer's evaluator-child probe as a regression;
+     - #118 -> ses_e4a0a7cb, steered to cover both sites, search.py:619-624 and 819-821.
+  2. New tier-1 must-fix #131 (kiteval scorecard input parsed last-wins; incomplete fix of #114) is folded into ticket/fu110-scorecard-k under the same Opus owner. Duplicate keys must fail closed, reusing #114's strict loader. That branch now carries #110, #113 and #131, and round 1 gets all 4 reviews.
+  3. Noted: the pass found no path that makes a missing check produce false. The #109 and #120 regressions pass. The Standards axis (Grok) is still running.
+- **Why:** Tier-1 fail-closed first; same-area work goes to one owner.
+- **Evidence:** newest comments on #106, #110, #113 and #118; #131.
