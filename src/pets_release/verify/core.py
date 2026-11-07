@@ -148,12 +148,61 @@ def _assertion_problems(manifest: dict, records, scopes: set) -> list[str]:
     return out
 
 
+def _released_tables(release: Path, manifest: dict) -> dict:
+    import pandas as pd
+
+    out = {}
+    for name in sorted(manifest["contract"]["files"]):
+        out[name[:-4]] = pd.read_csv(release / name, dtype=str, keep_default_na=False, na_filter=False,
+                                     encoding="utf-8")
+    return out
+
+
+def _same_score(a, b) -> bool:
+    if a is None or b is None:
+        return a is None and b is None
+    return isinstance(a, (int, float)) and isinstance(b, (int, float)) and abs(float(a) - float(b)) <= 1e-12
+
+
+def purpose_problems(manifest: dict, release: Path, kit: Kit, source: dict) -> list[str]:
+    """Producer-scope fresh utility check (``--full``): re-run the run's own purpose evaluation
+    (``run.purpose.evaluate``) on the release folder; it must accept, and the signed ``measured.utility`` and
+    sacrifice scores must equal the re-run. Content-free lines (check IDs, reason codes)."""
+    from pets_release.policy import get_policy
+    from pets_release.run.purpose import evaluate
+
+    try:
+        policy = get_policy(manifest["release"]["scenario"])
+        released = _released_tables(release, manifest)
+    except Exception:  # noqa: BLE001 - unknown state fails closed, content-free
+        return ["purpose [producer]: unavailable (policy or released tables unreadable)"]
+    res = evaluate(policy, source, released, root=kit.root)
+    out = [f"purpose [producer]: {r}" for r in res.reasons]
+    util = manifest["measured"]["utility"]
+    if util.get("status") != "measured":
+        return out + ["measured.utility: not measured (full verify needs the signed purpose scores)"]
+    signed = {t["task"]: t for t in util["tasks"]}
+    fresh = {t["task"]: t for t in res.tasks}
+    for tid in sorted(set(signed) | set(fresh)):
+        s, f = signed.get(tid), fresh.get(tid)
+        if s is None or f is None or s["status"] != f["status"] or not (
+                _same_score(s["before"], f["before"]) and _same_score(s["after"], f["after"])):
+            out.append(f"measured.utility: {tid}: re-run differs from the manifest")
+    for sac in manifest["sacrifices"]:
+        f = fresh.get(sac["check"])
+        if f is None or not (_same_score(sac["before"], f["before"]) and _same_score(sac["after"], f["after"])):
+            out.append(f"sacrifices: {sac['check']}: re-run differs from the manifest")
+    return out
+
+
 def verify_release(release_dir, *, full: bool = False, kit=None, master_key=None, checks=None,
-                   context: dict | None = None) -> VerifyReport:
+                   context: dict | None = None, purpose=None) -> VerifyReport:
     """Verify ``release_dir``. Recipient mode by default; ``full=True`` needs ``kit`` and ``master_key``.
 
     ``checks`` replaces the registry (tests and run-context wiring only; the CLI never passes it).
     ``context`` adds producer run context under ``--full`` (ticket 21 wiring); recipient mode ignores it.
+    ``purpose`` replaces ``purpose_problems`` under ``--full`` (in-process tests whose fixture rows are not a run
+    of the kit; the CLI never passes it).
     """
     mode = "full" if full else "limited"
     release = Path(release_dir)
@@ -237,6 +286,12 @@ def verify_release(release_dir, *, full: bool = False, kit=None, master_key=None
             problems.append(f"check {r.check} [{r.scope}]: status mismatch "
                             f"(manifest {attested[r.check]}, re-run {r.status})")
     problems += _assertion_problems(manifest, result.records, scopes)
+    # 6. Purpose checks (full only): fresh, on full data, against the signed scores.
+    if full:
+        if run_ctx.get("source") is None:
+            problems.append("purpose [producer]: not_run (no source dataset)")
+        else:
+            problems += (purpose or purpose_problems)(manifest, release, kit, run_ctx["source"])
     if result.refused and not problems:  # the runner's own verdict is a floor, never overridden
         problems.append("checks: runner refused")
 
@@ -246,7 +301,7 @@ def verify_release(release_dir, *, full: bool = False, kit=None, master_key=None
     if full:
         n_producer = sum(1 for r in result.records if r.scope == "producer")
         verdict = (f"VERIFIED (full): {len(result.records)} checks re-run ({n_release} release, {n_producer} "
-                   f"producer); signature, input digests and tool revision match")
+                   f"producer); purpose checks re-run; signature, input digests and tool revision match")
     else:
         attested = sum(1 for c in manifest["gate"]["checks"] if c["scope"] == "producer")
         verdict = f"VERIFIED (limited): {n_release} release-checked, {attested} producer-attested"
