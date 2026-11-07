@@ -179,6 +179,13 @@ def test_column_without_provenance_refuses(tmp_path):
     assert "policy:contract.files: ed_visits.at: no-provenance" in res.reasons, res.reasons
 
 
+def test_unresolvable_provenance_refuses(tmp_path):
+    """Round-3 review (Sol): ``derived_from="."`` names no source column; it must not count as provenance."""
+    res = _write_cand(tmp_path, _with_extra_column({"derived_from": "."}))
+    assert res.status == "refused"
+    assert "policy:contract.files: ed_visits.at: unknown-provenance" in res.reasons, res.reasons
+
+
 def test_conflicting_provenance_refuses(tmp_path):
     fj = {"table": "ed_visits", "column": "triage", "outputColumn": "at", "decision": "released",
           "rung": "exact", "floor": "exact", "reason": "synthetic", "source": "hand"}

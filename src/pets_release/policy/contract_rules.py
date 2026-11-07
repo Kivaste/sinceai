@@ -5,7 +5,8 @@ A contract cannot set its own privacy target:
 * the k target comes from the policy's ``k_anonymity`` privacy target;
 * every released column must state its source (output provenance): a released field justification for it
   (``table`` + ``column`` -> ``outputColumn``) and/or the column's ``params.derived_from`` (``col`` or
-  ``table.col``). No source -> ``no-provenance``; two different sources -> ``provenance-conflict``;
+  ``table.col``). No source -> ``no-provenance``; two different sources -> ``provenance-conflict``; a malformed
+  reference or one naming a column outside the pinned source schema (the policy's columns) -> ``unknown-provenance``;
 * the mandatory QI set is derived from that provenance: any released column whose source is a policy QI is a
   QI whatever its name (also a column named like a policy QI's derived or source name), and must be listed in
   ``contract.qi``.
@@ -51,8 +52,12 @@ def _columns(contract) -> list[tuple[str, str, Mapping]]:
     return sorted(out, key=lambda x: (x[0], str(x[1])))
 
 
-def provenance(contract, justifications) -> tuple[dict, list[str]]:
-    """``({(table, released column): (source table, source column)}, problems)``."""
+def provenance(contract, justifications, source_schema) -> tuple[dict, list[str]]:
+    """``({(table, released column): (source table, source column)}, problems)``.
+
+    ``source_schema`` is the pinned set of ``(table, column)`` source columns (the policy's columns). A reference
+    that is malformed or names a column outside it is ``unknown-provenance`` and counts as no source at all, so it
+    can never stand in for real provenance (round-3 review, #62)."""
     justified: dict = {}
     for fj in justifications or ():
         if isinstance(fj, Mapping) and fj.get("decision") == "released" and isinstance(fj.get("outputColumn"), str):
@@ -68,6 +73,9 @@ def provenance(contract, justifications) -> tuple[dict, list[str]]:
                 continue
             t, _, c = df.rpartition(".")
             sources.add((t or stem, c))
+        if sources - set(source_schema):
+            problems.append(f"contract.files: {_n(stem)}.{_n(col)}: unknown-provenance")
+            continue
         if not sources:
             problems.append(f"contract.files: {_n(stem)}.{_n(col)}: no-provenance")
         elif len(sources) > 1:
@@ -82,7 +90,7 @@ def released_policy_qis(policy, contract: Mapping, justifications=None) -> list[
     policy QI) or by name (it carries a policy QI's derived or source name)."""
     qi_src = {(q["table"], q["column"]) for q in policy.qi}
     by_name = {(q["table"], name) for q in policy.qi for name in (q["derived"], q["column"])}
-    prov, _ = provenance(contract, justifications)
+    prov, _ = provenance(contract, justifications, policy.floors)
     out = set()
     for stem, col, _spec in _columns(contract):
         if (stem, col) in by_name or prov.get((stem, col)) in qi_src:
@@ -112,7 +120,7 @@ def contract_policy_problems(scenario: str, contract, justifications=None) -> li
         out.append("contract.k: missing")
     elif not _valid_k(contract["k"]) or contract["k"] != want:
         out.append("contract.k: policy-mismatch")
-    out += provenance(contract, justifications)[1]
+    out += provenance(contract, justifications, policy.floors)[1]
     qi = contract.get("qi")
     listed = {(q.get("table"), q.get("column")) for q in qi if isinstance(q, Mapping)} if isinstance(qi, list) else set()
     for table, column in released_policy_qis(policy, contract, justifications):

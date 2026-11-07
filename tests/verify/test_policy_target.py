@@ -4,8 +4,12 @@ Rows (trigger -> result), on a release built by the real ``pets-release run`` (s
   unchanged                              -> verify --full exit 0, recipient verify exit 0
   contract k=2, re-bound and re-signed   -> verify --full exit 1, recipient verify exit 1 (manifest invalid)
   a released policy QI dropped from qi   -> verify --full exit 1, recipient verify exit 1
+  extra column, derived_from malformed or naming a column outside the policy's source schema
+                                         -> both tiers exit 1 (unknown-provenance)
 """
 from __future__ import annotations
+
+import pytest
 
 
 def _verify(verify_cli, real_bed, full):
@@ -63,6 +67,17 @@ def test_unlisted_column_derived_from_policy_qi_fails_both_tiers(real_bed, verif
         r = _verify(verify_cli, real_bed, full)
         assert r.returncode == 1, r.stdout
         assert "ed_visits.at: missing-policy-qi" in r.stdout
+
+
+@pytest.mark.parametrize("ref", [".", "ed_visits.", "no_such_column", "lab_results.arrival_ts"])
+def test_unresolvable_provenance_fails_both_tiers(real_bed, verify_cli, tb, ref):
+    """Round-3 review (Sol): a malformed provenance reference, or one naming a source column absent from the
+    pinned source schema (the policy's columns), is not provenance; it must not let a copied QI escape qi."""
+    _add_column(real_bed, tb, {"derived_from": ref})
+    for full in (True, False):
+        r = _verify(verify_cli, real_bed, full)
+        assert r.returncode == 1, r.stdout
+        assert "ed_visits.at: unknown-provenance" in r.stdout, r.stdout
 
 
 def test_column_without_provenance_fails_both_tiers(real_bed, verify_cli, tb):
