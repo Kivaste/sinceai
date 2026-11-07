@@ -26,7 +26,12 @@ verify needs only the release. No contract ``k`` -> both k checks return not_run
   source:       {table: DataFrame (dtype=str)} original tables
   rowmaps:      {table: DataFrame[protected_row, original_record_id]} per released QI table
   record_keys:  {table: record-key column in source}
-  person:       {table, column} the person identifier in source
+  person:       {table, column, normalise[, released_as]} the person identifier in source.
+                ``normalise`` (str -> str) is the pseudonymiser's own normalisation for the person
+                column's label, injected by the producer context (checks never import the
+                pseudonymiser). Persons are keyed by it, so spellings that get one released token are
+                one person; missing -> not_run. If a person token is released, token <-> canonical
+                person must be one-to-one, else error (conflicting mapping).
   joins:        [{table, column, ref_table, ref_column}] source joins to the person table
 """
 
@@ -125,8 +130,25 @@ def _anchor_ids(table, release_n, context):
     return out
 
 
-def _person_linked(contract, context, person_t, person_c) -> bool:
-    """True if a released token lets a recipient link all records of one person.
+def _canonical(p, norm):
+    """Canonical person identity: ``norm`` is the pseudonymiser's own normalisation for the person label.
+
+    Two source spellings that pseudonymisation maps to one released token are one person. Empty
+    (or empty after normalisation) -> None, an unidentified unit. Any normaliser error fails closed.
+    """
+    if not isinstance(p, str) or not p.strip():
+        return None
+    try:
+        c = norm(p)
+    except Exception as exc:  # noqa: BLE001 - any failure is a content-free error
+        raise CheckError("person identifier cannot be normalised") from exc
+    if not isinstance(c, str):
+        raise CheckError("person normaliser returned a non-string")
+    return c if c else None
+
+
+def _person_tokens(contract, context, person_t, person_c) -> set[tuple[str, str]]:
+    """Released (table, column) tokens that let a recipient link all records of one person.
 
     A contract token links the person when ANY of: it has the source person column's
     name (legacy), it carries ``derived_from`` naming the person column (``col`` or
@@ -138,6 +160,7 @@ def _person_linked(contract, context, person_t, person_c) -> bool:
     released_as = {
         (x["table"], x["column"]) for x in (context["person"].get("released_as") or [])
     }
+    out = set()
     for x in tokens:
         key = (x["table"], x["column"])
         src = x.get("derived_from")
@@ -146,8 +169,24 @@ def _person_linked(contract, context, person_t, person_c) -> bool:
             or key in released_as
             or (isinstance(src, str) and src in (person_c, f"{person_t}.{person_c}") and x["table"] == person_t)
         ):
-            return True
-    return False
+            out.add(key)
+    return out
+
+
+def _check_token_mapping(pairs) -> None:
+    """Released person token <-> canonical identity must be one-to-one (else refuse: conflicting mapping).
+
+    ``pairs`` are (token, canonical person) per released row with a person ID. A canonical person under
+    two tokens, or one token over two canonical persons, means the counting identity differs from what
+    the recipient can link; the check cannot be trusted, so it errors.
+    """
+    tok_to_p: dict = {}
+    p_to_tok: dict = {}
+    for tok, p in pairs:
+        if p is None:
+            continue
+        if tok_to_p.setdefault(tok, p) != p or p_to_tok.setdefault(p, tok) != tok:
+            raise CheckError("person token and person identity do not map one-to-one")
 
 
 class PersonK(NamedTuple):
@@ -170,19 +209,23 @@ def person_k_values(release, contract, context) -> PersonK:
         raise CheckError("person table record key missing")
     psrc = _source_index(context["source"], person_t, person_c)
     _source_index(context["source"], person_t, pk)
-    # a record with no person ID maps to None: an unidentified unit (see module docstring)
-    anchor_person = {
-        a: (p if isinstance(p, str) and p.strip() else None) for a, p in zip(psrc[pk], psrc[person_c])
-    }
+    # persons are keyed by their canonical identity (see _canonical); a record with no person ID maps
+    # to None: an unidentified unit (see module docstring)
+    norm = context["person"].get("normalise")
+    if not callable(norm):
+        raise CheckError("person identity normaliser missing")
+    anchor_person = {a: _canonical(p, norm) for a, p in zip(psrc[pk], psrc[person_c])}
 
     qis = qi_by_table(contract)
     tables = sorted(set(qis) | ({person_t} if (release_dir(release) / f"{person_t}.csv").is_file() else set()))
     if not tables:
         raise CheckError("nothing released to evaluate")
 
+    person_tokens = _person_tokens(contract, context, person_t, person_c)
     # anchor -> {table: [row tuples]}
     parts: dict[str, dict[str, list[tuple]]] = defaultdict(lambda: defaultdict(list))
     person_rows: dict[str, list[int]] = defaultdict(list)
+    token_pairs = []
     for t in tables:
         df = read_table(release, t)
         cols = qis.get(t, [])
@@ -190,6 +233,10 @@ def person_k_values(release, contract, context) -> PersonK:
         if missing:
             raise CheckError("contract QI column missing from released table")
         anchors = _anchor_ids(t, len(df), context)
+        for tt, tc in sorted(person_tokens):
+            # a declared token column absent from the file has nothing to map (linking stays assumed)
+            if tt == t and tc in df.columns:
+                token_pairs.extend((tok, anchor_person.get(a)) for tok, a in zip(df[tc].tolist(), anchors))
         values = list(zip(*(df[c].tolist() for c in cols))) if cols else [()] * len(df)
         for i, (a, v) in enumerate(zip(anchors, values)):
             parts[a][t].append(tuple(v))
@@ -207,7 +254,8 @@ def person_k_values(release, contract, context) -> PersonK:
                 sig.append(tuple(sorted(rows)) if rows else ())
         return tuple(sig)
 
-    person_linked = _person_linked(contract, context, person_t, person_c)
+    person_linked = bool(person_tokens)
+    _check_token_mapping(token_pairs)
 
     identified = [a for a in parts if anchor_person[a] is not None]
     unidentified = sorted(a for a in parts if anchor_person[a] is None)
@@ -245,6 +293,8 @@ def run_person_k(release, contract, context) -> Outcome:
     k = _k(contract, context)
     needed = ("source", "rowmaps", "record_keys", "person")
     if k is None or any(context.get(n) is None for n in needed):
+        return Outcome.not_run()
+    if context["person"].get("normalise") is None:  # identity canonicaliser not supplied
         return Outcome.not_run()
     res = person_k_values(release, contract, context)
     n = len(res.per_person) + res.unidentified

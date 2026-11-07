@@ -230,5 +230,5 @@ def test_linkage_is_expected_exactly_when_the_kit_has_identity_data_for_the_tabl
     identity.write_text("record_id,person_id\nc1,\nc2,\n", encoding="utf-8")
     assert linkage() is None  # the kit itself skips linkage when no record maps to a person
     identity.write_text("record_id,person_id\nc1,p1\nc2,\n", encoding="utf-8")
-    assert linkage() == {"attacks": []}
+    assert linkage() == {"attacks": [], "no_attack_columns": []}
 

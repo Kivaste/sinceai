@@ -14,6 +14,7 @@ import pytest
 
 import pets_release.checks as checks_pkg
 from pets_release.checks import all_checks, run_checks
+from pets_release.run.context import person_normaliser
 
 RECORD_KEYS = {"check", "version", "scope", "status", "denominator", "hits", "violations"}
 VIOLATION_KEYS = {"check", "label", "severity", "file", "column", "count", "locations"}
@@ -38,7 +39,7 @@ def _ctx(h):
         "source": {"ed_visits": h.frame({"visit_id": visits, "patient_hetu": [f"P{i}0000-00{i}" for i in range(6)]})},
         "rowmaps": {"ed_visits": h.rowmap(visits)},
         "record_keys": {"ed_visits": "visit_id"},
-        "person": {"table": "ed_visits", "column": "patient_hetu"},
+        "person": {"table": "ed_visits", "column": "patient_hetu", "normalise": person_normaliser()},
         "joins": [],
         "identifiers": [{"table": "ed_visits", "column": "patient_hetu"}],
         "keys": [KEY],
