@@ -87,6 +87,21 @@ def test_every_assertion_is_literal_false_and_backed_by_a_clean_gate_record(tmp_
         assert ev == gate[ev["check"]] and ev["hits"] == 0 and ev["denominator"]["n"] >= 1
 
 
+def test_not_applicable_check_is_listed_in_gate_but_backs_nothing(tmp_path):
+    na = stub("zz.text-only", status_outcome=Outcome.not_applicable(), scope="release", unit="turns",
+              applies_to=("text",))  # fixture contract has no text column
+    out = tmp_path / "rel"
+    res = write_release(make_candidate(), out, MASTER, context={},
+                        checks=checks_with_stubs(replace={"zz.text-only": na}))
+    assert res.status == "released", res.reasons
+    m = loads_strict((out / MANIFEST_FILENAME).read_bytes())
+    entry = {c["check"]: c for c in m["gate"]["checks"]}["zz.text-only"]
+    assert entry["status"] == "not_applicable" and entry["denominator"]["n"] == 0
+    assert m["bindings"]["checkVersions"]["zz.text-only"] == "1.0.0"
+    assert "zz.text-only" not in {e["check"] for e in m["assertionEvidence"].values()}
+    assert validate_manifest_file(out) == []
+
+
 def test_tables_written_sorted_and_row_maps_match_lineage(tmp_path):
     cand = make_candidate()
     out, _ = _released(tmp_path, cand)

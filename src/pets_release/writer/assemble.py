@@ -74,7 +74,8 @@ def assemble_manifest(candidate, records, file_digests: dict, signing_key):
     assertions, evidence, reasons = evidence_for(records, candidate.scenario)
     if reasons:
         return None, reasons
-    gate = [gate_entry(r) for r in sorted(records, key=lambda r: r.check) if r.status == "pass"]
+    # not_applicable records (04: n 0, hits 0) are listed for transparency; evidence_for never uses them.
+    gate = [gate_entry(r) for r in sorted(records, key=lambda r: r.check) if r.status in ("pass", "not_applicable")]
     contract = candidate.contract
     m = {
         "schemaVersion": SCHEMA_VERSION,

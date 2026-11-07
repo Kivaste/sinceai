@@ -47,12 +47,12 @@ def make_candidate(**over) -> Candidate:
     return Candidate(**kw)
 
 
-def stub(name: str, *, status_outcome=None, scope=None, unit=None) -> Check:
+def stub(name: str, *, status_outcome=None, scope=None, unit=None, applies_to=()) -> Check:
     """A test-only stand-in for a producer-scope check that needs source context the fixture lacks."""
     ev = {e["check"]: e for e in ASSERTION_EVIDENCE.values()}.get(name, {"scope": "producer", "unit": "cells"})
     out = status_outcome or Outcome(n=10)
     return Check(name=name, version="1.0.0", scope=scope or ev["scope"], unit=unit or ev["unit"],
-                 run=lambda release, contract, context: out)
+                 run=lambda release, contract, context: out, applies_to=tuple(applies_to))
 
 
 def checks_with_stubs(scenario: str = fx.SCENARIO, replace: dict | None = None) -> list[Check]:

@@ -17,8 +17,8 @@ What it does, in order:
      inputs from ``context`` (e.g. source tables, row maps, keys); absent inputs mean ``not_run``, which refuses.
   4. Evidence (``assemble.evidence_for``): each of the scenario's required assertions needs its
      ``ASSERTION_CHECKS`` record with status pass, 0 hits, n >= 1 and 02's scope/unit. Otherwise refuse. The
-     assertion value is the literal ``False``; there is no other code path. ``not_applicable`` records are left
-     out of ``gate.checks`` and never back an assertion.
+     assertion value is the literal ``False``; there is no other code path. ``not_applicable`` records are listed in
+     ``gate.checks`` (n 0) and never back an assertion.
   5. Field-justification tie: every released contract column has a released justification and vice versa.
   6. Assembles the manifest (bindings: per-file SHA-256, input digests, tool revision, check versions, lexicon
      digests, contract digest; ``releaseScopeId``), signs it with ticket 06's ``manifest_signing_key(master)``

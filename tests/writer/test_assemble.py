@@ -51,9 +51,9 @@ def test_scope_or_unit_mismatch_refuses(tmp_path):
 
 
 def test_not_applicable_status_never_backs_an_assertion(tmp_path):
-    from dataclasses import replace
-    recs = tuple(replace(r, status="not_applicable") if r.check == "rescan.emails" else r
-                 for r in _records(tmp_path))
+    na = stub("rescan.emails", status_outcome=Outcome.not_applicable(), applies_to=("text",))
+    recs = _records(tmp_path, {"rescan.emails": na})
+    assert {r.check: r.status for r in recs}["rescan.emails"] == "not_applicable"
     assertions, _, reasons = evidence_for(recs, SCEN)
     assert assertions is None and "assertion:emails:status:not_applicable" in reasons
 
