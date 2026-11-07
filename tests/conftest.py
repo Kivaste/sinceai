@@ -105,6 +105,33 @@ def run_cli(*args: str, env: dict | None = None, module: str = "pets_release") -
     )
 
 
+PINNED_KIT = Path(r"C:\Users\kivas\AI\sinceai-hackaton\Briefs\TRUSTED_PETS_PROVING_GROUND_2026 (1)"
+                  r"\TRUSTED_PETS_PROVING_GROUND_2026")
+
+
+def find_kit() -> Path | None:
+    """The kit root: PETS_KIT if set, else the pinned path. None when it is not a kit (no results/benchmark.json)."""
+    kit = Path(os.environ.get("PETS_KIT") or PINNED_KIT)
+    return kit if (kit / "results" / "benchmark.json").is_file() else None
+
+
+@pytest.fixture
+def kit_root(request) -> Path:
+    """The kit root for tests marked ``kit``. A missing kit FAILS (never skips: skipped = not run = unknown = fail).
+    Kit-less runs deselect them explicitly with ``-m "not kit"``."""
+    kit = find_kit()
+    if kit is None:
+        pytest.fail("kit required but not found: set PETS_KIT or place the kit at the pinned path "
+                    '(run with -m "not kit" to exclude kit tests explicitly)', pytrace=False)
+    return kit
+
+
+@pytest.fixture(autouse=True)
+def _kit_marked_tests_need_the_kit(request):
+    if request.node.get_closest_marker("kit") is not None:
+        request.getfixturevalue("kit_root")
+
+
 @pytest.fixture
 def make_kit(tmp_path: Path):
     def _make(**kwargs) -> Path:
