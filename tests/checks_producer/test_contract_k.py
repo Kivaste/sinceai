@@ -1,4 +1,4 @@
-"""k comes from the release contract's top-level ``k``; context k must agree; no contract k -> not_run."""
+"""k comes from the release contract's top-level ``k``; context k must agree; no contract k -> not_applicable (CS-S1 has no k target; ticket 23)."""
 
 from __future__ import annotations
 
@@ -47,9 +47,9 @@ def test_context_k_must_equal_contract_k(h, setup, name):
 
 
 @pytest.mark.parametrize("name", NAMES)
-def test_no_contract_k_is_not_run_even_with_context_k(h, setup, name):
+def test_no_contract_k_is_not_applicable_even_with_context_k(h, setup, name):
     rel, ctx = setup
-    assert _run(name, rel, h.contract([("ed_visits", "sex")], k=None), dict(ctx, k=2))["status"] == "not_run"
+    assert _run(name, rel, h.contract([("ed_visits", "sex")], k=None), dict(ctx, k=2))["status"] == "not_applicable"
 
 
 @pytest.mark.parametrize("name", NAMES)

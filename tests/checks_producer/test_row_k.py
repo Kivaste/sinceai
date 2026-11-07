@@ -40,7 +40,7 @@ def test_row_k_counts_rows_in_small_classes_per_table(h):
 
 def test_row_k_needs_only_release_but_not_run_without_k(h):
     rel = h.release({"ed_visits": {"sex": ["F"] * 6}})
-    assert ROW_K.run(rel, h.contract([("ed_visits", "sex")], k=None), {"k": 5})["status"] == "not_run"
+    assert ROW_K.run(rel, h.contract([("ed_visits", "sex")], k=None), {"k": 5})["status"] == "not_applicable"
     assert ROW_K.run(rel, h.contract([("ed_visits", "sex")]), {})["status"] == "pass"  # release only
     assert ROW_K.run(rel, h.contract([("ed_visits", "sex")]), {"k": 5})["status"] == "pass"
 
