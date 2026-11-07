@@ -192,7 +192,8 @@ def device_ids(s):
 #   value is glued to it ("[SECRET_1]hunterxyz");
 # * a plain word directly before a placeholder is not the value (the placeholder is); after a bare
 #   wifi/wlan cue a plain word counts only at the clause end;
-# * a cue inside a placeholder ("[USERNAME_1]") is no cue; a cue glued to a longer word ("pinta") is no cue.
+# * a cue inside a placeholder ("[USERNAME_1]") is no cue; a cue glued to a longer word ("pinta") is no cue,
+#   unless the glued remainder is credential-shaped ("passwordHunterTwo"): then that remainder is the value.
 # Brackets are value characters ("[Hunter2!]"), not a placeholder.
 _CUE_TOKEN = re.compile(_cues.PLACEHOLDER_SRC + r"|(?:(?!" + _cues.PLACEHOLDER_SRC + r")\S)+")
 _WRAP = "\"'()[]<>,;"
@@ -248,7 +249,9 @@ def _cued_value_counts(s: str, pos: int, *, alpha_without_copula: bool,
     for i, (start, end, tok) in enumerate(toks[:_cues.WINDOW]):
         nxt = toks[i + 1][2] if i + 1 < len(toks) else None
         if i == 0 and start == pos and tok[0].isalpha():
-            return False  # the cue is the start of another word ("pinta", "passwordless")
+            # the cue starts another word ("pinta", "passwordless"): no cue, unless what is glued on is itself
+            # credential-shaped ("passwordHunterTwo", "salasanaKissa7", "loginAliceSmith")
+            return _credential_shaped(tok.strip(_WRAP))
         if _cues.is_placeholder(tok):
             if not s[end:end + 1].isalnum():
                 armed = False  # the redacted value took the copula; "[SECRET_1] ok" is prose

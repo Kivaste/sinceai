@@ -97,6 +97,21 @@ def test_uncued_time_is_not_split(tmp_path, check):
     assert _hits(tmp_path, "password reset at 12:30 tomorrow", check) == 0
 
 
+# a cue glued to a credential-shaped remainder (camelCase keys, "salasana123") is cue + value; a cue glued to
+# a plain word ("passwordless", "loginpage") is no cue
+@pytest.mark.parametrize("check,text", [("rescan.secrets", "passwordHunterTwo"), ("rescan.secrets", "salasanaKissa7"),
+                                        ("rescan.usernames", "loginAliceSmith")])
+def test_cue_glued_to_credential_shaped_remainder_refuses(tmp_path, check, text):
+    assert _hits(tmp_path, text, check) >= 1
+
+
+@pytest.mark.parametrize("check,text", [("rescan.secrets", "passwordless login works"),
+                                        ("rescan.usernames", "loginpage is down"),
+                                        ("rescan.secrets", "pinta is fine")])
+def test_cue_glued_to_plain_word_is_no_cue(tmp_path, check, text):
+    assert _hits(tmp_path, text, check) == 0
+
+
 def test_cli_refuses_hedge_glued_username(tmp_path):
     c = tmp_path / "contract.json"
     shutil.copy(FIX / "contract.json", c)
