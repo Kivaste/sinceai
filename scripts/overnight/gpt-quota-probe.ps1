@@ -5,15 +5,17 @@
   On the first success: writes .scratch/local-overnight/gpt-available.json (the exact time), logs it, queues the
   switch-back message to the orchestrator (send-to-orchestrator.ps1) and exits. Single instance via PID file.
 #>
-param([int]$IntervalMin = 5, [int]$MaxHours = 6, [string]$Model = 'openai/gpt-6.1-sol#low', [switch]$Once)
+param([int]$IntervalMin = 5, [int]$MaxHours = 6, [string]$Model = 'openai/gpt-6.1-sol#low', [switch]$Once,
+      # Generic use (e.g. -Name go -Model opencode-go/gemini-4-argon#low -MessageFile go-switch-back-message.md):
+      [string]$Name = 'gpt', [string]$MessageFile = 'gpt-switch-back-message.md')
 $ErrorActionPreference = 'Continue'
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $dir = Join-Path $RepoRoot '.scratch\local-overnight'
 $log = Join-Path $dir 'watchdog.log'
-$pidFile = Join-Path $dir 'gpt-probe.pid'
-$flag = Join-Path $dir 'gpt-available.json'
-$msg = Join-Path $PSScriptRoot 'gpt-switch-back-message.md'
-function Log($t) { Add-Content -Path $log -Value ('{0} [{1}] gpt-probe {2}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss zzz'), $PID, $t) }
+$pidFile = Join-Path $dir "$Name-probe.pid"
+$flag = Join-Path $dir "$Name-available.json"
+$msg = Join-Path $PSScriptRoot $MessageFile
+function Log($t) { Add-Content -Path $log -Value ('{0} [{1}] {2}-probe {3}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss zzz'), $PID, $Name, $t) }
 
 if (Test-Path $flag) { "already available since: " + (Get-Content -Raw $flag); exit 0 }
 if (-not $Once -and (Test-Path $pidFile)) {

@@ -55,6 +55,16 @@ If `claude-agent/opus` is rate-limited or errors, use `openai/gpt-6.1-sol`. Log 
 - **At most 8 concurrent review sessions per provider** (xai, opencode-go). Review only a ticket's current head, and cancel a review when its head is superseded.
 - **Final whole-branch `code-review`:** `opencode-go/gemini-4-argon#medium` + `opencode-go/gpt-6-luna#medium`. Use `openai/gpt-6.1-sol` instead of Luna if its quota has reset.
 
+**opencode-go quota exhausted (D13e, Sat 07:05). This overrides every opencode-go model named elsewhere in this brief:** `opencode-go/*` (Gemini 4 Argon, GPT-6 Luna, DeepSeek, opencode-go Grok) fails with "Go usage limit exceeded". Until `.scratch/local-overnight/go-available.json` exists:
+- **Core tickets:** `xai/grok-4.7#medium` + `openai/gpt-6.1-sol#high`.
+- **Routine tickets:** Grok only.
+- **Must-fix delta reviews** (D13c's "Grok + Gemini"): Grok + Sol.
+- **Rule-audit passes:** `xai/grok-4.7#high`.
+- **Final review:** `openai/gpt-6.1-sol#high` + `xai/grok-4.7#high`.
+- **Sol budget:** at most **4** concurrent Sol sessions, and Sol only for core second reviews, must-fix delta reviews and the final review.
+- **If Sol hits its limit:** the second reviewer becomes `opencode/glm-5.3-flash-free` (free, a different family: Zhipu). It's weaker, so the orchestrator double-checks its approvals of fail-closed code with a Grok delta review.
+- When `go-available.json` appears, you'll get `scripts/overnight/go-switch-back-message.md`; apply it.
+
 **Extra parallel work (D24, Sat 06:25; user decision):**
 - **Rolling final review:** the final whole-branch review runs incrementally. A pass covers everything merged so far, using the final-review reviewers plus the AGENTS.md rule audit; each later pass covers only the delta since the previous pass. Record the reviewed range (`<from>..<to>`) in the decision log, so the end-of-run review is just the last delta.
 - **Story drafts:** one Sonnet agent drafts `docs/story/` for the business teammate: 3–5 tagline options (≤140 chars), the description (≤5,000 chars, with the first lines written for voters), the deck outline, a video script under 2 minutes (working product in the first 20 s) and the 4-minute pitch with Q&A notes, all from the spec, GLOSSARY.md, PRIVACY_PATTERNS_PLAN.md §10–12 and the manifest keys. Numbers appear as manifest-key placeholders until #22 lands, then get filled from the real manifest. Content-free: no row values.
