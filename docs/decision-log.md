@@ -693,3 +693,11 @@ CS-S1 chain done-report + 4 reviews (23 + #53/#54/#56/#92) -> merge -> #63 -> 25
 - The #32 Mistral run (key file absent); #32 AC3.
 - The default-plan release feeding the packager (#128; the README uses --plan hand until it merges).
 - 5 README-ledger skips (named reasons; not passes).
+
+### Sat 15:44 - nudge 13:43Z; #80 round 2
+
+- **When:** Sat 15:43-15:44 EET
+- **Decision:**
+  - ticket/fu121-readme-examples (#121): approved, with a native blocked-by #117 edge and a comment from 14:40. It is flagged only because of the #129 monitor defect, which is parked until the pin. Not dispatchable.
+  - #80 round 1: Sol Standards (high, reproduced on the synthetic minikit), Sol Spec and Grok Spec all CHANGES REQUIRED. A withheld value held by 5 or more rows is exempt from the self-scan. Round 2 is with the Opus implementer (ses_e49de156): drop the frequency exemption, red first. Grok Standards is pending.
+- **Evidence:** issue #121 comment; review sessions ses_e49c2940, ses_e49c27a9, ses_e49c2662.
