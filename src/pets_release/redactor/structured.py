@@ -33,12 +33,14 @@ CUE_WINDOW = 7  # words before a value searched for a cue
 CARD_CUES = ("kortti", "kortil", "kortin", "korttia", "card", "kort", "päättyy", "loppuu", "ending", "ends",
              "slutar", "visa", "mastercard", "luottokort", "pankkikort")
 ACCOUNT_CUES = ("asiakas", "lasku", "sopimus", "tilaus", "viite", "customer", "invoice", "contract", "order",
-                "kund", "faktur", "avtal", "referen", "account", "konto", "asiakkuu", "tilin")
+                "kundnum", "kundnr", "faktur", "avtal", "referen", "account", "konto", "asiakkuu", "tilin")
 SECRET_CUES = ("pin", "puk", "salasan", "password", "passw", "lösenord", "koodi", "tunnusluku", "wifi", "wlan",
                "verkkoavain", "passcode", "kod", "nyckel")
 DEVICE_CUES = ("imei", "iccid", "sim", "sarjanumer", "serial", "serienummer", "laitetunnus", "laitteen")
-USERNAME_CUES = ("käyttäjätunnu", "käyttäjänim", "username", "användarnamn", "login", "tunnukseni", "tunnus",
-                 "user")
+USERNAME_CUES = ("käyttäjätunnu", "käyttäjänim", "username", "användarnamn", "login", "kirjautumistunnu")
+HETU_CUES = ("hetu", "henkilötunnu", "henkilötunnukse", "personbeteckning", "personnummer", "personnumret", "identity",
+             "personal", "sotu", "loppuosa", "tarkiste")
+NUMBER_CUES = ("numero", "number", "nummer", "nro", "numret")
 PLATE_CUES = ("auto", "rekisteri", "rekkari", "plate", "registration", "bil", "registrering", "ajoneuvo", "car")
 VERSION_CUES = ("versio", "version", "firmware", "ohjelmisto", "päivitys", "update", "v")
 FILLER = {"on", "oli", "is", "was", "är", "var", "my", "mun", "minun", "min", "mitt", "the", "varmaan", "probably",
@@ -57,8 +59,9 @@ _MAC_RE = re.compile(r"(?<![\w:-])[0-9A-Fa-f]{2}(?:([:-])[0-9A-Fa-f]{2})(?:\1[0-
 _PROPERTY_RE = re.compile(r"(?<![\w-])\d{1,3}-\d{1,3}-\d{1,4}-\d{1,4}(?![\w-])")
 _PLATE_RE = re.compile(r"(?<![\w-])[A-Za-zÅÄÖåäö]{2,3}-\d{1,3}(?![\w-])")
 _DOTTED_RE = re.compile(r"(?<![\w])\d+(?:[.,:]\d+)+\.?(?![\w])")
+_EXPIRY_RE = re.compile(r"(?<![\w/])(?:0?[1-9]|1[0-2])/(?:\d{2}|20\d{2})(?![\w/])")
 _TIME_RE = re.compile(r"(?i)\b(?:klo|kl\.?|at)\s*\d{1,2}(?:[.:]\d{2})?\b")
-_CURRENCY = r"(?:€|e|eur|euro[a-zä]*|snt|sentti[a-zä]*|kr|kronor|sek|usd|\$|£|gbp|dollar[s]?)"
+_CURRENCY = r"(?:€|eur|euro[a-zä]*|snt|sentti[a-zä]*|kr|kronor|sek|usd|\$|£|gbp|dollar[s]?)"
 _AMOUNT_RE = re.compile(
     rf"(?i)(?:(?<![\w])\d+(?:[  ]\d{{3}})*(?:[.,]\d+)?(?:[.,]-)?\s?{_CURRENCY}(?![\w])"
     rf"|(?:€|\$|£)\s?\d+(?:[.,]\d+)?)"
@@ -87,10 +90,13 @@ def _words_before(text: str, pos: int) -> list[str]:
 
 
 def _context(view: ConversationView, turn_index: int, pos: int, n: int = CUE_WINDOW) -> list[str]:
-    words = _words_before(view.turns[turn_index].text, pos)
-    if len(words) < n and turn_index > 0:
-        words = _words_before(view.turns[turn_index - 1].text, len(view.turns[turn_index - 1].text)) + words
-    return words[-n:]
+    """Up to ``n`` words before ``pos`` in the turn, plus the last ``n`` words of the previous turn
+    (an agent's question is the usual cue for a bare answer)."""
+    words = _words_before(view.turns[turn_index].text, pos)[-n:]
+    if turn_index > 0:
+        prev = view.turns[turn_index - 1].text
+        words = _words_before(prev, len(prev))[-n:] + words
+    return words
 
 
 def _has_cue(words: Iterable[str], cues: tuple[str, ...]) -> bool:
@@ -184,7 +190,7 @@ class StructuredPass:
             if letters.isupper() or _has_cue(_context(view, i, m.start()), PLATE_CUES):
                 out.append(_Hit(i, m.start(), m.end(), "LICENSE_PLATE", PRIORITY_CUE, None))
         # denylist: never emitted, and they break number runs
-        for rx in (_VERSION_RE, _AMOUNT_RE, _PERCENT_RE, _DOTTED_RE, _TIME_RE):
+        for rx in (_VERSION_RE, _AMOUNT_RE, _PERCENT_RE, _DOTTED_RE, _TIME_RE, _EXPIRY_RE):
             for m in rx.finditer(text):
                 if not any(m.start() >= a and m.end() <= b for a, b in masks):
                     claim(m.start(), m.end())
@@ -249,7 +255,7 @@ class StructuredPass:
             label = None
             if _has_cue([w], SECRET_CUES):
                 label = "SECRET"
-            elif _has_cue([w], USERNAME_CUES) and w not in ("user",):
+            elif _has_cue([w], USERNAME_CUES):
                 label = "USERNAME"
             if label is None:
                 continue
@@ -264,7 +270,8 @@ class StructuredPass:
                 val = text[vs:ve]
                 if any(vs < b and a < ve for a, b in masks):
                     break
-                ok = any(c.isdigit() for c in val) if label == "SECRET" else bool(re.search(r"\w", val))
+                # values carry a digit (or, for user names, an '@'); plain words after a cue are prose
+                ok = any(c.isdigit() for c in val) or (label == "USERNAME" and "@" in val)
                 if label == "SECRET" and val.isdigit() and not (4 <= len(val) <= 8):
                     ok = False
                 if ok and len(val) >= 3:
@@ -303,6 +310,14 @@ class StructuredPass:
                 if not any(used[a:b]) and V.iban_valid(s[a:b]):
                     take(a, b, "IBAN", PRIORITY_VALIDATED, "iban\x00" + s[a:b])
                     break
+        if not cross_only:
+            # HETU tail asked for on its own ('the last part of your ID code'): century sign, 3 digits, check
+            for m in re.finditer(r"(?<![0-9A-Z])[-+A-FU-Y]\d{3}[0-9A-Y](?![0-9A-Z])", s):
+                a, b = m.start(), m.end()
+                if any(used[a:b]):
+                    continue
+                if _has_cue(_context(view, chain[owner[a]].turn_index, syms[a].start), HETU_CUES):
+                    take(a, b, "NATIONAL_ID", PRIORITY_CUE, "hetu-tail\x00" + s[a:b])
         for m in re.finditer(r"\+?\d(?:-?\d)*", s):
             a, b = m.start(), m.end()
             if any(used[a:b]):
@@ -313,12 +328,35 @@ class StructuredPass:
             res = _classify_digits(digits, s[a] == "+", ctx)
             if res:
                 take(a, b, res[0], res[1], res[0].lower() + "\x00" + digits)
+                continue
+            # a typed value glued to a neighbouring number ('Testitie 5 A 3 040 123 4567'): retry
+            # sub-segments that start and end on token boundaries, validated labels only
+            cuts = [q for q in range(a, b + 1)
+                    if q in (a, b) or (syms[q].tok != syms[q - 1].tok and s[q - 1] != "-" and s[q] != "-")]
+            done = False
+            for lo in cuts:
+                for hi in reversed(cuts):
+                    if hi <= lo or (lo, hi) == (a, b) or done:
+                        continue
+                    sub = s[lo:hi].replace("-", "")
+                    r2 = _classify_digits(sub, False, ctx)
+                    # PHONE only: Luhn passes 1 in 10 random sub-strings
+                    if r2 and r2[0] == "PHONE":
+                        take(lo, hi, r2[0], r2[1], r2[0].lower() + "\x00" + sub)
+                        done = True
+                if done:
+                    break
 
         hits: list[_Hit] = []
         for a, b, label, prio, key in found:
             owners = sorted(set(owner[a:b]))
-            if cross_only and len(owners) < 2:
-                continue
+            if cross_only:
+                if len(owners) < 2:
+                    continue
+                # weak validators (Luhn: 1 in 10 random strings pass) need substantial fragments to join
+                per = [sum(1 for q in range(a, b) if owner[q] == ci) for ci in owners]
+                if min(per) < (4 if label in ("PAYMENT_CARD", "DEVICE_ID", "ACCOUNT_NUMBER") else 1):
+                    continue
             for ci in owners:
                 idx = [q for q in range(a, b) if owner[q] == ci]
                 first, last = syms[idx[0]], syms[idx[-1]]
@@ -365,6 +403,8 @@ def _classify_digits(d: str, plus: bool, ctx: list[str]) -> tuple[str, int] | No
         return "PHONE", PRIORITY_VALIDATED
     account = _has_cue(ctx, ACCOUNT_CUES)
     if account and 6 <= n <= 12:
+        return "ACCOUNT_NUMBER", PRIORITY_CUE
+    if n in (8, 10) and not d.startswith("0") and _has_cue(ctx, NUMBER_CUES):
         return "ACCOUNT_NUMBER", PRIORITY_CUE
     if n == 16 and _has_cue(ctx, CARD_CUES):
         return "PAYMENT_CARD", PRIORITY_CUE

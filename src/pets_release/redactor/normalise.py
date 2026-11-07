@@ -39,6 +39,7 @@ LETTER_NAMES: dict[str, str] = {
     "aa": "A", "bee": "B", "see": "C", "dee": "D", "ee": "E", "äf": "F", "gee": "G", "hoo": "H",
     "ii": "I", "jii": "J", "koo": "K", "äl": "L", "äm": "M", "än": "N", "oo": "O", "pee": "P",
     "kuu": "Q", "är": "R", "äs": "S", "tee": "T", "uu": "U", "vee": "V", "äks": "X", "yy": "Y",
+    "cee": "C", "kaksoisvee": "W", "tset": "Z",
 }
 
 _TOKEN_RE = re.compile(r"[^\W_]+|\S")
@@ -120,28 +121,35 @@ def turn_runs(turn_index: int, text: str, masks: list[tuple[int, int]]) -> list[
 
     def flush() -> None:
         nonlocal cur, cur_first, cur_last
+        # separators stay in the run: a HETU fragment may start or end with its century sign;
+        # matches (not runs) decide span boundaries
         if cur and any(s.ch.isdigit() for s in cur):
-            # trim leading/trailing separators so spans start and end on a value symbol
-            while cur and cur[0].ch in "-+" and not (cur[0].ch == "+" and len(cur) > 1 and cur[1].ch.isdigit()):
-                cur = cur[1:]
-            while cur and cur[-1].ch in "-+":
-                cur = cur[:-1]
-            if cur:
-                runs.append(Run(turn_index, tuple(cur), cur[0].tok, cur[-1].tok, 0, 0))
+            runs.append(Run(turn_index, tuple(cur), cur[0].tok, cur[-1].tok, 0, 0))
         cur, cur_first, cur_last = [], -1, -1
 
+    punct_gap = False  # a ',', '.', '/' or bracket since the last symbol token
+    prev_literal = False  # the last symbol token was typed (digits), not spoken
     for tok in toks:
         if masked(tok):
             flush()
+            punct_gap = False
             continue
         syms = token_symbols(tok)
         if syms is not None:
-            # a token glued to the previous symbol token without a gap must itself be a symbol token
+            literal = tok.text[0].isdigit()
+            # typed groups separated by punctuation are separate values ('12 B 14, 20100'); spoken digit
+            # sequences keep going across commas ('kaksi yksi, nolla kahdeksan')
+            if cur and punct_gap and prev_literal and literal:
+                flush()
             cur.extend(syms)
+            punct_gap = False
+            prev_literal = literal
             continue
         if tok.text in _GAP_CHARS and cur:
+            punct_gap = True
             continue
         flush()
+        punct_gap = False
     flush()
 
     word_idx = [t.index for t in toks if is_word(t)]
