@@ -16,6 +16,7 @@ Failure rows (trigger -> result):
   planted 4111111111111111.0 (same, as a float)                       -> refused, PAYMENT_CARD
   planted 4.111111111111135e+16 (exponent form; its integer value 41111111111111352 is Luhn-valid, issuer 4)
                                                                       -> today RELEASED; must refuse, PAYMENT_CARD
+  card / decimal-text card / email in a manifest STRING               -> refused (strings scanned as before)
 Synthetic values only (published test card number digits).
 """
 from __future__ import annotations
@@ -40,7 +41,7 @@ def _bench(privacy: float) -> dict:
     return {"generated": "x", "baselines": {f"{p}_health": dict(rec) for p in ("B0", "B2", "B2K")}}
 
 
-def _kit(tmp_path, monkeypatch, *, privacy=FRACTION_CARD, search_risk=None):
+def _kit(tmp_path, monkeypatch, *, privacy=FRACTION_CARD, search_risk=None, source="published benchmark"):
     monkeypatch.setenv("PETS_HMAC_KEY", TEST_KEY)
     kit = build_kit(tmp_path / "kit", edit=coarse_qis)
     (kit / "results").mkdir()
@@ -48,7 +49,7 @@ def _kit(tmp_path, monkeypatch, *, privacy=FRACTION_CARD, search_risk=None):
 
     def measure(scid, *, root, **_kw):
         block = {k: dict(NOT_MEASURED) for k in ("utility", "privacy", "search", "redaction")}
-        block["baselines"] = {"status": "measured", "source": "published benchmark",
+        block["baselines"] = {"status": "measured", "source": source,
                               "rows": baseline_rows(root, scid, "health")}
         if search_risk is not None:
             block["search"] = {"status": "measured", "source": "stub", "candidates": 1, "accepted": 1,
@@ -83,3 +84,19 @@ def test_card_shaped_integer_number_still_refuses(tmp_path, monkeypatch, capsys,
     report = (scoring_dir(out) / REFUSAL_REPORT).read_text(encoding="utf-8")
     assert "manifest:$.measured.search.points[0].risk: identifier-shape:PAYMENT_CARD" in report, report
     assert "4111111111111" not in report  # content-free: the planted digits are never echoed
+
+
+@pytest.mark.parametrize(("source", "label"), [
+    ("published benchmark 4111111111111111", "PAYMENT_CARD"),  # card as string, beside a Luhn-fraction number
+    ("published benchmark 0.4111111111111111", "PAYMENT_CARD"),  # decimal TEXT is still scanned as text
+    ("published benchmark someone@example.com", "EMAIL"),
+])
+def test_identifier_in_manifest_string_still_refuses(tmp_path, monkeypatch, capsys, source, label):
+    kit, out = _kit(tmp_path, monkeypatch, source=source)
+    code = wire.main(run_args(kit, out)[1:])
+    err = capsys.readouterr()
+    assert code == 1, err.out + err.err
+    assert not out.exists()
+    report = (scoring_dir(out) / REFUSAL_REPORT).read_text(encoding="utf-8")
+    assert f"manifest:$.measured.baselines.source: identifier-shape:{label}" in report, report
+    assert "4111111111111" not in report and "someone@example.com" not in report
