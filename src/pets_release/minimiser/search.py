@@ -97,6 +97,16 @@ def _norm(res) -> dict:
     return {"score": None, "status": status if status in ("not_answerable", "missing") else "error"}
 
 
+MAX_SUPPRESSION_ROUNDS = 50
+
+
+def _units(person_of: pd.Series, rows) -> int:
+    """Distinct identified persons plus unidentified records among source rows (ticket 21's unit count)."""
+    vals = [person_of.loc[i] for i in sorted(rows)]
+    ident = {v for v in vals if isinstance(v, str) and v.strip()}
+    return len(ident) + sum(1 for v in vals if not (isinstance(v, str) and v.strip()))
+
+
 def _call(fn, task, original, protected) -> dict:
     """Run one purpose check; a raise is an ``error`` result (message dropped: it could carry values)."""
     try:
@@ -634,28 +644,42 @@ class _Search:
 
     def suppress(self, full, plan):
         """Local suppression to reach k: drop all rows of persons below k (and their joined rows) to a fixpoint."""
+        # Same rule as ticket 21 (run/suppress.py): unit persons, k from the policy, every below-k unit (and
+        # every unidentified unit) dropped per round with its joined rows, to a fixpoint (<= 50 rounds); the
+        # share is units suppressed / units in the unsuppressed candidate.
         pt = self.kspec["person"]["table"] if self.kspec else None
         if self.k is None or pt not in full:
             return {}, 0, 0
+        sup_cfg = self.p.suppression
+        if sup_cfg is not None:
+            if sup_cfg["unit"] != "persons" or sup_cfg["method"] != "local_suppression":
+                raise MinimiserRefused("unsupported suppression method", self.log, self.stats)
+            if sup_cfg["k"] != self.k:
+                raise MinimiserRefused("suppression k differs from the k target", self.log, self.stats)
         pcol = self.kspec["person"]["column"]
-        src_p = self.src[pt]
-        persons_all = src_p[pcol].where(src_p[pcol].str.strip() != "", None)
-        n_persons = persons_all.dropna().nunique() + int(persons_all.isna().sum())
+        person_of = self.src[pt][pcol]
         dropped_p: set = set()
+        units_before, rounds = None, 0
         while True:
             cur = apply_suppression(full, self._expand(dropped_p))
             pk, _ = R.person_k(cur, plan, self.p, self.src, self.kspec, self.k)
             if pk is None:
                 break
+            if units_before is None:
+                units_before = len(pk.per_person) + pk.unidentified
             rows = sorted(set(pk.below_rows) | set(pk.unidentified_rows))
             if not rows:
                 break
+            rounds += 1
+            if rounds > MAX_SUPPRESSION_ROUNDS:
+                raise MinimiserRefused("suppression did not reach a fixpoint", self.log, self.stats)
+            if sup_cfg is None:  # no suppression allowed: report the shortfall, drop nothing
+                ids = {cur[pt].index[i] for i in rows}
+                return {}, _units(person_of, ids), int(units_before)
             idx = cur[pt].index
             dropped_p |= {idx[i] for i in rows}
         sup = self._expand(dropped_p)
-        dropped_persons = persons_all.loc[sorted(dropped_p)]
-        n_sup = dropped_persons.dropna().nunique() + int(dropped_persons.isna().sum())
-        return sup, int(n_sup), int(n_persons)
+        return sup, _units(person_of, dropped_p), int(units_before or 0)
 
     def _expand(self, person_rows: set) -> dict:
         """Suppressed person-table rows -> {table: sorted index labels}, incl. rows joined to them."""

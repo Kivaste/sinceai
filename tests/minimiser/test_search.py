@@ -238,6 +238,13 @@ def test_suppression_drop_error_never_waived(syn):
         _run(syn, syn.policy(sacrifices=(syn.sacrifice, s)), purpose=purpose)
 
 
+def test_suppression_k_must_match_k_target(syn):
+    pol = syn.policy()
+    pol = type(pol)(**{**pol.__dict__, "suppression": dict(pol.suppression, k=2)})
+    with pytest.raises(MinimiserRefused):
+        _run(syn, pol)
+
+
 def test_suppression_over_budget_refuses(syn):
     with pytest.raises(MinimiserRefused):
         _run(syn, syn.policy(max_share=0.01))
