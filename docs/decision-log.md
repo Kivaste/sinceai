@@ -766,3 +766,27 @@ CS-S1 chain done-report + 4 reviews (23 + #53/#54/#56/#92) -> merge -> #63 -> 25
      - Round 2 is with the Opus implementer (ses_e4a0a4c1).
 - **Why:** D49 (a review or test failure discards the speculative merge). Fail closed.
 - **Evidence:** `sinceai-out/pin-c0ece5c/fast-c0ece5c….log` and `.exit`; review sessions ses_e49a39d7 and ses_e49a3760; issue comments on #106 and #117.
+
+### Sat 16:47 - PIN: integration 5b260ec (#117); D50-D53; D53 window open
+
+- **When:** Sat 16:33-16:47 EET
+- **Decision:**
+  1. **PIN = 5b260ec2dc0fb36d34c6e2b47ede56d677eac3b9.** It is a `--no-ff` merge of #117 at 06846d5 into 35bb5f5, pushed unchanged after every check passed:
+     - Fast tier `-n 16 -m "not slow"`: exit 0, 2618 passed, 7 skipped.
+     - Slow tier `-n 16 -m slow`: exit 0, 123 passed. It ran concurrently with the fast tier, the D52 one-off.
+     - Guard stopgap: exit 0, 99 passed.
+     - #117 r4 delta at 06846d5: Grok Standards APPROVE and Sonnet Spec APPROVE. Both confirm the empty diff of src/pets_release/offline.py and _offline_hook since 8a7d6a8, an empty src diff for the fix, and a planted socket that still fails.
+  2. **The #117 r4 fix is test-only.** The UI test client runs in a fresh interpreter (loopback-asserted), while the worker, the server and the children stay guarded. slow_tests.txt was renumbered to the current README blocks. Per D52, the fixer ran the 26 failing tests red then green (20 red at -n 16, 33 green), not the whole fast tier.
+  3. **D53:** the non-demo lanes are paused from 16:47. #106 r2 and #110/#131 r2 were told to finish their current step and wait. No dispatches or trains until the planning session ends the proof, or about 30 minutes pass. #32 merges after the window (D51: AC3 is draft-only).
+  4. **Ready queue after the window, in priority order:**
+     - #30 r5: approved; re-merge on the pin.
+     - #32: approved.
+     - #132 r2: 3/3 APPROVE at dec9653.
+     - #116 r4: Grok and Sonnet APPROVE at d5d6bd2.
+     - #80 and #128: approved; after the recording. #128 must drop #30's strict xfails first.
+     - #136: dispatch after the pin.
+     - #121 and #130: after #30.
+  5. **Parked for the human:** #116's "about 6 minutes" target is not met. The default smoke takes 512 s, of which 454 s is the HEALTH-S1 run, against a documented 900 s budget. Sonnet Spec rules it a disclosed unmet target, not a merge blocker.
+  6. **#117 stays open** until the real-kit proof on 5b260ec exists. Its newest real-kit evidence is for 8a7d6a8.
+- **Why:** D46, D49, D52 and D53 (human); close only on evidence (D31).
+- **Evidence:** `sinceai-out/pin-5b260ec/{fast,slow,guard}-5b260ec….{log,exit}`; review sessions ses_e498c7d8 and ses_e498c591; `git ls-remote origin integration/pets-release` = 5b260ec.

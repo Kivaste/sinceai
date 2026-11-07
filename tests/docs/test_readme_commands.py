@@ -30,6 +30,7 @@ ALLOWED_SKIP_REASONS = (
     "environment-setup",
     "sets-secret-placeholder-only",
     "runs-the-whole-test-suite-recursively",
+    "starts-a-long-running-server",
     # the CS-S1 release needs ticket 23 (turn_id check); guarded below
     "cs-s1-run-needs-ticket-23",
 )
