@@ -93,16 +93,49 @@ def _order(errs: list[str], path: str, items: list, key) -> None:
         errs.append(f"{path}: order")
 
 
+def _applied_rungs(m: dict, errs: list[str]) -> dict:
+    """#109: ``{(table, source column): rung}`` as the bound contract applies it to each released field
+    (``contract.files[<table>.csv].columns[<outputColumn>].params.rung``). The justification's rung must equal it
+    and the column's form must be that rung's form; a missing or non-string contract rung, or a contract column
+    no released justification backs, is an error (fail closed: no rung, no sacrifice decision)."""
+    from pets_release.ladders import CONTRACT_FORMS
+
+    files = m["contract"]["files"]
+    applied, backed = {}, set()
+    for f in m["fieldJustifications"]:
+        if f["decision"] != "released":
+            continue
+        t, c, out = f["table"], f["column"], f["outputColumn"]
+        backed.add((f"{t}.csv", out))
+        col = files.get(f"{t}.csv", {}).get("columns", {}).get(out)
+        rung = col["params"].get("rung") if col is not None else None
+        where = f"{_fmt(['fieldJustifications'])}: {t}.{c}"
+        if not isinstance(rung, str):
+            errs.append(f"{where}: rung-contract-missing")
+            continue
+        if rung != f["rung"]:
+            errs.append(f"{where}: rung-contract-mismatch")
+        if CONTRACT_FORMS.get(rung) != col["form"]:
+            errs.append(f"{where}: rung-form-mismatch")
+        applied[(t, c)] = rung
+    for file, spec in sorted(files.items()):
+        for col in sorted(spec["columns"]):
+            if (file, col) not in backed:
+                errs.append(f"{_fmt(['contract', 'files', file, 'columns', col])}: rung-unjustified")
+    return applied
+
+
 def _rung_step_errors(m: dict) -> list[str]:
-    """#89: a released sacrifice-only rung needs exactly one sacrifice ``rungStep`` for that column and rung,
-    whose measured k at ``from`` exceeds the budget and whose check still scores >= 0.9 (fail closed); every
-    ``rungStep`` must match a released field at its ``to`` rung."""
+    """#89/#109: a sacrifice-only rung the contract applies needs exactly one sacrifice ``rungStep`` for that
+    column and rung, whose measured k at ``from`` exceeds the budget and whose check still scores >= 0.9 (fail
+    closed); every ``rungStep`` must match a released field at its ``to`` rung. Rungs are read from the bound
+    contract, never from the justification alone."""
     from pets_release.ladders import SACRIFICE_ONLY_RUNGS
     from pets_release.run.purpose import THRESHOLD
 
-    errs = []
+    errs: list[str] = []
     steps = [(i, s) for i, s in enumerate(m["sacrifices"]) if "rungStep" in s]
-    released = {(f["table"], f["column"]): f["rung"] for f in m["fieldJustifications"] if f["decision"] == "released"}
+    released = _applied_rungs(m, errs)
     for (t, c), rung in sorted(released.items()):
         if rung not in SACRIFICE_ONLY_RUNGS:
             continue
