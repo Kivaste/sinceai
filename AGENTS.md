@@ -73,7 +73,7 @@ These apply to every change. A skipped, missing or errored check is a fail, not 
 
 ### Determinism
 
-- Run Python with `PYTHONUTF8=1` and `PYTHONDONTWRITEBYTECODE=1`, and set `TZ=UTC`. Sort rows before hashing or writing. Do not rely on set order or wall-clock time in outputs.
+- Run Python with `PYTHONUTF8=1` and `TZ=UTC`, and keep bytecode out of the tree with `PYTHONPYCACHEPREFIX=%LOCALAPPDATA%\sinceai-pycache` (D30). Don't set `PYTHONDONTWRITEBYTECODE` on the top-level test command: it forces a recompile on every run. Subprocess environments in the code may keep it, because they still read the shared cache. Sort rows before hashing or writing. Do not rely on set order or wall-clock time in outputs.
 - The same input, key and versions must produce a byte-identical release.
 
 ### Content-free artefacts

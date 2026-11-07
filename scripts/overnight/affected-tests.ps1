@@ -54,7 +54,11 @@ $dirs = @($sel | Where-Object { $_ -notmatch '\.py$' })
 $paths = if ($whole) { @('tests') } else { @($sel | Where-Object { $p = $_; -not ($dirs | Where-Object { $_ -ne $p -and $p.StartsWith("$_/") }) } | Sort-Object) }
 "changed files: $($changed.Count); selection: $($paths -join ' ')"
 if ($Run) {
-  $env:PYTHONUTF8 = '1'; $env:PYTHONDONTWRITEBYTECODE = '1'; $env:TZ = 'UTC'; $env:PYTHONPATH = 'src'
+  # D30: bytecode cache OUTSIDE the repo instead of no cache (tree stays clean; modules aren't recompiled every run).
+  # Child processes that still set PYTHONDONTWRITEBYTECODE=1 inherit the prefix and READ this cache.
+  $env:PYTHONUTF8 = '1'; $env:TZ = 'UTC'; $env:PYTHONPATH = 'src'
+  Remove-Item Env:PYTHONDONTWRITEBYTECODE -ErrorAction SilentlyContinue
+  $env:PYTHONPYCACHEPREFIX = Join-Path $env:LOCALAPPDATA 'sinceai-pycache'
   $py = Join-Path (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path '.venv\Scripts\python.exe'
   Push-Location $Worktree
   try { & $py -m pytest -n $Workers -q -p no:cacheprovider -m 'not slow' @paths; exit $LASTEXITCODE } finally { Pop-Location }
