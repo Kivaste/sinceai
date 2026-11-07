@@ -166,6 +166,20 @@ def test_phone_formats():
         assert found(conv(t)) == [("t0", 10, 10 + len(p), "PHONE")], p
 
 
+def test_phone_with_00_prefix_and_parentheses():
+    for p in ("0035840 123 4567", "00358 40 123 4567", "(040) 123 4567", "+358 (0)40 123 4567"):
+        t = f"numero on {p}."
+        spans = found(conv(t))
+        assert len(spans) == 1 and spans[0][3] == "PHONE", p
+        assert t[spans[0][1]:spans[0][2]].replace("(", "").replace(")", "").endswith("4567"), p
+
+
+def test_phone_00_prefix_shares_placeholder_with_national_form():
+    r = conv("numero on 0035840 123 4567 ja +358 40 123 4567")
+    phs = [s["placeholder"] for s in r.spans if s["label"] == "PHONE"]
+    assert len(phs) == 2 and phs[0] == phs[1]
+
+
 def test_spoken_phone_split_over_turns_with_agent_backchannel():
     a = "numero on nolla neljä nolla, yksi kaksi kolme"
     b = "neljä viisi kuusi seitsemän"
