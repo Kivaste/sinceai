@@ -4,7 +4,6 @@ from __future__ import annotations
 import csv
 import hashlib
 import io
-import json
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -52,10 +51,15 @@ class Release:
         return self._factor[key]
 
     def manifest(self):
+        """The parsed manifest, or None if absent. Strict (#114): a duplicate key at any depth, NaN/Infinity or
+        undecodable bytes raise ValueError, never a partially parsed record."""
+        # lazy: manifest.schema imports pets_release.checks
+        from pets_release.manifest.canonical import loads_strict
+
         p = self.path / MANIFEST
         if not p.is_file():
             return None
-        return json.loads(p.read_text(encoding="utf-8"))
+        return loads_strict(p.read_bytes())
 
     def sha256(self, name: str) -> str:
         h = hashlib.sha256()

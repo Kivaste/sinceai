@@ -43,8 +43,11 @@ def _no_constant(_name: str) -> Any:
     raise ValueError("non-finite JSON number constant")
 
 
-def loads_strict(raw: bytes | str) -> Any:
-    """Parse JSON, rejecting duplicate keys and NaN/Infinity. Raises ValueError (json.JSONDecodeError included)."""
+def loads_strict(raw: bytes | str, *, numbers_as_text: bool = False) -> Any:
+    """Parse JSON, rejecting duplicate keys (any depth) and NaN/Infinity. Raises ValueError (JSONDecodeError and
+    UnicodeDecodeError included). ``numbers_as_text`` keeps every number as its exact JSON text (for scanners).
+    The one manifest loader (#114): every production reader of a manifest parses through here."""
     if isinstance(raw, bytes):
         raw = raw.decode("utf-8")
-    return json.loads(raw, object_pairs_hook=_no_duplicates, parse_constant=_no_constant)
+    extra = {"parse_int": str, "parse_float": str} if numbers_as_text else {}
+    return json.loads(raw, object_pairs_hook=_no_duplicates, parse_constant=_no_constant, **extra)
