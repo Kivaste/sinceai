@@ -55,6 +55,13 @@ If `claude-agent/opus` is rate-limited or errors, use `openai/gpt-6.1-sol`. Log 
 - **At most 8 concurrent review sessions per provider** (xai, opencode-go). Review only a ticket's current head, and cancel a review when its head is superseded.
 - **Final whole-branch `code-review`:** `opencode-go/gemini-4-argon#medium` + `opencode-go/gpt-6-luna#medium`. Use `openai/gpt-6.1-sol` instead of Luna if its quota has reset.
 
+**Worker cap 28, and Sol implements the easier work (D13g, Sat 07:20, user decision). This overrides the cap of 16 in §4:**
+- **Cap:** at most **28** concurrent implementer and fixer subagents. The CPU rule still applies (`-n 4` above 90% for 10 minutes).
+- **Routing by difficulty:** `model:opus` tickets and every Must-fix touching gate, verify, writer, manifest, keys, measurer or minimiser stay on `claude-agent/opus`. Routine tickets, medium/low follow-ups, docs, test-only and fixture work go to **`openai/gpt-6.1-sol#high` as implementer**, which keeps Anthropic rate limits away; Sonnet is the fallback.
+- **Reviewers for Sol-written code:** `xai/grok-4.7#medium` + `claude-agent/sonnet` (not Sol). Claude-written code keeps Grok + Sol.
+- **On an Anthropic rate-limit error:** move further Sonnet/Opus work to Sol, drop the Claude part of the cap to 16, and log it.
+- **While Sol auth is expired** (#86): Sol work goes to Sonnet, and Sol reviews go to `opencode/deepseek-v4.1-flash-free`. Re-probe Sol every 10 minutes.
+
 **GPT-6.1 Sol unlimited (D13f, Sat 07:20, user decision). This overrides the Sol limits and the tiering below:** the ChatGPT subscription was upgraded, so use `openai/gpt-6.1-sol#high` freely, with no 4-session cap (sanity limit 12 concurrent Sol sessions). **Every ticket**, core and routine, and every must-fix or follow-up delta review, gets **two** independent reviews: `xai/grok-4.7#medium` **and** `openai/gpt-6.1-sol#high`. Rule-audit passes: Sol high, with Grok high as a second pass. Final whole-branch review: Sol high + Grok high. Grok reviewers stay in every round. If Sol ever fails with a usage limit again, fall back as D13e describes and log it.
 
 **opencode-go quota exhausted (D13e, Sat 07:05). This overrides every opencode-go model named elsewhere in this brief:** `opencode-go/*` (Gemini 4 Argon, GPT-6 Luna, DeepSeek, opencode-go Grok) fails with "Go usage limit exceeded". Until `.scratch/local-overnight/go-available.json` exists:

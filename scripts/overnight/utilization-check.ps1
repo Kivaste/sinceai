@@ -31,7 +31,7 @@ param(
   [int[]]$ExcludeIssues = @(1, 32),                                  # spec; ticket 31 LLM (side lane)
   [string[]]$ExcludeBranches = @('ticket/story-drafts', 'ticket/31-llm'),  # side lane
   [double]$MaxCpu = 70,
-  [int]$MaxWorkers = 16,
+  [int]$MaxWorkers = 28,
   [int]$CooldownMinutes = 10,
   [int]$BranchQuietMinutes = 5,
   [int]$DeadIdleMinutes = 25,
@@ -246,7 +246,7 @@ try {
     [void]$msg.AppendLine("These $($idle.Count) item(s) have no live session working on them:")
     foreach ($it in $idle) { [void]$msg.AppendLine("- $($it.text)") }
     [void]$msg.AppendLine('')
-    [void]$msg.AppendLine('Dispatch ALL of them now, in ONE turn (parallel background subagents), respecting labels, Merge after, review rules and the 16-worker cap. If an item is not actually dispatchable (blocked in a way not recorded as a GitHub dependency, or already handled), say why in the decision log and record the blocker on the issue so this monitor stops flagging it. Then write a heartbeat.')
+    [void]$msg.AppendLine('Dispatch ALL of them now, in ONE turn (parallel background subagents), respecting labels, Merge after, review rules and the worker cap (28, D13g). If an item is not actually dispatchable (blocked in a way not recorded as a GitHub dependency, or already handled), say why in the decision log and record the blocker on the issue so this monitor stops flagging it. Then write a heartbeat.')
     $text = $msg.ToString()
     if ($DryRun) { Write-Output '----- message (dry run, not sent) -----'; Write-Output $text }
     else {
