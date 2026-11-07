@@ -79,3 +79,30 @@ included in totals; use zero on future refreshes. Relative ordering matters more
 than absolute timings on a loaded machine. Review and commit the generated list;
 never commit raw logs or kit data. New unprofiled synthetic tests remain fast
 until the next refresh; real-kit tests are slow immediately.
+
+## Checkout-write guard
+
+`tests/conftest.py` identifies the running tests' checkout with Git, not the
+process working directory or a planted marker. At session start and finish it
+takes one `git status --porcelain -z --untracked-files=all` snapshot per checkout:
+the tests' own checkout and the main checkout found through `--git-common-dir`.
+With xdist, only the controller takes snapshots, bracketing all workers and
+fixture teardowns. A new dirty path fails the session. Pre-existing untracked or
+modified paths are baseline, so unrelated existing work is not reported.
+Only pytest's actual temporary directory is exempt, not arbitrary temp-named
+folders. Keep bytecode and generated outputs outside the checkout as above.
+
+The same guard checks literal `ROOT`/`REPO`/`repo_root` and file-relative `root`
+resolutions (including function-local ones), plus `Path(__file__).parents[n]`
+references, against the tests' Git worktree identity. Fixture/import ancestors
+inside `tests/` are allowed; repo-root assignments must equal the Git root.
+It never evaluates test source. Regression tests run real nested pytest sessions
+in temporary repositories and linked worktrees, never plant files in the real
+main checkout.
+Unrecognised uppercase `ROOT`/`REPO`/`REPO_ROOT` expressions fail closed; use
+literal file-relative pathlib expressions rather than dynamic root discovery.
+
+This is a boundary check, not a filesystem sandbox: writes outside a running
+pytest session, ignored files, changes to already-dirty paths, or writes restored
+before the final snapshot are not detected. Git errors fail closed. Independent
+scripts and agents must still follow the worktree rules in `AGENTS.md`.
