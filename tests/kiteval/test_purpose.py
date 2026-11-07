@@ -57,10 +57,10 @@ def test_task_error_is_a_fail_and_carries_no_message(monkeypatch):
     def boom(orig, prot):
         raise ValueError("VALUE_THAT_MUST_NOT_LEAK")
 
-    task = UtilityTask("X-U1", "customer_service", "conversations", "d", "aggregate", boom)
+    task = UtilityTask("CS-U4", "customer_service", "conversations", "d", "aggregate", boom)
     monkeypatch.setattr("pets_release.kiteval.purpose.all_tasks", lambda *a, **k: [task])
-    res = purpose_check("X-U1", {}, {})
-    assert res == {"id": "X-U1", "score": None, "status": "error", "required": True}
+    res = purpose_check("CS-U4", {}, {})
+    assert res == {"id": "CS-U4", "score": None, "status": "error", "required": True}
     assert counts_as_fail(res)
     assert set(res) == {"id", "score", "status", "required"}
 
@@ -98,35 +98,50 @@ def test_unknown_scenario_is_rejected(mini_kit):
     assert caught.value.reason == "scenario"
 
 
-# ---- review round 1: only task columns become numbers ---------------------
 
 
-def _spy_task(monkeypatch, seen, needs, table="turns"):
+# ---- review round 2: explicit per-task numeric columns ---------------------
+
+
+def _spy(monkeypatch, seen, task_id="CS-U4", needs=("intent", "handle_time_s", "agent_note")):
     from pets_eval.utility import UtilityTask
 
     def fn(orig, prot):
         seen["orig"], seen["prot"] = orig, prot
         return {"score": 1.0, "metric": "m", "detail": {}}
 
-    task = UtilityTask("X-U1", "customer_service", table, "d", "aggregate", fn, needs, ["TEST-S1"])
+    task = UtilityTask(task_id, "customer_service", "conversations", "d", "aggregate", fn, list(needs))
     monkeypatch.setattr("pets_release.kiteval.purpose.all_tasks", lambda *a, **k: [task])
 
 
-def test_numeric_looking_text_keeps_its_string_form(tmp_path, monkeypatch):
-    (tmp_path / "metadata").mkdir()
-    (tmp_path / "metadata" / "scenarios.json").write_text(
-        json.dumps([{"id": "TEST-S1", "dataset": "customer_service", "utility_requirements": ["X-U1"]}]), encoding="utf-8")
-    (tmp_path / "metadata" / "field_catalog.csv").write_text(
-        "dataset,table,column,privacy_role,data_kind,subtype\n"
-        "customer_service,turns,text,free_text,text,\n", encoding="utf-8")
+def test_only_the_tasks_numeric_measures_become_numbers(monkeypatch):
     seen = {}
-    _spy_task(monkeypatch, seen, needs=["text", "n"])
-    turns = pd.DataFrame({"text": ["007", "0123", "42"], "n": ["1", "2", ""], "other": ["001", "002", "003"]}, dtype=str)
-    res = purpose_checks("TEST-S1", {"turns": turns}, {"turns": turns}, root=tmp_path)
-    assert res[0]["status"] == "ok"
+    _spy(monkeypatch, seen)
+    df = pd.DataFrame({"intent": ["001", "002", "003"], "handle_time_s": ["10", "20", ""],
+                       "agent_note": ["007", "0123", "42"]}, dtype=str)
+    res = purpose_check("CS-U4", {"conversations": df}, {"conversations": df})
+    assert res["status"] == "ok"
     for side in ("orig", "prot"):
-        t = seen[side]["turns"]
-        assert list(t["text"]) == ["007", "0123", "42"]  # free text stays a string even though task lists it
-        assert list(t["other"]) == ["001", "002", "003"]  # not a task column: untouched
-        assert pd.api.types.is_numeric_dtype(t["n"]) and t["n"].isna().sum() == 1  # task column converted
-    assert list(turns["text"]) == ["007", "0123", "42"]
+        t = seen[side]["conversations"]
+        assert list(t["intent"]) == ["001", "002", "003"]  # numeric-looking category stays a string
+        assert list(t["agent_note"]) == ["007", "0123", "42"]  # so does text, though the task lists it
+        assert pd.api.types.is_numeric_dtype(t["handle_time_s"]) and t["handle_time_s"].isna().sum() == 1
+    assert list(df["intent"]) == ["001", "002", "003"]
+
+
+def test_numeric_looking_categories_are_not_collapsed_for_the_mix_task(monkeypatch):
+    seen = {}
+    _spy(monkeypatch, seen, task_id="CS-U3", needs=("intent",))
+    orig = pd.DataFrame({"intent": ["01", "1", "1"]}, dtype=str)
+    prot = pd.DataFrame({"intent": ["1", "1", "1"]}, dtype=str)
+    purpose_check("CS-U3", {"conversations": orig}, {"conversations": prot})
+    assert list(seen["orig"]["conversations"]["intent"]) == ["01", "1", "1"]
+    assert list(seen["prot"]["conversations"]["intent"]) == ["1", "1", "1"]
+
+
+def test_task_without_a_numeric_column_entry_is_an_error_not_a_guess(monkeypatch):
+    seen = {}
+    _spy(monkeypatch, seen, task_id="NEW-U1")
+    res = purpose_check("NEW-U1", {"conversations": ORIG}, {"conversations": ORIG})
+    assert res["status"] == "error" and counts_as_fail(res)
+    assert not seen  # never ran on guessed types

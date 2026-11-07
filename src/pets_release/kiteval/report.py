@@ -10,11 +10,14 @@ from collections.abc import Iterable
 from numbers import Integral, Real
 
 # Allowlist of exported top-level fields. Everything else stays in the scoring folder.
-EXPORT_FIELDS = ("scenario", "dataset", "privacy", "utility", "composite", "tasks", "risks", "tables")
+EXPORT_FIELDS = ("scenario", "dataset", "privacy", "utility", "composite", "tasks", "risks", "tables",
+                 "not_applicable")
+BASELINE_SECTIONS = ("k_anonymity", "risks", "regex_residuals", "direct_identifiers_retained")
+SECTIONS = ("free_text", "linkage", "k_anonymity", "hash_attack", "trajectory_unicity", "table")
 
 _ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}")  # scenario, dataset, task and table names
 _RISK_KEY = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_ :<>=()./+-]{0,119}")
-_TASK_STATUS = ("ok", "not_answerable")
+_KEY = re.compile(r"[A-Za-z0-9_.-]{1,64}")
 
 
 class ScorecardRejected(ValueError):
@@ -42,32 +45,57 @@ def _scenario_id(report: dict):
     return s.get("id") if isinstance(s, dict) else None
 
 
-def _walk(node):
-    """Yield every dict nested anywhere in the node."""
+# `evaluated: False` reasons that mean "the attack/evaluation has nothing to act on", taken from the
+# pets-eval 1.0.0 source (attacks.py, privacy.py, scorecard.py). Anything else is a fail.
+BENIGN_REASONS = {
+    "no overlapping quasi-identifiers between adversary and protected table": "no_overlapping_qi",
+    "no gold spans in package": "no_gold_spans",
+    "no values": "no_values",
+    "user or time column missing": "trajectory_column_removed",
+    "no location column": "trajectory_column_removed",
+    "no usable points": "trajectory_no_usable_points",
+}
+BENIGN_NOTES = {
+    "no catalogued quasi-identifier kept": "no_quasi_identifier",
+    "no attack spec targets this table (metadata/attack_specs.json)": "no_attack_spec",
+}
+_CODE = re.compile(r"[a-z_]{1,40}")
+
+
+def _walk(node, path=()):
+    """Yield (path, dict) for every dict nested anywhere in the node."""
     if isinstance(node, dict):
-        yield node
-        for v in node.values():
-            yield from _walk(v)
+        yield path, node
+        for k, v in node.items():
+            yield from _walk(v, (*path, str(k)))
     elif isinstance(node, list):
-        for v in node:
-            yield from _walk(v)
+        for i, v in enumerate(node):
+            yield from _walk(v, (*path, str(i)))
 
 
-def _scan_nested(table: dict) -> None:
-    """Errored or unavailable sub-results anywhere in a table record are a fail."""
-    for d in _walk(table):
+def _scan_nested(name: str, table: dict, required_text: set, found: list) -> None:
+    """Errored or unavailable sub-results anywhere in a table record are a fail, except the
+    allowlisted benign ones, which are recorded as not_applicable."""
+    for path, d in _walk(table):
         if "error" in d or "trace" in d:
             raise ScorecardRejected("error_status")
-        if d.get("evaluated") is False:
-            reason = str(d.get("reason", "")).lower()
-            if reason.startswith("error"):
-                raise ScorecardRejected("error_status")
-            if "row map" in reason:
-                raise ScorecardRejected("not_evaluated")
         note = d.get("note")
-        if isinstance(note, str) and note.lower().startswith("no row map"):
-            raise ScorecardRejected("not_evaluated")
-
+        if isinstance(note, str):
+            if note.lower().startswith("no row map"):
+                raise ScorecardRejected("not_evaluated")
+            if note in BENIGN_NOTES:
+                found.append({"table": name, "section": path[0] if path else "table",
+                              "key": path[-1] if len(path) > 1 else "", "code": BENIGN_NOTES[note]})
+        if d.get("evaluated") is False:
+            reason = d.get("reason")
+            if isinstance(reason, str) and reason.lower().startswith("error"):
+                raise ScorecardRejected("error_status")
+            if not isinstance(reason, str) or reason not in BENIGN_REASONS:
+                raise ScorecardRejected("not_evaluated")
+            if path[:1] == ("free_text",) and len(path) > 1 and path[1] in required_text:
+                raise ScorecardRejected("required_not_evaluated")
+            found.append({"table": name, "section": path[0] if path else "table",
+                          "key": path[-1] if path else "", "code": BENIGN_REASONS[reason]})
 
 def _check_tasks(report: dict, required_tasks: list[str]) -> list[dict]:
     utility = report.get("utility")
@@ -99,7 +127,16 @@ def _positive(v) -> bool:
     return _num(v) and v > 0
 
 
-def _check_released(tr: dict) -> None:
+def _check_released(tr: dict, expected: dict) -> None:
+    for section in BASELINE_SECTIONS:
+        if section not in tr:
+            raise ScorecardRejected("missing_section")
+    free_text = tr.get("free_text")
+    if expected.get("free_text") and (
+            not isinstance(free_text, dict) or any(c not in free_text for c in expected["free_text"])):
+        raise ScorecardRejected("missing_section")
+    if expected.get("linkage") and not isinstance(tr.get("linkage"), dict):
+        raise ScorecardRejected("missing_section")
     if not _int(tr.get("rows_original")) or not _int(tr.get("rows_protected")):
         raise ScorecardRejected("structure")
     if tr["rows_original"] <= 0 or tr["rows_protected"] <= 0:
@@ -134,10 +171,10 @@ def _check_released(tr: dict) -> None:
                 raise ScorecardRejected("zero_denominator")
 
 
-def _check_table(name: str, tr: dict) -> dict:
+def _check_table(name: str, tr: dict, expected: dict, found: list) -> dict:
     if not _name(name):
         raise ScorecardRejected("structure")
-    _scan_nested(tr)
+    _scan_nested(name, tr, set(expected.get("free_text", ())), found)
     status = tr.get("status")
     if status == "error":
         raise ScorecardRejected("error_status")
@@ -146,14 +183,19 @@ def _check_table(name: str, tr: dict) -> dict:
     if not _int(tr.get("rows_original")) and status == "withheld":
         raise ScorecardRejected("structure")
     if status == "released":
-        _check_released(tr)
+        _check_released(tr, expected)
     return {"table": name, "status": status, "rows_original": int(tr["rows_original"]),
             "rows_protected": int(tr["rows_protected"]) if status == "released" else None}
 
 
 def validate_report(report: dict, *, scenario: str, required_tasks: Iterable[str],
-                    tables: Iterable[str]) -> dict:
-    """Return the allowlisted aggregate summary, or raise ScorecardRejected."""
+                    tables: Iterable[str], expected_sections: dict | None = None) -> dict:
+    """Return the allowlisted aggregate summary, or raise ScorecardRejected.
+
+    `expected_sections` (table -> {"free_text": [columns that must be evaluated], "linkage": bool})
+    names the result sections this scenario requires beyond the baseline ones; the caller derives it
+    from the kit (catalog, gold spans, truth). Unavailable evaluations pass only with a BENIGN_REASONS
+    reason, and are exported as `not_applicable` with their code."""
     if not isinstance(report, dict):
         raise ScorecardRejected("structure")
     summary = report.get("summary")
@@ -169,11 +211,16 @@ def validate_report(report: dict, *, scenario: str, required_tasks: Iterable[str
     for name in tables:
         if name not in rep_tables:
             raise ScorecardRejected("missing_table")
-    exported_tables = []
+    exported_tables, found = [], []
+    expected_sections = expected_sections or {}
     for name, tr in rep_tables.items():
         if not isinstance(tr, dict):
             raise ScorecardRejected("structure")
-        exported_tables.append(_check_table(name, tr))
+        exported_tables.append(_check_table(name, tr, expected_sections.get(name, {}), found))
+    for item in found:
+        if not (_name(item["table"]) and item["section"] in SECTIONS and _CODE.fullmatch(item["code"])
+                and (item["key"] == "" or _KEY.fullmatch(item["key"]))):
+            raise ScorecardRejected("structure")
     tasks = _check_tasks(report, list(required_tasks))
     risks = report.get("risk_components")
     if not isinstance(risks, dict) or not all(
@@ -188,4 +235,8 @@ def validate_report(report: dict, *, scenario: str, required_tasks: Iterable[str
         "tasks": tasks,
         "risks": {k: float(v) for k, v in risks.items()},
         "tables": exported_tables,
+        "not_applicable": found,
     }
+
+
+

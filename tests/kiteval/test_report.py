@@ -173,6 +173,7 @@ def test_exported_summary_is_allowlisted_and_drops_raw_fields():
         "tasks",
         "risks",
         "tables",
+        "not_applicable",
     }
     assert summary["scenario"] == "HEALTH-S1"
     assert summary["privacy"] == 0.5
@@ -268,7 +269,7 @@ def test_nested_trace_anywhere_is_a_fail():
 
 
 def test_missing_k_anonymity_record_is_a_fail():
-    _reject(lambda r: _ed(r).pop("k_anonymity"), "structure")
+    _reject(lambda r: _ed(r).pop("k_anonymity"), "missing_section")
 
 
 def test_k_anonymity_without_denominator_or_note_is_a_fail():
@@ -276,7 +277,7 @@ def test_k_anonymity_without_denominator_or_note_is_a_fail():
 
 
 def test_released_table_without_scored_risks_is_a_fail():
-    _reject(lambda r: _ed(r).pop("risks"), "structure")
+    _reject(lambda r: _ed(r).pop("risks"), "missing_section")
 
 
 def test_zero_protected_rows_is_a_fail():
@@ -310,3 +311,87 @@ def test_export_rejects_odd_task_id_and_risk_key_and_score_type():
 
 def test_export_rejects_odd_dataset_and_table_names():
     _reject(lambda r: r.update(dataset="health; MARKER"), "structure")
+
+
+# ---- review round 2: sections and benign "not evaluated" ------------------
+
+NO_QI = "no overlapping quasi-identifiers between adversary and protected table"
+EXPECTED = {"ed_visits": {"free_text": ["chief_complaint"], "linkage": True}}
+
+
+def _validate_expecting(report):
+    return validate_report(report, scenario="HEALTH-S1", required_tasks=REQUIRED, tables=TABLES,
+                           expected_sections=EXPECTED)
+
+
+def test_benign_linkage_outcome_is_recorded_as_not_applicable_with_its_code():
+    report = _passing_report()
+    _ed(report)["linkage"]["other_adv"] = {"evaluated": False, "reason": NO_QI}
+    summary = _validate(report)
+    assert summary["not_applicable"] == [
+        {"table": "ed_visits", "section": "linkage", "key": "other_adv", "code": "no_overlapping_qi"}]
+    assert "MARKER" not in json.dumps(summary)
+
+
+def test_unknown_unavailable_reason_is_a_fail():
+    def m(r):
+        _ed(r)["linkage"]["other_adv"] = {"evaluated": False, "reason": "something new MARKER_SHOULD_NOT_EXPORT"}
+
+    _reject(m, "not_evaluated")
+
+
+def test_kit_reason_for_missing_row_map_or_truth_is_a_fail():
+    def m(r):
+        _ed(r)["linkage"]["other_adv"] = {"evaluated": False, "reason": "row map or adversary truth missing"}
+
+    _reject(m, "not_evaluated")
+
+
+def test_required_free_text_evaluation_that_is_unavailable_is_a_fail_even_for_a_benign_reason():
+    report = _passing_report()
+    _ed(report)["free_text"]["chief_complaint"] = {"evaluated": False, "reason": "no gold spans in package"}
+    with pytest.raises(ScorecardRejected) as caught:
+        _validate_expecting(report)
+    assert caught.value.reason == "required_not_evaluated"
+
+
+def test_benign_free_text_outcome_for_a_column_not_required_is_not_applicable():
+    report = _passing_report()
+    _ed(report)["free_text"]["other_text"] = {"evaluated": False, "reason": "no gold spans in package"}
+    summary = _validate(report)
+    assert summary["not_applicable"][0]["code"] == "no_gold_spans"
+
+
+@pytest.mark.parametrize("section", ["regex_residuals", "direct_identifiers_retained"])
+def test_deleted_baseline_section_is_a_fail(section):
+    _reject(lambda r: _ed(r).pop(section), "missing_section")
+
+
+def test_deleted_required_free_text_section_is_a_fail():
+    report = _passing_report()
+    del _ed(report)["free_text"]
+    with pytest.raises(ScorecardRejected) as caught:
+        _validate_expecting(report)
+    assert caught.value.reason == "missing_section"
+
+
+def test_free_text_section_missing_a_required_column_is_a_fail():
+    report = _passing_report()
+    _ed(report)["free_text"] = {"other": {"evaluated": True, "n_values": 3}}
+    with pytest.raises(ScorecardRejected) as caught:
+        _validate_expecting(report)
+    assert caught.value.reason == "missing_section"
+
+
+def test_deleted_required_linkage_section_is_a_fail():
+    report = _passing_report()
+    del _ed(report)["linkage"]
+    with pytest.raises(ScorecardRejected) as caught:
+        _validate_expecting(report)
+    assert caught.value.reason == "missing_section"
+
+
+def test_complete_report_passes_with_expected_sections():
+    assert _validate_expecting(_passing_report())["not_applicable"] == []
+
+

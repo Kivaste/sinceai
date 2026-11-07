@@ -25,6 +25,20 @@ def _inside(child: Path, parent: Path) -> bool:
     return child == parent or parent in child.parents
 
 
+def _expected_sections(root: Path, dataset: str, catalog, tables) -> dict:
+    """Result sections the kit can produce for each table: free-text leakage for catalogued free-text
+    columns that have gold spans, linkage when the kit ships identity truth for the table."""
+    out = {}
+    for name, path in tables.items():
+        cols = set(pd.read_csv(path, dtype=str, nrows=0).columns)
+        text = catalog[(catalog.table == name) & (catalog.privacy_role == "free_text")].column
+        out[name] = {
+            "free_text": sorted(c for c in text if c in cols and kit_io.spans_path(root, dataset, name, c).exists()),
+            "linkage": (root / "truth" / f"{dataset}__{name}.csv").exists(),
+        }
+    return out
+
+
 def run_scorecard(original_dir, protected_dir, *, scenario: str, root, rowmaps: dict[str, str | Path],
                   lineage: dict[str, Lineage], out_dir) -> dict:
     """Validate row maps, run pets-eval scorecard in a child process, validate the report,
@@ -39,6 +53,8 @@ def run_scorecard(original_dir, protected_dir, *, scenario: str, root, rowmaps: 
     rowmaps = {t: Path(p).resolve() for t, p in rowmaps.items()}
     if _inside(out_dir, protected_dir) or _inside(protected_dir, out_dir):
         raise ScorecardRejected("out_dir_inside_release")
+    if any(_inside(p, protected_dir) for p in rowmaps.values()):
+        raise RowMapRejected("rowmap_in_release")  # row maps are private scoring aids
     scen = kit_io.get_scenario(scenario, root)
     if not scen or scen.get("dataset") != original_dir.name:
         raise ScorecardRejected("scenario")
@@ -80,7 +96,9 @@ def run_scorecard(original_dir, protected_dir, *, scenario: str, root, rowmaps: 
         report = json.loads((out_dir / "scorecard.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
         raise ScorecardRejected("structure") from None
-    return validate_report(report, scenario=scenario,
-                           required_tasks=scen.get("utility_requirements", []), tables=orig_files)
+    return validate_report(report, scenario=scenario, required_tasks=scen.get("utility_requirements", []),
+                           tables=orig_files, expected_sections=_expected_sections(root, original_dir.name,
+                                                                                   catalog, orig_files))
+
 
 

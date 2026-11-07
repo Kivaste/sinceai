@@ -61,7 +61,8 @@ def test_real_scorecard_returns_allowlisted_summary_and_keeps_raw_output(kit, re
     summary = _run(kit, release)
     assert summary["scenario"] == "TEST-S1"
     assert summary["tasks"] == [{"id": "CS-U4", "score": 1.0, "required": True, "status": "ok"}]
-    assert set(summary) == {"scenario", "dataset", "privacy", "utility", "composite", "tasks", "risks", "tables"}
+    assert set(summary) == {"scenario", "dataset", "privacy", "utility", "composite", "tasks", "risks", "tables",
+                          "not_applicable"}
     out = release[2]
     assert (out / "scorecard.json").exists()
     assert not list(release[0].glob("scorecard.*"))  # nothing written into the release folder
@@ -153,4 +154,24 @@ def test_relative_paths_work(kit, release, tmp_path, monkeypatch):
         rel(kit / "data" / "customer_service"), rel(prot), scenario="TEST-S1", root=rel(kit),
         rowmaps={k: rel(v) for k, v in rms.items()}, out_dir=rel(out), lineage={"conversations": LINEAGE})
     assert summary["tasks"][0]["status"] == "ok"
+
+
+
+def test_row_map_inside_the_release_folder_is_rejected(kit, release):
+    import shutil
+
+    prot, rms, _out = release
+    inside = prot / "rowmap_conversations.csv"
+    shutil.copy(rms["conversations"], inside)
+    with pytest.raises(RowMapRejected) as caught:
+        _run(kit, release, rowmaps={"conversations": inside})
+    assert caught.value.reason == "rowmap_in_release"
+
+
+def test_required_result_sections_come_from_the_kit_for_this_scenario(kit, release):
+    # the synthetic kit has no truth/spans, so no linkage or free-text section is required of the report
+    summary = _run(kit, release)
+    # no catalogued quasi-identifier in the synthetic kit: recorded, with its code, not hidden
+    assert summary["not_applicable"] == [
+        {"table": "conversations", "section": "k_anonymity", "key": "", "code": "no_quasi_identifier"}]
 
