@@ -60,3 +60,42 @@ def test_hour_of_day_never_a_small_step_after_month(syn):
     assert _rung(res) in ("ts.month_hour", "ts.day", "ts.week", "ts.month")
     tried = [m["rung"] for e in res.log for m in e["moves"] if m["column"] == "ts"]
     assert "ts.hour_of_day" not in tried
+
+
+HOUR_SACRIFICE = {"check": "U-HOUR", "floor_score": 0.5, "reason": "coarser visit time to reach k",
+                  "via": [{"table": "visits", "column": "ts"}]}
+HOUR_STEP = {"check": "U-HOUR", "table": "visits", "column": "ts", "from": "ts.month_hour", "to": "ts.hour_of_day",
+             "reason": "hour of day only, if k fails at month+hour"}
+
+
+def _with_step(syn, **kw):
+    pol = syn.policy(**kw)
+    return dataclasses.replace(pol, sacrifices=(*pol.sacrifices, HOUR_SACRIFICE), rung_sacrifices=(HOUR_STEP,))
+
+
+def _flat(syn):
+    """One town, one visit instant: k holds at month+hour (only the lone third-decade person is below k)."""
+    t = {k: v.copy() for k, v in syn.tables.items()}
+    t["visits"]["town"] = "Ta"
+    t["visits"]["ts"] = "2025-01-10 08:15:00"
+    return t
+
+
+def test_rung_sacrifice_adopted_and_recorded_when_k_fails(syn):
+    res = _run(syn, policy=_with_step(syn))  # synthetic rows: k shortfall at month+hour is above the 0.25 budget
+    assert _rung(res) == "ts.hour_of_day"
+    (rec,) = [s for s in res.sacrifices if "rung_step" in s]
+    assert rec["check"] == "U-HOUR" and rec["score_after"] == 1.0
+    step = rec["rung_step"]
+    assert (step["table"], step["column"], step["from"], step["to"]) == ("visits", "ts", "ts.month_hour",
+                                                                        "ts.hour_of_day")
+    assert step["max_share"] == 0.25 and step["k_shortfall_at_from"] > step["max_share"]
+    assert step["check_score_at_to"] == 1.0
+    adopted = [e for e in res.log if e["accepted"] and any(m["rung"] == "ts.hour_of_day" for m in e["moves"])]
+    assert len(adopted) == 1 and adopted[0]["reason"].startswith("sacrifice: rung step visits.ts")
+
+
+def test_rung_sacrifice_not_adopted_when_k_passes(syn):
+    res = _run(syn, policy=_with_step(syn), tables=_flat(syn))
+    assert _rung(res) == "ts.month_hour"
+    assert not [s for s in res.sacrifices if "rung_step" in s]
