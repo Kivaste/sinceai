@@ -39,15 +39,41 @@ $labels = @($iss.labels | ForEach-Object { $_.name })
 function Field([string]$name) { if ($b -match "(?mi)^\s*-\s*${name}:\s*(.+?)\s*$") { return $matches[1].Trim() } ; return $null }
 $head = Field 'Head'; $branch = Field 'Branch'; $impl = Field 'Implementer'
 Need ($head -match '^[0-9a-f]{40}$') 'Head: missing or not a full 40-char sha'
-Need ([bool]$branch) 'Branch: missing'
+Need ($branch -cmatch '^ticket/.+$') 'Branch: must match ticket/*'
 Need ([bool]$impl) 'Implementer: missing'
 
 # Head must be the real current head of the branch (or already merged into integration).
+$inInteg = $false
 if ($head -match '^[0-9a-f]{40}$') {
   & git -C $RepoRoot fetch -q origin 2>$null
   $tip = $null; if ($branch) { $tip = (& git -C $RepoRoot rev-parse --verify -q "origin/$branch" 2>$null) }
-  $inInteg = $false; & git -C $RepoRoot merge-base --is-ancestor $head origin/integration/pets-release 2>$null; if ($LASTEXITCODE -eq 0) { $inInteg = $true }
+  & git -C $RepoRoot merge-base --is-ancestor $head origin/integration/pets-release 2>$null; if ($LASTEXITCODE -eq 0) { $inInteg = $true }
   Need (($tip -and $tip.Trim() -eq $head) -or $inInteg) "Head $head is neither the current origin/$branch tip nor merged into integration (stale evidence)"
+}
+
+# Active tickets must be isolated. A merged ticket may already have had its worktree removed,
+# but being checked out in the main checkout is never acceptable, even after merging.
+if ($branch -cmatch '^ticket/.+$') {
+  $isolated = $false
+  try {
+    $listing = @(& git -C $RepoRoot -c core.quotePath=false worktree list --porcelain 2>$null)
+    if ($LASTEXITCODE -ne 0 -or $listing.Count -eq 0) { throw 'Worktree listing unavailable' }
+    $branchPattern = '(?m)^branch refs/heads/' + [regex]::Escape($branch) + '$'
+    $records = @(($listing -join "`n") -split "`n`n" | Where-Object { $_ -cmatch $branchPattern })
+    if ($records.Count -eq 0) { $isolated = $inInteg }
+    elseif ($records.Count -eq 1) {
+      $pathMatch = [regex]::Match($records[0], '(?m)^worktree (.+)$')
+      if (-not $pathMatch.Success) { throw 'Worktree path unavailable' }
+      $path = $pathMatch.Groups[1].Value
+      $gitDirs = @(& git -C $path rev-parse --path-format=absolute --git-dir --git-common-dir 2>$null)
+      if ($LASTEXITCODE -ne 0 -or $gitDirs.Count -ne 2) { throw 'Git identity unavailable' }
+      $gitDir = [IO.Path]::GetFullPath($gitDirs[0]).Replace('\', '/').TrimEnd('/')
+      $commonDir = [IO.Path]::GetFullPath($gitDirs[1]).Replace('\', '/').TrimEnd('/')
+      $actualBranch = & git -C $path symbolic-ref --quiet HEAD 2>$null
+      $isolated = $LASTEXITCODE -eq 0 -and $actualBranch -ceq "refs/heads/$branch" -and -not [StringComparer]::OrdinalIgnoreCase.Equals($gitDir, $commonDir)
+    }
+  } catch { $isolated = $false }
+  Need $isolated "Branch: $branch must be checked out in a linked worktree (unless already merged with its worktree removed)"
 }
 
 # TDD evidence: at least one Rule with a Red line (or an explicit 'No red observed') and a Green line.
