@@ -6,6 +6,8 @@ import csv
 import pathlib
 import re
 
+import pytest
+
 from pets_release.redactor import lexicon
 from pets_release.redactor.labels import LEXICON_LABELS
 from pets_release.redactor.lexicon import Gazetteer, loader, passes
@@ -14,6 +16,35 @@ from pets_release.redactor.pipeline import default_passes, redact_conversation
 
 DATA = pathlib.Path(lexicon.__file__).parent / "data"
 COLUMNS = ["term", "lang", "label", "match", "boundary", "notes"]
+
+
+def test_int_rule_with_non_integer_value_is_refused():
+    rules = loader.Rules({("@health_left", "HEALTH"): "four"})
+    with pytest.raises(ValueError, match="@health_left"):
+        rules.int_of("@health_left", "HEALTH", 3)
+    assert loader.Rules({}).int_of("@health_left", "HEALTH", 3) == 3  # an absent row keeps the default
+
+
+def test_no_placeholder_question_marks_in_lexicon_terms():
+    """A literal '?' in a term is encoding damage (the entry would never match)."""
+    bad = [(f.name, n) for f in sorted(DATA.glob("*.csv")) for n, e in enumerate(loader.read_csv(f), 2) if "?" in e.term]
+    assert bad == []
+
+
+def test_stopword_set_has_no_placeholder_question_marks():
+    from pets_release.redactor.lexicon import places
+
+    for name in dir(places):
+        v = getattr(places, name)
+        if name.isupper() and isinstance(v, (set, frozenset, list, tuple)):
+            assert not [w for w in v if isinstance(w, str) and "?" in w], name
+
+
+def test_restored_finnish_cues_and_denylist_words_take_effect():
+    from pets_release.redactor.lexicon import Gazetteer  # noqa: F401
+
+    terms = {e.term for f in DATA.glob("*.csv") for e in loader.read_csv(f)}
+    assert {"nimellä", "yhteyshenkilö", "hänen nimensä on", "lääkäri", "työnantaja on", "että", "hän", "mikäli"} <= terms
 
 
 def test_csv_columns_are_pinned():

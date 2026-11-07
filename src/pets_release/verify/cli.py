@@ -25,6 +25,20 @@ def parser() -> argparse.ArgumentParser:
     return p
 
 
+def _producer_context(kit, master, release_dir) -> dict | None:
+    """Ticket 21 wiring: the run's own producer context, rebuilt from kit + key + release (never a file).
+
+    Any failure gives None: producer checks then return not_run, which fails ``--full`` (fail closed).
+    """
+    try:
+        from pets_release.kit import Kit
+        from pets_release.run.context import verify_context
+
+        return verify_context(Kit(kit), master, release_dir)
+    except Exception:  # noqa: BLE001 - content-free; unknown state fails through not_run
+        return None
+
+
 def main(argv: list[str]) -> int:
     a = parser().parse_args(argv)
     try:
@@ -43,7 +57,8 @@ def main(argv: list[str]) -> int:
                 master = MasterKey.from_env()
             except KeyConfigError as e:
                 raise VerifyUsageError(str(e)) from None
-        report = verify_release(a.release_dir, full=a.full, kit=kit, master_key=master)
+        context = _producer_context(kit, master, a.release_dir) if a.full else None
+        report = verify_release(a.release_dir, full=a.full, kit=kit, master_key=master, context=context)
     except VerifyUsageError as e:
         print(f"pets-release verify: {e}", file=sys.stderr)
         return 2

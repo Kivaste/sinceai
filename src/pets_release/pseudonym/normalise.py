@@ -126,6 +126,14 @@ _NOSPACE_FOLD_LABELS = frozenset({"EMAIL", "USERNAME", "DEVICE_ID"})
 # letters, so Hansen/Jensen/Larsen stay themselves.
 _NEN_INFLECTED = re.compile(r"se(?:n|lle|lla|llä|lta|ltä|ssa|ssä|sta|stä|ksi|na|nä)$")
 _NEN_MIN_STEM = 4
+# Finnish -nen stems end in a/i/o/u/y/ä/ö before the genitive "se"; a consonant
+# or "e" there is a North-Germanic -sen name (Hansen, Petersen, Thoresen).
+_NEN_STEM_VOWELS = "aiouyäö"
+# Phone extension ("x12", "ext. 3", "extension 3") and everything after it.
+_EXTENSION = re.compile(
+    r"(?<=[0-9])[\s.,;:#-]*(?<![^\W\d_])(?:extension|ext|x)(?![^\W\d_]).*",
+    re.IGNORECASE | re.DOTALL,
+)  # only a marker that follows digits of the base number
 
 # Context-only (used by the Pseudonymiser in conversation scope): a word equal
 # to a name already seen in the same conversation plus one of these endings.
@@ -148,7 +156,11 @@ def _spoken(text: str) -> str:
 
 def _name_word(word: str) -> str:
     m = _NEN_INFLECTED.search(word)
-    if m and m.start() >= _NEN_MIN_STEM:
+    if (
+        m
+        and m.start() >= _NEN_MIN_STEM
+        and word[m.start() - 1] in _NEN_STEM_VOWELS
+    ):
         return word[: m.start()] + "nen"
     return word
 
@@ -161,6 +173,7 @@ _TRUNK_ZERO_CC = ("358", "46")
 
 def _phone(text: str, country: str) -> str:
     """E.164-like: '+' + country code + national number without trunk 0."""
+    text = _EXTENSION.sub("", text)  # extensions are not national digits
     text = re.sub(r"\(\s*0\s*\)", "", text)  # "+358 (0)40" written trunk
     s = re.sub(r"[^0-9+]", "", text)
     plus = s.startswith("+")

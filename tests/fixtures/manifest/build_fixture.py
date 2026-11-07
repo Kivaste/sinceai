@@ -130,8 +130,8 @@ _EVIDENCE_SHAPE = {
     "usernames": ("release", "cells", 130),
 }
 EVIDENCE = {a: (ASSERTION_CHECKS[a], *shape) for a, shape in _EVIDENCE_SHAPE.items()}
-# Gate checks that back no assertion. contract.* / release.* except manifest-shapes: ticket 04's names;
-# producer.row-k / producer.original-values: ticket 11's (26de63b); release.manifest-shapes: not registered yet.
+# Gate checks that back no assertion. contract.* / release.*: ticket 04's names;
+# producer.row-k / producer.original-values: ticket 11's (26de63b). Only registered checks may be claimed.
 EXTRA_GATE = [
     _ev("contract.columns", "release", "files", 2),
     _ev("contract.files", "release", "files", 2),
@@ -140,7 +140,6 @@ EXTRA_GATE = [
     _ev("release.file-digests", "release", "files", 2),
     _ev("release.token-hex64", "release", "cells", 130),
     _ev("producer.row-k", "release", "rows", 10),
-    _ev("release.manifest-shapes", "release", "files", 1),
     _ev("producer.original-values", "producer", "cells", 130),
 ]
 
