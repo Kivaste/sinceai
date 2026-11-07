@@ -74,7 +74,10 @@ def test_sacrifice_floor_without_an_adopted_sacrifice_is_not_met_or_accepted():
                 "sacrifices": []}
     row = next(r for r in target_rows("HEALTH-S1", manifest) if r["name"] == "H-U4 sacrifice floor")
     assert row["status"] == "not adopted"
-    manifest["sacrifices"] = [{"check": "H-U4", "floor": 0.6, "after": 0.5, "before": 1.0, "reason": "r"}]
+    manifest["sacrifices"] = [{"check": "H-U4", "floor": 0.6, "after": 0.7, "before": 1.0, "reason": "r"}]
+    row = next(r for r in target_rows("HEALTH-S1", manifest) if r["name"] == "H-U4 sacrifice floor")
+    assert row["status"] == "accepted sacrifice" and row["measured"] == 0.7
+    manifest["sacrifices"][0]["after"] = 0.5
     manifest["measured"]["utility"]["tasks"][0]["after"] = 0.5
     row = next(r for r in target_rows("HEALTH-S1", manifest) if r["name"] == "H-U4 sacrifice floor")
     assert row["status"] == "not met"
