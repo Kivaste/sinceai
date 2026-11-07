@@ -48,8 +48,7 @@ Check that the install works and that the kit is readable (these print table nam
 .\.venv\Scripts\pets-release.exe kit-info --dataset health --kit "$env:PETS_KIT"
 ```
 
-In the later examples, use `.\.venv\Scripts\pets-release.exe` wherever they say
-`pets-release`; activation is not required.
+The later examples also use the venv executables directly; activation is not required.
 
 Exit codes: `0` success; `1` refusal or verify failure; `2` usage error or unknown state. Unknown counts as failure.
 
@@ -59,6 +58,8 @@ The engine (library + CLI) is the product: a **self-hosted pipeline step** for C
 Airflow or dbt inside your own infrastructure, where row values stay local.
 The web app is **the approval and audit console** for one run; a self-hosted REST
 API is future work.
+
+![Self-hosted pipeline: source storage and customer-held keys feed pets-release; protected tables and a signed manifest go to the recipient; the approval and audit console reads the manifest. Only the optional LLM receives field names, never row values.](docs/assets/architecture.svg)
 
 This GitHub Actions job assumes a trusted, self-hosted Linux runner with Bash,
 the project and kit toolkit installed in its `python` environment, and `PETS_KIT`
@@ -106,7 +107,9 @@ inside your approved sharing boundary.
 
 ## Demo
 
-The demo has three parts: HEALTH-S1 (ED visits to a university research group) in depth, CS-S1 (contact-centre transcripts to an LLM analytics vendor) for free text, and live detection on the `unseen` export.
+The supported release demo is HEALTH-S1 (ED visits to a university research group),
+with live detection on the `unseen` export. CS-S1 releases are not supported in
+this version (D46); they are future work, not a runnable release demo.
 
 ### Local web app
 
@@ -116,7 +119,7 @@ each server launch; existing directories are refused rather than reused.
 
 <!-- docs-test: skip reason=starts-a-long-running-server -->
 ```powershell
-python -m pets_release.ui --kit "$env:PETS_KIT" --out ..\sinceai-out\ui-demo --created 2026-11-07T08:00:00Z
+.\.venv\Scripts\python.exe -m pets_release.ui --kit "$env:PETS_KIT" --out ..\sinceai-out\ui-demo --created 2026-11-07T08:00:00Z
 ```
 
 Open the token-bearing URL printed at startup. The server binds only `127.0.0.1`
@@ -158,21 +161,85 @@ The UI cannot bypass the production pipeline's refusal or an unavailable check.
 
 <!-- docs-test: run -->
 ```powershell
-pets-release detect unseen --out ..\sinceai-out\unseen_field_labels.csv --format unseen --kit "$env:PETS_KIT"
+.\.venv\Scripts\pets-release.exe detect unseen --out ..\sinceai-out\unseen_field_labels.csv --format unseen --kit "$env:PETS_KIT"
 ```
 
 ### 2. HEALTH-S1 release
 
 `--created` pins the creation time. The same input, key, creation time and tool versions give a byte-identical release.
 
+#### Measured search (default)
+
+Omit `--plan` to run the deterministic, bounded search: it measures purpose checks,
+tries withholding and coarsening, then re-checks purpose checks and privacy targets
+after local suppression. No acceptable candidate means refusal, not a fallback to
+the hand plan. Field justifications and `measured.search` describe the search;
+the candidate log stays outside the release in `<out>.scoring/search_log.jsonl`.
+
+`--recipient` binds the recipient ID into the release scope and derives a separate
+pseudonym key. Joins survive within a release, but tokens do not link across
+recipients. Use a stable, non-sensitive ID matching `[A-Za-z0-9][A-Za-z0-9._-]{0,63}`;
+`default` and `manifest-signature` are reserved. Omission keeps the legacy default
+recipient; it does not select a recipient-specific derived key.
+
 <!-- docs-test: run -->
 ```powershell
-pets-release run --scenario HEALTH-S1 --out ..\sinceai-out\health-s1 --created 2026-11-07T08:00:00Z --kit "$env:PETS_KIT"
+.\.venv\Scripts\pets-release.exe run --scenario HEALTH-S1 --recipient research-group --out ..\sinceai-out\health-s1 --created 2026-11-07T08:00:00Z --kit "$env:PETS_KIT"
 ```
 
-<!-- docs-test: skip reason=cs-s1-run-needs-ticket-23 -->
+The walking-skeleton hand plan remains available explicitly. It bypasses the
+search, not the gate, suppression or final purpose checks. Use a fresh output
+folder for each run:
+
+<!-- docs-test: run -->
 ```powershell
-pets-release run --scenario CS-S1 --out ..\sinceai-out\cs-s1 --created 2026-11-07T08:00:00Z --kit "$env:PETS_KIT"
+.\.venv\Scripts\pets-release.exe run --scenario HEALTH-S1 --plan hand --recipient research-group --out ..\sinceai-out\health-s1-hand --created 2026-11-07T08:00:00Z --kit "$env:PETS_KIT"
+```
+
+#### Full before/after measurement
+
+The default search measures candidate purpose checks; it does not by itself fill
+the scorecard's before/after utility, privacy and published baseline comparison.
+Use the measured wrapper for those. Its CLI accepts the same arguments as `run`:
+no `--plan` means search, `--plan hand` selects the hand plan, and `--recipient`
+is passed to both builds.
+
+<!-- docs-test: run -->
+```powershell
+.\.venv\Scripts\python.exe -m pets_release.measure.wire --help
+```
+
+The full command needs the real kit, its published `results/benchmark.json`, and
+the installed `pets-eval` toolkit. The synthetic README ledger therefore names
+that dependency as a skip; real-kit evidence must run it separately, not count
+the skip as success:
+
+<!-- docs-test: skip reason=measure-wire-needs-full-kit-scorecards -->
+```powershell
+.\.venv\Scripts\python.exe -m pets_release.measure.wire --scenario HEALTH-S1 --recipient research-group --out ..\sinceai-out\health-s1-measured --created 2026-11-07T08:00:00Z --kit "$env:PETS_KIT"
+```
+
+This builds a scratch release, scores before/after through the kit-eval adapter,
+then gates and signs a second build with the measured narrative. The protected
+tables must match the scratch build byte-for-byte. Raw scorecards and scratch
+tables remain local under `<out>.measure/`; row maps stay outside the release.
+Use fresh paths: an existing release or measure scratch folder is an error.
+The measured release supports the same `verify` and `verify --full` commands below.
+
+#### CS-S1: unsupported in this version (D46)
+
+CS-S1 is dropped from this submission's release scope and deferred to future
+work (D46). The strict gate refuses the CS-S1 release rather than weakening
+privacy checks to publish it; builds without CS-S1 integration reject the scenario
+earlier as unsupported. This is an honest limitation, not a successful release.
+The measured wrapper does not bypass it. The command below is deliberately
+skipped, not an instruction to run a supported release. CS evaluation exports
+still ship through the submission packager under D37; they are not a gated CS-S1
+release.
+
+<!-- docs-test: skip reason=cs-s1-deferred-d46 -->
+```powershell
+.\.venv\Scripts\pets-release.exe run --scenario CS-S1 --out ..\sinceai-out\cs-s1 --created 2026-11-07T08:00:00Z --kit "$env:PETS_KIT"
 ```
 
 A release folder holds one `<table>.csv` per released table and `privacy_manifest.json`, nothing else. The gate refuses any other file. If a check finds a high-severity violation, errors or does not run, the tool exits 1, prints counts by check and label (never values), and publishes nothing.
@@ -187,14 +254,14 @@ VERIFIED (limited): N release-checked, M producer-attested
 
 <!-- docs-test: run -->
 ```powershell
-pets-release verify ..\sinceai-out\health-s1
+.\.venv\Scripts\pets-release.exe verify ..\sinceai-out\health-s1
 ```
 
 Controller or auditor mode (`--full`) also needs the kit and the key. It re-runs every check in the registry, including the producer-scope ones (original-value survival, reversible hashes, key material, per-person k), the input digests, the tool revision and the signature. Any check that cannot run is a failure.
 
 <!-- docs-test: run -->
 ```powershell
-pets-release verify --full --kit "$env:PETS_KIT" ..\sinceai-out\health-s1
+.\.venv\Scripts\pets-release.exe verify --full --kit "$env:PETS_KIT" ..\sinceai-out\health-s1
 ```
 
 | | `verify <release>` (limited) | `verify --full --kit <path>` |
@@ -213,7 +280,7 @@ A static HTML file rendered from the manifest alone. No network assets and no ro
 
 <!-- docs-test: run -->
 ```powershell
-pets-release dashboard ..\sinceai-out\health-s1 --out ..\sinceai-out\health-s1-dashboard.html
+.\.venv\Scripts\pets-release.exe dashboard ..\sinceai-out\health-s1 --out ..\sinceai-out\health-s1-dashboard.html
 ```
 
 ### 5. Submission bundle
@@ -224,8 +291,8 @@ Until #128 lands, the default search plan can drop a table's record key, and the
 
 <!-- docs-test: run -->
 ```powershell
-pets-release run --scenario HEALTH-S1 --plan hand --out ..\sinceai-out\health-s1-hand --created 2026-11-07T08:00:00Z --kit "$env:PETS_KIT"
-pets-release submission --out ..\sinceai-out\pets_submission --release ..\sinceai-out\health-s1-hand --kit "$env:PETS_KIT"
+.\.venv\Scripts\pets-release.exe run --scenario HEALTH-S1 --plan hand --out ..\sinceai-out\health-s1-hand --created 2026-11-07T08:00:00Z --kit "$env:PETS_KIT"
+.\.venv\Scripts\pets-release.exe submission --out ..\sinceai-out\pets_submission --release ..\sinceai-out\health-s1-hand --kit "$env:PETS_KIT"
 ```
 
 It prints `SUBMISSION BUILT (COMPLETE)`. Without a HEALTH-S1 release (`REFUSED: incomplete`), or without the kit's unseen or CS eval exports, it refuses and writes nothing. `--partial` must be passed explicitly to build without a missing target dataset; such a build prints `SUBMISSION BUILT (PARTIAL)` and lists the missing datasets in `submission_index.json`. With HEALTH-S1 as the only target, `--partial` with no release still refuses (`REFUSED: no_release`).
@@ -247,7 +314,7 @@ They must never enter the public repo (decision D15, [ADR 0003](docs/adr/)). The
 <!-- docs-test: skip reason=runs-the-whole-test-suite-recursively -->
 ```powershell
 $env:PYTHONUTF8 = "1"; $env:PYTHONDONTWRITEBYTECODE = "1"; $env:TZ = "UTC"
-python -m pytest -n auto --import-mode=importlib tests
+.\.venv\Scripts\python.exe -m pytest -n auto --import-mode=importlib tests
 ```
 
 Tests marked `kit` need `PETS_KIT` and are reported as not run when it is absent.
