@@ -84,6 +84,43 @@ def apply_suppression(tables: Mapping[str, pd.DataFrame], suppressed: Mapping[st
     return {t: (df.drop(index=list(suppressed.get(t, ()))) if suppressed.get(t) else df) for t, df in tables.items()}
 
 
+def rung_params(policy, params, key, rung):
+    """The search's params for ``rung`` on ``key`` (``params``: ``kit.params_from_plan`` of the hand plan), or
+    None if the rung cannot be parameterised. One function for the search and for ``rebuild_plan``."""
+    given = (params or {}).get(key, {}).get(rung)
+    if given is not None:
+        return dict(given)
+    if rung in ("age.band5", "age.band10"):
+        return None
+    if rung == "id.pseudonym":
+        return {"label": "RECORD_KEY"}
+    if rung == "geo.topn":
+        pm = policy.param_minimums.get(key)
+        return {"n": pm["min"] if pm and pm["rung"] == rung else 8}
+    if rung == "num.round":
+        return {"unit": 1}
+    if rung == "num.bin":
+        return {"width": 10}
+    return {}
+
+
+def rebuild_plan(policy, params, fields: Mapping) -> list:
+    """A search plan from ``{(table, column): (rung, floor)}`` with the search's own params (withheld: ``{}``),
+    in plan order, ``source: "search"``. Raises ValueError (content-free) for a field the policy does not name
+    or a rung the search could not parameterise."""
+    out = []
+    for key in sorted(fields):
+        if key not in policy.floors:
+            raise ValueError("rebuild: field not in the policy")
+        rung, floor = fields[key]
+        pr = {} if rung == WITHHELD else rung_params(policy, params, key, rung)
+        if pr is None:
+            raise ValueError("rebuild: rung has no search params")
+        out.append({"table": key[0], "column": key[1], "rung": rung, "params": json.loads(canonical(pr)),
+                    "floor": floor, "reason": policy.floors[key].reason, "source": "search"})
+    return out
+
+
 def _norm(res) -> dict:
     """Purpose result -> {score, status}; anything but a finite score with status ok is not a pass."""
     if not isinstance(res, Mapping):
@@ -202,21 +239,7 @@ class _Search:
 
     def rung_params(self, key, rung):
         """Params for ``rung`` on ``key``, or None if the rung cannot be parameterised (skipped)."""
-        given = self.params.get(key, {}).get(rung)
-        if given is not None:
-            return dict(given)
-        if rung in ("age.band5", "age.band10"):
-            return None
-        if rung == "id.pseudonym":
-            return {"label": "RECORD_KEY"}
-        if rung == "geo.topn":
-            pm = self.p.param_minimums.get(key)
-            return {"n": pm["min"] if pm and pm["rung"] == rung else 8}
-        if rung == "num.round":
-            return {"unit": 1}
-        if rung == "num.bin":
-            return {"width": 10}
-        return {}
+        return rung_params(self.p, self.params, key, rung)
 
     # ---------------------------------------------------------------- candidates
     def entry_state(self, cand, key):
