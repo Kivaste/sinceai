@@ -1,6 +1,6 @@
 ﻿# Submission description
 
-Character count: 4933 of 5,000, counting the body below including all conditional blocks and unrendered placeholders. Rendered numbers are shorter than placeholders.
+Character count: 4947 of 5,000, counting the body below including all conditional blocks and unrendered placeholders. Rendered numbers are shorter than placeholders.
 True for the current build when every conditional block is removed. A block is kept only once its enabling ticket has merged and the claim is verified (see the claims checklist in 06). Strip the HTML comment markers before submitting. The first two paragraphs work alone for voters.
 
 ---
@@ -23,7 +23,7 @@ We start from the data request. The scenario's required analyses (purpose checks
 
 1. Keyed pseudonyms. Identifiers become HMAC-SHA256 tokens under a secret key, so joins inside a release survive.
 <!-- IF #29 recipient keys -->Keys can be scoped per recipient, so two recipients cannot join their copies.<!-- END IF -->
-2. Fail-closed gate. A closed contract lists allowed files, columns and value forms. An independent rescan, a check for surviving original values and a per-person k check run on the candidate release. A hit, an error or a check that did not run means exit 1 and nothing is published. Refusal reports give counts and labels, never values.
+2. Fail-closed gate. A closed contract lists allowed files, columns and value forms. An independent rescan, a check for surviving original values and a per-person k check run on the candidate release. A high-severity hit, an error or a check that did not run means exit 1 and nothing is published. Refusal reports give counts and labels, never values.
 3. Privacy manifest. Each assertion, for example paymentCards or nationalIds, can only hold the literal false and is bound to a named check with version, denominator and hits. Claims are per label; we never claim "no identifiers remain". Risks that cannot be zero are listed as residual risks. The manifest is HMAC-signed.
 4. Fully offline. No network, no cloud model; sockets are blocked at start-up. The same input, key and creation time give a byte-identical release.
 
@@ -46,4 +46,6 @@ Pseudonymised data is still personal data, and whoever holds the key can re-link
 ## What is next
 
 An optional LLM front end that turns a request into a needs spec, seeing only the request text and the data dictionary, never data values. More scenarios through the same gate and manifest.
+
+
 
