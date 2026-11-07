@@ -66,10 +66,10 @@ class Jobs:
         threading.Thread(target=self.execute, args=(scenario, self.release), daemon=True).start()
         return True
 
-    def command(self, name, args):
+    def command(self, name, args, *, module="pets_release"):
         with self.lock:
             self.state["steps"].append({"name": name, "exit": None})
-        proc = subprocess.run([sys.executable, "-m", "pets_release", *map(str, args)],
+        proc = subprocess.run([sys.executable, "-m", module, *map(str, args)],
                               env=self.env, capture_output=True, timeout=1800, check=False)
         with self.lock:
             self.state["steps"][-1]["exit"] = proc.returncode
@@ -90,7 +90,8 @@ class Jobs:
                         "--out", release, "--created", args.created]
             if args.plan is not None:
                 run_args.extend(["--plan", args.plan])
-            rc = self.command("run", run_args)
+            rc = (self.command("measure.wire", run_args[1:], module="pets_release.measure.wire")
+                  if args.measured else self.command("run", run_args))
             if rc != 0:
                 self.update(status="REFUSED" if rc == 1 else "FAILED", **self.refusal(release))
                 return

@@ -23,6 +23,7 @@ def capture():
     parser.add_argument("--out", required=True)
     parser.add_argument("--created", default="2026-11-07T08:00:00Z")
     parser.add_argument("--reference")
+    parser.add_argument("--measured", action="store_true")
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[2]
     revision = subprocess.check_output(["git", "-C", str(root), "rev-parse", "HEAD"], text=True).strip()
@@ -33,7 +34,8 @@ def capture():
     env = dict(os.environ, PYTHONPATH=str(root / "src"), PYTHONUTF8="1", TZ="UTC")
     env.pop("PETS_OFFLINE", None)
     server = subprocess.Popen([sys.executable, "-m", "pets_release.ui", "--kit", args.kit,
-                               "--out", str(evidence / "runs"), "--created", args.created, "--port", "0"],
+                               "--out", str(evidence / "runs"), "--created", args.created, "--port", "0",
+                               *(["--measured"] if args.measured else [])],
                               env=env, cwd=root, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
 
     def get(url):
@@ -82,6 +84,13 @@ def capture():
             raise RuntimeError("UI run timed out")
         get(url.replace("/?", "/result?"))
         screenshot(url.replace("/?", "/result?"), "result")
+        measurements = get(url.replace("/?", "/demo/measurements?"))
+        if args.measured:
+            if report.get("measured", {}).get("privacy", {}).get("status") != "measured":
+                raise RuntimeError("UI privacy was not measured")
+            if "Privacy measurement: measured" not in measurements:
+                raise RuntimeError("Measured privacy view unavailable")
+            screenshot(url.replace("/?", "/demo/measurements?"), "measurements")
         # D41: never decode, store, print or screenshot real-kit rows. Count transport
         # bytes only; screenshots above contain aggregates, with no rows auto-loaded.
         with urlopen(url.replace("/?", "/rows?"), timeout=300) as response:

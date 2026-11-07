@@ -4,6 +4,7 @@ from __future__ import annotations
 import io
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -70,8 +71,10 @@ with response:
 
 @contextmanager
 def running(tmp_path, *, extra_env=None, edit=coarse_qis, probe=False, verifier_unavailable=False,
-            remove_refusal_report=False, record_commands=False, launch_extra=()):
+            remove_refusal_report=False, record_commands=False, launch_extra=(), measured_kit=False):
     kit = build_kit(tmp_path / "kit", edit)
+    if measured_kit:
+        prepare_measured_kit(kit)
     env = server_env()
     env.update(extra_env or {})
     command = launch_args(kit, tmp_path / "out", *launch_extra)
@@ -211,6 +214,7 @@ def test_health_release_matches_cli_bytes_and_rechecks_both_tiers(tmp_path):
         assert report["personK"]["belowK"] == 0
         assert report["exportAssertions"] and report["assertionEvidence"]
         assert report["measured"]["utility"]
+        assert report["measured"]["privacy"]["status"] == "not_measured"
         release = out / "run-1"
         assert (release / "privacy_manifest.json").is_file()
         other = tmp_path / "cli-release"
@@ -222,6 +226,68 @@ def test_health_release_matches_cli_bytes_and_rechecks_both_tiers(tmp_path):
         assert "--plan" not in run, "default UI must preserve the CLI search default"
         assert {p.name: p.read_bytes() for p in release.iterdir()} == {
             p.name: p.read_bytes() for p in other.iterdir()}
+
+
+def prepare_measured_kit(kit):
+    """Hand-made metadata/aggregate baselines for the existing synthetic health tables."""
+    path = kit / "metadata" / "scenarios.json"
+    scenarios = json.loads(path.read_text())
+    scenarios[0]["utility_requirements"] = ["H-U2", "H-U4", "H-U6", "H-U7", "H-U8"]
+    path.write_text(json.dumps(scenarios), encoding="utf-8")
+    (kit / "metadata" / "field_catalog.csv").write_text(
+        "dataset,table,column,privacy_role,data_kind,subtype\n"
+        "health,ed_visits,visit_id,record_key,identifier,id\n"
+        "health,lab_results,lab_id,record_key,identifier,id\n"
+        "health,clinical_notes,note_id,record_key,identifier,id\n"
+        "health,published_weekly_stats,stat_id,record_key,identifier,id\n"
+        "health,ed_visits,patient_name,direct_identifier,text,name\n"
+        "health,ed_visits,municipality,quasi_identifier,categorical,location\n",
+        encoding="utf-8")
+    benchmark = {"baselines": {f"{name}_health": {
+        "privacy": 0.5, "worst_reid": 0.5, "residual_identifiers": 0.0,
+        "utility_by_scenario": {"HEALTH-S1": 1.0},
+        "utility_tasks": {task: 1.0 for task in scenarios[0]["utility_requirements"]},
+    } for name in ("B0", "B2", "B2K")}}
+    (kit / "results").mkdir()
+    (kit / "results" / "benchmark.json").write_text(json.dumps(benchmark), encoding="utf-8")
+
+
+def test_measured_mode_matches_wire_bytes_and_shows_privacy(tmp_path):
+    """HTTP + CLI seam: opt-in measurement runs the real offline measurer and both verify tiers."""
+    with running(tmp_path, measured_kit=True, launch_extra=("--measured",)) as (_, url, kit, out):
+        assert request(url, "/api/run", data={"scenario": "HEALTH-S1"})[0] == 202
+        report = result(url)
+        assert report["status"] == "RELEASED", report
+        assert report["steps"] == [{"name": "measure.wire", "exit": 0},
+                                   {"name": "verify (limited)", "exit": 0},
+                                   {"name": "verify --full", "exit": 0}]
+        assert report["measured"]["privacy"]["status"] == "measured"
+        privacy = next(c for c in report["measured"]["privacy"]["components"] if c["component"] == "privacy")
+        page = request(url, "/demo/measurements")[1]
+        assert f'<tr><td>privacy</td><td>{privacy["before"]}</td><td>{privacy["after"]}</td></tr>' in page
+        reference = tmp_path / "reference"
+        proc = subprocess.run([sys.executable, "-m", "pets_release.measure.wire", "--scenario", "HEALTH-S1",
+                               "--kit", str(kit), "--out", str(reference), "--created", CREATED],
+                              env=server_env(), cwd=ROOT, capture_output=True, timeout=240, check=False)
+        assert proc.returncode == 0, "reference measured CLI failed"
+        assert {p.name: p.read_bytes() for p in (out / "run-1").iterdir()} == {
+            p.name: p.read_bytes() for p in reference.iterdir()}
+
+
+def test_measured_view_shows_all_scorecard_aggregates(tmp_path):
+    """HTTP + CLI seam: displayed before/after scores agree with real pets-eval, not purpose labels."""
+    with running(tmp_path, measured_kit=True, launch_extra=("--measured",)) as (_, url, _, out):
+        assert request(url, "/api/run", data={"scenario": "HEALTH-S1"})[0] == 202
+        assert result(url)["status"] == "RELEASED"
+        page = request(url, "/demo/measurements")[1]
+        summaries = [json.loads((out / "run-1.measure" / "scorecards" / path).read_text())["summary"]
+                     for path in ("before/kit-out/scorecard.json", "after/scorecard.json")]
+        for name in ("privacy", "utility", "composite"):
+            cells = re.search(rf'<tr><td>{name}</td><td>([^<]+)</td><td>([^<]+)</td></tr>', page).groups()
+            assert "not measured" not in cells, f"{name} aggregate is missing"
+            assert [float(cell) for cell in cells] == pytest.approx([s[name] for s in summaries], abs=1e-9)
+        assert "Privacy measurement: measured" in page
+        assert "Attacker linkage rates" in page
 
 
 def test_explicit_hand_plan_matches_cli_bytes(tmp_path):
