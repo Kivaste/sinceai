@@ -74,6 +74,18 @@ def test_empty_risk_map_refuses(tmp_path, monkeypatch, capsys):
     _refused(code, out, capsys)
 
 
+@pytest.mark.parametrize("risk", [None, False, True, "private-risk-marker", float("nan"), float("inf"), -float("inf")],
+                         ids=["none", "false", "true", "string", "nan", "inf", "negative-inf"])
+def test_unmeasured_risk_component_refuses(tmp_path, monkeypatch, capsys, risk):
+    """Seam: CLI run. Unknown/non-finite risk -> refusal, never a measured release or value-bearing reason."""
+    code, out = _run(tmp_path, monkeypatch,
+                     _edit(lambda e: e["step"] == 0, lambda e: dict(e, risk={"component": risk})))
+    captured = capsys.readouterr()
+    assert code == 2, captured.err
+    assert captured.err == "pets-release run: measured.search: a search step has no measured risk\n"
+    assert not out.exists()
+
+
 def test_empty_score_map_refuses(tmp_path, monkeypatch, capsys):
     code, out = _run(tmp_path, monkeypatch, _edit(lambda e: not e["accepted"], lambda e: dict(e, scores={})))
     _refused(code, out, capsys)
