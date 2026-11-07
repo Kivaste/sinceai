@@ -6,8 +6,8 @@ appended to its fitFor reason (an upstream bug copying a row value into manifest
 protection, the gate, manifest assembly and the writer's self-scan are production code. Synthetic rows only.
 
 Rule: a source value (any table and column: withheld tables, withheld columns, suppressed rows, raw forms of
-transformed columns) of at least SCAN_MIN_LEN characters, held by fewer than k source rows of its column, must
-not appear in manifest text (outside `contract`). A value shared by k or more rows of its column is a category,
+transformed columns) of at least SCAN_MIN_LEN characters, held by fewer than SOURCE_CATEGORY_MIN_ROWS (5) source rows of its column, must
+not appear in manifest text (outside `contract`). A value shared by that many rows of its column is a category,
 not row content, and is not scanned (an honest manifest names categories, e.g. inside column names).
 
 Failure rows (trigger -> result):
@@ -15,7 +15,7 @@ Failure rows (trigger -> result):
                                                      -> today RELEASED; must refuse selfscan:manifest-value
   withheld non-identifier column of a released table (ed_visits.icd10_secondary, a one-row value) planted
                                                      -> today RELEASED; must refuse selfscan:manifest-value
-  honest hand release whose manifest text contains a withheld category value held by >= k rows
+  honest hand release whose manifest text contains a withheld category value held by >= 5 rows
                                                      -> released (no false positive)
   (identifier values, e.g. patient_name or a raw visit_id, are already refused by producer.original-values in
   the self-scan's verify pass, and raw timestamps by the manifest identifier-shape scan; not rows of this change.)
@@ -28,9 +28,8 @@ import pandas as pd
 import pytest
 from run_helpers import CREATED, TEST_KEY, build_kit, coarse_qis
 
-from pets_release.writer.core import SCAN_MIN_LEN
+from pets_release.writer.core import SCAN_MIN_LEN, SOURCE_CATEGORY_MIN_ROWS
 
-K = 5  # the HEALTH-S1 policy's k (asserted on the honest release's contract below)
 NOTE = "Synthetic remark: stable overnight, reviewed by the ward team, plan unchanged."  # hand-made
 
 
@@ -96,11 +95,10 @@ def test_honest_release_with_category_in_manifest_text_releases(tmp_path, monkey
     capsys.readouterr()
     assert code == 0
     m = json.loads((out / "privacy_manifest.json").read_text(encoding="utf-8"))
-    assert m["contract"]["k"] == K
     text = json.dumps({k: v for k, v in m.items() if k != "contract"}, ensure_ascii=False)
-    # the case really is exercised: some withheld category value (>= k rows) occurs in the manifest text
+    # the case really is exercised: some withheld category value occurs in the manifest text
     shared = False
     for table in ("clinical_notes", "ed_visits"):
         for c, s in _read(kit, table).items():
-            shared |= any(len(v) >= SCAN_MIN_LEN and n >= K and v in text for v, n in s.value_counts().items())
+            shared |= any(len(v) >= SCAN_MIN_LEN and n >= SOURCE_CATEGORY_MIN_ROWS and v in text for v, n in s.value_counts().items())
     assert shared

@@ -36,6 +36,9 @@ from pets_release.writer.assemble import (
 FILE_NAME = re.compile(r"^[A-Za-z0-9_]{1,64}\.csv$")
 SCORING_NAME = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.\-]{0,99}$")
 SCAN_MIN_LEN = 6  # released cell values at least this long must not appear in manifest text (outside `contract`)
+# Source values (withheld tables/columns, suppressed rows, raw forms; #80) at least SCAN_MIN_LEN long are scanned
+# too, unless held by this many rows of their column: such a value is a category, not row content.
+SOURCE_CATEGORY_MIN_ROWS = 5
 REFUSAL_REPORT = "refusal_report.json"
 GATE_REPORT = "gate_report.json"
 LINEAGE_FILE = "lineage.json"
@@ -184,7 +187,13 @@ def _self_scan(build: Path, c: Candidate, manifest: dict, context: dict) -> list
     values = set()
     for t in c.tables:
         values.update(v for v in pd.unique(t.frame.to_numpy(dtype=object).ravel()) if len(v) >= SCAN_MIN_LEN)
-    if any(v in text for v in values):
+    for df in context.get("source", {}).values():
+        for col in df.columns:
+            counts = df[col].value_counts(dropna=True)
+            values.update(v for v, n in counts.items()
+                          if isinstance(v, str) and len(v) >= SCAN_MIN_LEN and n < SOURCE_CATEGORY_MIN_ROWS)
+    grams = {text[i:i + SCAN_MIN_LEN] for i in range(len(text) - SCAN_MIN_LEN + 1)}  # prefilter: fast on big kits
+    if any(v[:SCAN_MIN_LEN] in grams and v in text for v in values):
         reasons.append("selfscan:manifest-value")
     return reasons
 
