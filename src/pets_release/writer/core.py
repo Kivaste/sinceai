@@ -137,12 +137,21 @@ def _csv_bytes(header, rows) -> bytes:
     return buf.getvalue().encode("utf-8")
 
 
+def _sorted_pairs(t: ProtectedTable) -> list:
+    return sorted(zip(t.frame.itertuples(index=False, name=None), t.final, strict=True))
+
+
+def table_bytes(t: ProtectedTable) -> bytes:
+    """The exact bytes ``write_release`` publishes for ``t`` (rows sorted; the run measures its k sets on them)."""
+    return _csv_bytes(list(t.frame.columns), [list(r) for r, _ in _sorted_pairs(t)])
+
+
 def _write_tables(build: Path, c: Candidate) -> tuple[dict, dict]:
     """Write sorted tables. Returns (file digests, {stem: Lineage}) with lineage in written row order."""
     digests, lineage = {}, {}
     for t in sorted(c.tables, key=lambda t: t.name):
-        pairs = sorted(zip(t.frame.itertuples(index=False, name=None), t.final, strict=True))
-        data = _csv_bytes(list(t.frame.columns), [list(r) for r, _ in pairs])
+        pairs = _sorted_pairs(t)
+        data = table_bytes(t)
         (build / t.name).write_bytes(data)
         digests[t.name] = hashlib.sha256(data).hexdigest()
         lineage[t.name[:-4]] = Lineage(final=tuple(k for _, k in pairs), suppressed=frozenset(t.suppressed))

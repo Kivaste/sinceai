@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from pets_release.ladders import WITHHELD, output_column
 from pets_release.manifest import not_measured
+from pets_release.run.ksets import k_sets_block
 
 _RECORD_KEYS = {("ed_visits", "visit_id"), ("lab_results", "lab_id"), ("lab_results", "visit_id"),
                 ("clinical_notes", "note_id"), ("clinical_notes", "visit_id"),
@@ -49,13 +50,15 @@ def _pet(entry) -> tuple[str, dict]:
 
 
 def build_narrative(*, policy, plan, scenario_ids, suppression: dict, k: int, purpose=None, search=None,
-                    rung_steps=()) -> dict:
+                    rung_steps=(), k_sets=None) -> dict:
     """``purpose``: the accepted ``run.purpose.PurposeResult``; fills ``measured.utility`` and the sacrifices'
     before/after scores (None leaves them not measured / null).
     ``search`` (ticket 25): {"justifications", "summary", "sacrifices"} from ``run.justify`` and the search
     result; None for the hand plan. Its sacrifice scores are used only when no ``purpose`` result is given.
     ``rung_steps``: adopted enumerated rung sacrifices (``run.pipeline.rung_step``), each recorded as
-    ``rungStep`` on its check's sacrifice entry."""
+    ``rungStep`` on its check's sacrifice entry.
+    ``k_sets``: the two k-set records (``run.ksets.measure_sets``, #146); None leaves ``measured.kSets`` not measured.
+    The withheld catalogued QIs come from this narrative's own field justifications."""
     by_key = sorted(plan, key=lambda e: (e["table"], e["column"]))
     inventory = [{"dataset": policy.dataset, "table": e["table"], "column": e["column"],
                   "role": _role(policy, e["table"], e["column"]),
@@ -85,7 +88,8 @@ def build_narrative(*, policy, plan, scenario_ids, suppression: dict, k: int, pu
     measured = {"utility": not_measured(pending), "privacy": not_measured(pending),
                 "search": (dict(search["summary"]) if search is not None
                            else not_measured("hand-picked plan; no search run")),
-                "baselines": not_measured(pending), "redaction": not_measured("no free text released")}
+                "baselines": not_measured(pending), "redaction": not_measured("no free text released"),
+                "kSets": k_sets_block(policy, {"k": k}, fj, k_sets)}
     scored = {}
     if purpose is not None:
         from pets_release.run.purpose import measured_utility, scores
