@@ -38,10 +38,9 @@ def test_before_and_after_scores_come_from_two_scorecard_runs(args):
     assert block["utility"]["status"] == "measured"
     assert block["utility"]["tasks"] == [{"task": "CS-U4", "status": "ok", "before": 1.0, "after": 1.0}]
     comps = {c["component"]: c for c in block["privacy"]["components"]}
-    assert {"summary.privacy", "summary.composite", "summary.utility"} <= set(comps)
-    assert comps["summary.utility"]["before"] == 1.0 and comps["summary.utility"]["after"] == 1.0
+    assert "privacy" in comps and not any(c.startswith("summary.") for c in comps)  # utility is not privacy
     # identical release: the privacy score cannot differ between the two runs
-    assert comps["summary.privacy"]["before"] == comps["summary.privacy"]["after"]
+    assert comps["privacy"]["before"] == comps["privacy"]["after"]
     out = args["out_dir"]
     assert (out / "after" / "scorecard.json").is_file() and (out / "before" / "kit-out" / "scorecard.json").is_file()
 
@@ -89,9 +88,9 @@ def test_baseline_rows_hold_the_published_numbers(args):
     block = measure(SCENARIO, **args)
     rows = {(r["baseline"], r["metric"]): r["value"] for r in block["baselines"]["rows"]}
     assert rows[("B0", "privacy")] == 0.25 and rows[("B2", "privacy")] == 0.5 and rows[("B2-k", "privacy")] == 0.75
-    assert rows[("B0", f"utility.{SCENARIO}")] == 1.0
-    assert rows[("B2", f"utility.{SCENARIO}")] == 0.75
-    assert rows[("B2-k", f"utility.{SCENARIO}")] == 0.5
+    assert rows[("B0", "utility_mean")] == 1.0
+    assert rows[("B2", "utility_mean")] == 0.75
+    assert rows[("B2-k", "utility_mean")] == 0.5
     assert rows[("B2", "task.CS-U4")] is None  # published as not answerable: stays null, never 0
     assert rows[("B2-k", "worst_reid")] == 0.0
 
@@ -156,7 +155,7 @@ def test_nan_or_out_of_range_score_fails(args, monkeypatch):
 
     def nan(*a, **k):
         s = real(*a, **k)
-        s["utility"] = float("nan")
+        s["utility"] = float("nan")  # NaN
         return s
     monkeypatch.setattr(core, "run_scorecard", nan)
     with pytest.raises(MeasureRejected) as caught:

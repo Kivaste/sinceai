@@ -19,6 +19,7 @@ from pets_release.kiteval import Lineage, run_scorecard
 from pets_release.manifest import MANIFEST_SCHEMA, not_measured
 from pets_release.measure.baselines import baseline_rows
 from pets_release.measure.errors import MeasureRejected
+from pets_release.measure.ids import RISK_AGGREGATES
 
 _VALIDATOR = Draft202012Validator({"$defs": MANIFEST_SCHEMA["$defs"], **MANIFEST_SCHEMA["properties"]["measured"]})
 _BAD_ID_CHARS = re.compile(r"[^A-Za-z0-9._:+-]")
@@ -33,7 +34,8 @@ def measured_errors(block) -> list[str]:
 
 
 def _finite(v) -> float:
-    if isinstance(v, bool) or not isinstance(v, Real) or math.isnan(v) or math.isinf(v):
+    """A score or risk: a finite real in [0, 1]. Anything else is rejected, never clamped."""
+    if isinstance(v, bool) or not isinstance(v, Real) or math.isnan(v) or math.isinf(v) or not 0.0 <= v <= 1.0:
         raise MeasureRejected("score")
     return float(v)
 
@@ -50,14 +52,17 @@ def _check_summary(summary, scenario: str) -> None:
 def _task_map(summary) -> dict:
     out = {}
     for t in summary.get("tasks") or []:
-        if not isinstance(t, dict) or t.get("status") not in _TASK_STATUS or t["id"] in out:
+        if not isinstance(t, dict) or t.get("status") not in _TASK_STATUS:
+            raise MeasureRejected("task_status")
+        tid = t.get("id")
+        if not isinstance(tid, str) or not tid or tid in out:
             raise MeasureRejected("task_status")
         score = t.get("score")
         if t["status"] == "ok":
             _finite(score)
         elif score is not None:
             raise MeasureRejected("task_status")
-        out[t["id"]] = t
+        out[tid] = t
     return out
 
 
@@ -67,6 +72,8 @@ def _utility(before: dict, after: dict) -> dict:
         raise MeasureRejected("task_mismatch")
     if not a:
         raise MeasureRejected("task_status")
+    if any(t["status"] != "ok" for t in b.values()):
+        raise MeasureRejected("before_not_answerable")  # the original data must answer every task
     tasks = [{"task": tid, "status": a[tid]["status"],
               "before": b[tid]["score"], "after": a[tid]["score"]} for tid in sorted(a)]
     return tasks
@@ -82,9 +89,18 @@ def _component_id(key: str, taken: set) -> str:
     return cid
 
 
+def _worst(risks: dict, suffix: str):
+    vals = [_finite(v) for k, v in risks.items() if k.endswith(suffix)]
+    return max(vals) if vals else None
+
+
 def _privacy(before: dict, after: dict) -> list[dict]:
-    comps = [{"component": f"summary.{k}", "before": _finite(before[k]), "after": _finite(after[k])}
-             for k in ("composite", "privacy", "utility")]
+    """Privacy components only: utility and composite are not privacy (utility is in `utility.tasks`)."""
+    comps = [{"component": "privacy", "before": _finite(before["privacy"]), "after": _finite(after["privacy"])}]
+    for cid, suffix in RISK_AGGREGATES.items():
+        b, a = _worst(before["risks"], suffix), _worst(after["risks"], suffix)
+        if b is not None or a is not None:
+            comps.append({"component": cid, "before": b, "after": a})
     taken: set = set()
     keys = sorted(set(before["risks"]) | set(after["risks"]))
     for key in keys:
@@ -126,7 +142,10 @@ def measure(scenario, *, root, original_dir, protected_dir, rowmaps: dict, linea
     if not isinstance(scenario, str) or not scenario.strip():
         raise MeasureRejected("scenario")
     original_dir, protected_dir, out_dir = Path(original_dir), Path(protected_dir), Path(out_dir)
-    tables = sorted(f.stem for f in protected_dir.glob("*.csv") if not f.stem.startswith(_SKIP_PREFIX))
+    # "before" is the original's FULL table set: tables the release withholds keep their risk in "before"
+    tables = sorted(f.stem for f in original_dir.glob("*.csv") if not f.stem.startswith(_SKIP_PREFIX))
+    if not tables:
+        raise MeasureRejected("original_tables")
 
     after = run_scorecard(original_dir, protected_dir, scenario=scenario, root=root, rowmaps=rowmaps,
                           lineage=lineage, out_dir=out_dir / "after")

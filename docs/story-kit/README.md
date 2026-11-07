@@ -30,7 +30,7 @@ Paths are dotted. Lists in the manifest are addressed by their id field.
 | `measured.search.candidates` | search candidate count |
 
 Ids are the measurer's real ones (not the fixture's): privacy components `person_k.{persons,min,below_k_share}`
-(ours, after only), `risk.ed_visits:_records_with_k_5` (scorecard, ROWS), `risk.ed_visits:_linkage_re-identification`,
+(ours, after only), `k_below_5_share` (scorecard, ROWS), `linkage_reid`,
 `summary.{privacy,utility}`; baseline metrics `utility.HEALTH-S1`, `privacy`, `worst_reid`, `task.<id>`. For
 `privacy` and `baselines` the metric (or component) is everything after the 3rd (or 2nd) segment, so it may contain dots.
 A null (e.g. B2-k cannot answer H-U6) is rendered `—`.
