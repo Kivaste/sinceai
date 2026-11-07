@@ -100,6 +100,8 @@ def test_measured_search_summarises_the_log(searched):
         assert p["accepted"] == e["accepted"]
         assert p["risk"] == max(e["risk"].values())
     assert isinstance(s["boundReached"], bool)
+    final = [e for e in _log(out) if e["step"] == "final"]
+    assert len(final) == 1 and final[0]["accepted"] and "(privacy pass)" in final[0]["reason"]
 
 
 def test_released_plan_is_the_logged_search_plan(searched):

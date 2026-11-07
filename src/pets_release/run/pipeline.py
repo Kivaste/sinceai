@@ -65,6 +65,30 @@ def search_log_bytes(log: list) -> bytes:
     return ("\n".join(lines) + "\n").encode("utf-8")
 
 
+def check_search_privacy(final, policy) -> None:
+    """Fail closed on the search's final privacy re-check (ticket 24's ``final``).
+
+    Releasable only when ``privacy_status`` is ``pass`` and ``privacy_targets`` lists exactly the policy's
+    declared targets (by id and kind), each ``pass``; or ``not_applicable`` with no declared target and an
+    empty list. Anything else not ``pass`` refuses (RunRefused); a malformed or self-contradicting result is an
+    unknown state (RunError)."""
+    if not isinstance(final, dict) or "privacy_status" not in final or "privacy_targets" not in final:
+        raise RunError("search result has no privacy re-check")
+    status, targets = final["privacy_status"], final["privacy_targets"]
+    if not isinstance(targets, list) or not all(isinstance(t, dict) for t in targets):
+        raise RunError("search privacy targets malformed")
+    declared = sorted((str(t.get("id")), str(t.get("kind"))) for t in policy.privacy_targets)
+    if status == "not_applicable":
+        if declared or targets:
+            raise RunRefused("search privacy re-check not applicable although the policy declares targets")
+        return
+    if status != "pass":
+        raise RunRefused(f"search privacy re-check: {status}")
+    got = sorted((str(t.get("id")), str(t.get("kind"))) for t in targets)
+    if not declared or got != declared or any(t.get("status") != "pass" for t in targets):
+        raise RunError("search privacy re-check contradicts the policy targets")
+
+
 def _search(scenario_id, policy, source, keys, kit, out: Path):
     """The bounded search (ticket 24) on the full source; a refusal writes its report and log, then raises."""
     try:
@@ -105,6 +129,16 @@ def run_release(*, kit, scenario: dict, created: str, key_text: str, out, plan_n
         plan = hand_plan(scenario_id)
     else:
         found = _search(scenario_id, policy, source, keys, kit, out)
+        try:
+            check_search_privacy(found.final, policy)
+        except RunRefused:
+            sc = scoring_dir(out)
+            sc.mkdir(parents=True)
+            (sc / SEARCH_LOG).write_bytes(search_log_bytes(found.log))
+            (sc / "refusal_report.json").write_bytes(canonical_bytes(
+                {"status": "refused", "scenario": scenario_id, "reasons": ["search:privacy-recheck-not-pass"],
+                 "privacyTargets": found.final["privacy_targets"]}))
+            raise
         plan = found.plan
     validate_plan(plan, policy)
 
