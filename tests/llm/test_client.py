@@ -96,9 +96,9 @@ def test_request_screen_accepts_plain_language():
 
 
 def test_config_precedence_flags_over_env_and_missing_is_an_error():
-    env = {"PETS_LLM_ENDPOINT": "http://e/v1", "PETS_LLM_MODEL": "em", "PETS_LLM_API_KEY": "k"}
+    env = {"PETS_LLM_ENDPOINT": "http://e/v1", "PETS_LLM_MODEL": "em", "PETS_LLM_API_KEY": "key-123"}
     cfg = resolve_config(None, None, env)
-    assert (cfg.endpoint, cfg.model, cfg.api_key) == ("http://e/v1", "em", "k")
+    assert (cfg.endpoint, cfg.model, cfg.api_key) == ("http://e/v1", "em", "key-123")
     cfg = resolve_config("http://flag/v1", "fm", env)
     assert (cfg.endpoint, cfg.model) == ("http://flag/v1", "fm")
     with pytest.raises(LlmError):

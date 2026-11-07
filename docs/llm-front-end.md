@@ -12,8 +12,8 @@ pets-release draft-policy --align-with HEALTH-S1 --allow-network      # self-che
 
 ## What the model sees
 
-Only the request text, the data dictionary (table and column names, roles, subtypes, descriptions from
-`docs/DATA_DICTIONARY.md`) and the fixed list of analysis types. The prompt builder takes a typed
+Only the request text, the data dictionary (table and column names, roles and subtypes from
+`docs/DATA_DICTIONARY.md`; descriptions are not sent) and the fixed list of analysis types. The prompt builder takes a typed
 `DataDictionary`; it has no parameter that can carry a table, and the `llm` package imports no table library
 (both are tested). The request is also screened: emails, ID-shaped strings and long digit runs are refused.
 
@@ -54,15 +54,26 @@ The vocabulary is pinned by a test to the purpose checks of the packaged scenari
 
 `--align-with HEALTH-S1|CS-S1` builds the request from the kit scenario's recipient and purpose and prints
 `alignment <ID>: recovered N of M required analyses (K extra)` on stderr, comparing the drafted purpose checks
-to the scenario's official required tasks. It is content-free and exits 0 regardless of the count.
+to the scenario's official required tasks. It is content-free. If any required analysis is missing the command exits 1 and writes nothing (stdout and
+`--out` alike); it exits 0 and writes the draft only when every required analysis is recovered.
+
+## Hardening (review round 2)
+
+- **No free-text metadata is transmitted.** The dictionary's description column is ignored. Only identifier-shaped
+  table and column names and closed-list roles and subtypes go out; `ColumnInfo` has no description field.
+- **Call-site type enforcement.** `TableInfo` and `DataDictionary` require real `ColumnInfo` / `TableInfo` children, and
+  `build_messages` re-validates a fresh copy built from real instances before anything is serialised.
+- **Short API keys are refused** (fewer than 6 characters, exit 2, nothing sent); every other key is screened against
+  the draft in raw, hex and base64 forms.
+- **Not yet consumable by `run`:** the draft is a reviewable artefact. The pipeline loads packaged policies only
+  (`pets_release.policy.get_policy`) and has no `search` command, so a draft cannot be run without changes outside
+  `llm/`.
 
 ## Hardening (review round 1)
 
 - **Dictionary metadata is allowlisted.** Table and column names must be plain identifiers; role and subtype must be in
   the closed lists in `llm/dictionary.py` (the kit taxonomy names). A name, role or subtype outside them fails closed
-  (exit 2, nothing sent). A description that looks like it carries a value (email, ID shape, long digit run, IBAN,
-  international phone, URL: the same screen as the request, `llm/screen.py`) is excluded: it is replaced by an empty
-  description and the column is still offered. These checks run when the typed objects are built, so no construction
+  (exit 2, nothing sent). Descriptions are not sent at all (round 2). These checks run when the typed objects are built, so no construction
   path bypasses them.
 - **No credentials in a draft.** A draft containing the API key (raw, hex, base64) or a credential-shaped token
   (`sk-`, bearer, JWT, cloud and VCS tokens, private-key header, 40+ hex) is refused with exit 1 and nothing written,

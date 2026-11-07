@@ -28,7 +28,7 @@ def test_parse_dictionary_types_tables_and_columns():
     assert d.dataset == "health"
     assert [t.name for t in d.tables] == ["ed_visits", "lab_results"]
     assert [c.name for c in d.tables[0].columns] == ["visit_id", "los_minutes"]
-    assert d.tables[0].columns[1].description == "Length of stay in minutes"
+    assert d.tables[0].columns[1].role == "sensitive_attribute"
 
 
 def test_parse_dictionary_unknown_dataset_fails_closed():

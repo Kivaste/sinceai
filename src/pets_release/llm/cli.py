@@ -7,7 +7,8 @@
 Optional stretch (ADR 0002). The model sees the request text and the data dictionary only. The command never
 runs a release. The offline guard stays on for this process; the one request is made by a child process
 (`transport.subprocess_transport`), and only when `--allow-network` is given.
-Exit 0 draft written; 1 the model output was refused; 2 usage error, missing config or unknown state.
+Exit 0 draft written; 1 the model output was refused, or with --align-with the draft misses a required
+analysis (nothing written); 2 usage error, missing config or unknown state.
 """
 from __future__ import annotations
 
@@ -80,12 +81,15 @@ def main(argv: list[str], *, transport=subprocess_transport) -> int:
     except DraftRejected as e:
         return _fail(f"draft refused, nothing written: {e}", 1)
 
+    if required is not None:
+        result = alignment.align(draft, required)
+        print(f"alignment {a.align_with}: {result['summary']}", file=sys.stderr)
+        if result["missing"]:
+            return _fail("alignment incomplete: the draft misses required analyses; nothing written", 1)
     text = json.dumps(draft, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
     if a.out:
         _write_atomic(Path(a.out), text)
         print(f"pets-release draft-policy: DRAFT written to {a.out}; a human must approve it", file=sys.stderr)
     else:
         sys.stdout.write(text)
-    if required is not None:
-        print(f"alignment {a.align_with}: {alignment.align(draft, required)['summary']}", file=sys.stderr)
     return 0

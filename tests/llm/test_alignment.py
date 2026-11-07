@@ -41,7 +41,7 @@ def test_cli_self_check_reports_recovered_n_of_m(cli, make_kit, tmp_path):
     reply = {
         "recipient": "University research group",
         "trustLevel": "controlled_research",
-        "purposeChecks": [{"id": "H-U2", "reason": "x"}],
+        "purposeChecks": [{"id": "H-U2", "reason": "x"}, {"id": "H-U4", "reason": "y"}],
         "fieldsNeeded": [{"table": "ed_visits", "column": "when", "detail": "exact", "reason": "x"}],
     }
     provider = FakeProvider(tmp_path / "provider", reply=reply)
@@ -55,5 +55,5 @@ def test_cli_self_check_reports_recovered_n_of_m(cli, make_kit, tmp_path):
     finally:
         provider.close()
     assert r.returncode == 0, r.stderr
-    assert "recovered 1 of 2 required analyses" in r.stderr
+    assert "recovered 2 of 2 required analyses" in r.stderr
     assert json.loads(r.stdout)["status"] == "draft"

@@ -45,14 +45,14 @@ def _md(role="quasi_identifier", subtype="DATE", name="when", desc="Date of visi
 @pytest.mark.parametrize("plant", sorted(PLANTS))
 def test_value_shaped_description_is_excluded_from_the_prompt(plant):
     d = parse_dictionary(_md(desc=f"Sample {PLANTS[plant]} here"), "health")
-    assert d.tables[0].columns[0].description == ""
     text = json.dumps(build_messages("req", d, vocabulary_for("health")))
-    assert PLANTS[plant] not in text
+    assert PLANTS[plant] not in text and "Sample" not in text
 
 
-def test_clean_descriptions_and_kit_style_formats_survive():
+def test_clean_descriptions_are_not_sent_either():
     d = parse_dictionary(_md(desc="Visit identifier ED25-NNNNNN or AU-<base>-NN"), "health")
-    assert d.tables[0].columns[0].description.startswith("Visit identifier")
+    text = json.dumps(build_messages("req", d, vocabulary_for("health")))
+    assert "Visit identifier" not in text and "when" in text
 
 
 @pytest.mark.parametrize(
@@ -75,10 +75,9 @@ def test_role_subtype_and_names_are_a_closed_allowlist(kw):
 
 def test_directly_built_dictionary_objects_are_validated_too():
     with pytest.raises(DictionaryError):
-        ColumnInfo("c", "bad role", "DATE", "x")
+        ColumnInfo("c", "bad role", "DATE")
     with pytest.raises(DictionaryError):
-        TableInfo("t@x.org", (ColumnInfo("c", "record_key", "RECORD_ID", ""),))
-    assert ColumnInfo("c", "record_key", "RECORD_ID", "a@b.org").description == ""
+        TableInfo("t@x.org", (ColumnInfo("c", "record_key", "RECORD_ID"),))
 
 
 # ---- credential echo ------------------------------------------------------------------------------

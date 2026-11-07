@@ -9,7 +9,6 @@ from dataclasses import dataclass
 
 from pets_release.llm.screen import has_value_shape
 
-MAX_DESCRIPTION = 300
 _NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,63}$")
 # Closed vocabularies from the kit taxonomy (role / subtype names, not values). Anything else fails closed.
 ROLES = frozenset({"direct_identifier", "free_text", "non_sensitive", "quasi_identifier", "record_key",
@@ -33,13 +32,12 @@ class DictionaryError(ValueError):
 
 @dataclass(frozen=True)
 class ColumnInfo:
-    """Value-free column metadata. Names, role and subtype are allowlisted (else DictionaryError);
-    a description that looks like it carries a value is dropped to "" (documented in docs/llm-front-end.md)."""
+    """Value-free column metadata: identifier-shaped name, closed-list role and subtype. There is no free-text
+    field: kit descriptions are untrusted prose and are never transmitted (fail closed, ADR 0002)."""
 
     name: str
     role: str
     subtype: str
-    description: str
 
     def __post_init__(self):
         if not (isinstance(self.name, str) and _NAME.match(self.name) and not has_value_shape(self.name)):
@@ -48,8 +46,6 @@ class ColumnInfo:
             raise DictionaryError("a column role is not in the closed role list")
         if self.subtype not in SUBTYPES:
             raise DictionaryError("a column subtype is not in the closed subtype list")
-        desc = self.description if isinstance(self.description, str) else ""
-        object.__setattr__(self, "description", "" if has_value_shape(desc) else desc[:MAX_DESCRIPTION])
 
 
 @dataclass(frozen=True)
@@ -60,6 +56,8 @@ class TableInfo:
     def __post_init__(self):
         if not (isinstance(self.name, str) and _NAME.match(self.name) and not has_value_shape(self.name)):
             raise DictionaryError("a table name is not a plain identifier")
+        if not isinstance(self.columns, tuple) or not all(type(c) is ColumnInfo for c in self.columns):
+            raise DictionaryError("a table's columns must be a tuple of ColumnInfo")
 
 
 @dataclass(frozen=True)
@@ -70,6 +68,21 @@ class DataDictionary:
     def __post_init__(self):
         if not (isinstance(self.dataset, str) and _NAME.match(self.dataset) and not has_value_shape(self.dataset)):
             raise DictionaryError("the dataset name is not a plain identifier")
+        if not isinstance(self.tables, tuple) or not all(type(t) is TableInfo for t in self.tables):
+            raise DictionaryError("a dictionary's tables must be a tuple of TableInfo")
+
+    def validated(self) -> "DataDictionary":
+        """A fresh, re-validated copy built only from real instances (call sites use this, never the original)."""
+        if type(self) is not DataDictionary:
+            raise DictionaryError("not a DataDictionary")
+        tables = []
+        for t in self.tables:
+            if type(t) is not TableInfo or not isinstance(t.columns, tuple):
+                raise DictionaryError("a dictionary's tables must be TableInfo")
+            if not all(type(c) is ColumnInfo for c in t.columns):
+                raise DictionaryError("a table's columns must be ColumnInfo")
+            tables.append(TableInfo(t.name, tuple(ColumnInfo(c.name, c.role, c.subtype) for c in t.columns)))
+        return DataDictionary(self.dataset, tuple(tables))
 
     def columns(self) -> frozenset[tuple[str, str]]:
         return frozenset((t.name, c.name) for t in self.tables for c in t.columns)
@@ -94,8 +107,7 @@ def parse_dictionary(markdown: str, dataset: str) -> DataDictionary:
             cells = [c.strip() for c in r.group(2).split("|")]
             if len(cells) < 4:
                 continue
-            role, subtype, description = cells[0], cells[1], cells[-1]
-            tables[current].append(ColumnInfo(r.group(1), role, subtype, description))
+            tables[current].append(ColumnInfo(r.group(1), cells[0], cells[1]))  # description column ignored
     populated = {n: cols for n, cols in tables.items() if cols}
     if not populated:
         raise DictionaryError("data dictionary has no tables for the requested dataset")

@@ -42,7 +42,7 @@ def key_forms(key: str) -> list[str]:
 
 def has_credential(strings: list[str], api_key: str = "") -> bool:
     """True if any string contains the API key (raw, hex, base64) or a credential-shaped token."""
-    forms = key_forms(api_key) if len(api_key) >= MIN_KEY_CHECK else []
+    forms = key_forms(api_key) if api_key else []  # every non-empty key is screened (short ones are refused upstream)
     for s in strings:
         if any(f in s for f in forms) or any(p.search(s) for p in _CREDENTIAL_SHAPES):
             return True

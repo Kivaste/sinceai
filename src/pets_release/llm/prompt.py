@@ -11,7 +11,7 @@ from pets_release.llm.vocabulary import DETAIL_LEVELS, TRUST_LEVELS, AnalysisTyp
 
 SYSTEM = (
     "You draft a data-sharing policy from a plain-language data request. You are given the request, "
-    "a data dictionary (table and column names with descriptions) and a fixed list of analysis types. "
+    "a data dictionary (table and column names with role and subtype) and a fixed list of analysis types. "
     "You never see data. Answer with one JSON object and nothing else, with exactly these keys: "
     '"recipient" (string), "trustLevel" (one of {trust}), '
     '"purposeChecks" (list of {{"id": <analysis id from the list>, "reason": string}}), '
@@ -28,15 +28,13 @@ def build_messages(request: str, dictionary: DataDictionary, vocabulary: tuple[A
         raise TypeError("dictionary must be a DataDictionary")
     if not isinstance(vocabulary, tuple) or not all(isinstance(a, AnalysisType) for a in vocabulary):
         raise TypeError("vocabulary must be a tuple of AnalysisType")
+    dictionary = dictionary.validated()  # fresh copy from real instances only; re-runs the allowlists
     schema = {
         "dataset": dictionary.dataset,
         "tables": [
             {
                 "name": t.name,
-                "columns": [
-                    {"name": c.name, "role": c.role, "subtype": c.subtype, "description": c.description}
-                    for c in t.columns
-                ],
+                "columns": [{"name": c.name, "role": c.role, "subtype": c.subtype} for c in t.columns],
             }
             for t in dictionary.tables
         ],

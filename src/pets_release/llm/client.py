@@ -14,7 +14,7 @@ from urllib.parse import urlparse
 from pets_release.llm.dictionary import DataDictionary
 from pets_release.llm.draft import DraftRejected, build_draft, parse_model_output
 from pets_release.llm.prompt import build_messages
-from pets_release.llm.screen import has_credential, has_value_shape
+from pets_release.llm.screen import MIN_KEY_CHECK, has_credential, has_value_shape
 from pets_release.llm.vocabulary import vocabulary_for
 
 MAX_REQUEST = 2000
@@ -47,7 +47,17 @@ def resolve_config(endpoint: str | None, model: str | None, env: Mapping[str, st
         raise LlmError("no model: pass --model or set PETS_LLM_MODEL")
     if urlparse(endpoint).scheme not in ("http", "https") or not urlparse(endpoint).netloc:
         raise LlmError("endpoint must be an http or https URL")
-    return LlmConfig(endpoint, model, env.get("PETS_LLM_API_KEY", ""))
+    cfg = LlmConfig(endpoint, model, env.get("PETS_LLM_API_KEY", ""))
+    _check_key(cfg.api_key)
+    return cfg
+
+
+def _check_key(key: str) -> None:
+    """A configured key must be long enough for the echo screen to be meaningful; refuse before sending."""
+    if not isinstance(key, str):
+        raise LlmError("the API key is not text")
+    if key and len(key) < MIN_KEY_CHECK:
+        raise LlmError(f"the API key is shorter than {MIN_KEY_CHECK} characters, so a draft could not be screened for it; refused")
 
 
 def screen_request(text: str) -> str:
@@ -72,6 +82,7 @@ def draft_policy(
 ) -> dict:
     """Request text + typed dictionary in, validated DRAFT policy out. Raises LlmError or DraftRejected."""
     request = screen_request(request)
+    _check_key(config.api_key)
     messages = build_messages(request, dictionary, vocabulary_for(dictionary.dataset))
     body = json.dumps(
         {"model": config.model, "messages": messages, "temperature": 0}, sort_keys=True
