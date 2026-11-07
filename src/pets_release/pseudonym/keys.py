@@ -75,6 +75,17 @@ class SecretKey:
             lower.add(b.hex())
         return frozenset(f for f in exact if f), frozenset(f for f in lower if f)
 
+    def occurs_in(self, data: bytes) -> bool:
+        """Package-internal, for leak scans: whether this key occurs in ``data`` as raw bytes, hex (any case) or
+        base64 (std/url, padded or not). The raw bytes never leave this class."""
+        exact, lower = self.scannable_forms()
+        if any(b and b in data for b in {self._k, self._k.strip()}):
+            return True
+        if any(f.encode("utf-8") in data for f in exact):
+            return True
+        low = data.lower()
+        return any(f.encode("ascii") in low for f in lower)
+
     def key_id(self) -> str:
         """Public 16-hex identifier of this key (an HMAC, not a hash of it)."""
         return self.hmac_sha256(b"pets-release/key-id").hex()[:16]
