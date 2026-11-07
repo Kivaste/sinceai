@@ -93,6 +93,7 @@ Initial rule table (_open_, to be refined against the scenarios):
 
 - **Rule:** every purpose check ≥ threshold (_open_: e.g. 0.9). Within that, minimise the **worst** risk component, then the mean.
 - Start from the needs spec's proposed levels and coarsen step by step. Evaluate **joint** moves for quasi-identifiers (k-anonymity is computed over the combination). Add local suppression as a last step to reach k ≥ 5.
+- Date-free hour of day (`ts.hour_of_day`, issue #89) is placed **coarser than month** on the privacy order and is never an ordinary step. It is shipped only as an enumerated sacrifice: when month+hour measurably fails k (suppression needed above the budget) while hour-only still passes H-U8. The manifest records it with those scores on the H-U8 sacrifice (`rungStep`); without that record the release is invalid.
 - Run the search on a **sample** for speed; confirm on the full data.
 - **Every step is logged** (field, level tried, risk components, check scores, accepted/rejected, reason). That log is the raw material for the field justifications and the trade-off chart.
 

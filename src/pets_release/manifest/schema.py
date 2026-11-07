@@ -207,13 +207,23 @@ def _assertion_maps(names) -> dict:
     }
 
 
+def _policy_k(scenario: str) -> int:
+    from pets_release.policy import get_policy, k_target
+
+    k = k_target(get_policy(scenario))
+    if k is None:
+        raise ImportError("scenario carries quasiIdentifiersBelowK but its policy has no k target")
+    return k
+
+
 def _scenario_rule(scenario: str) -> dict:
     then = {"properties": _assertion_maps(required_assertions(scenario))}
     if scenario == "CS-S1":  # healthInText is checked against the lexicon version bound in the manifest
         then["properties"]["bindings"] = {"properties": {"lexiconDigests": {"minProperties": 1}}}
     # contract.k (k-anonymity target) exactly when the scenario carries quasiIdentifiersBelowK
     if "quasiIdentifiersBelowK" in required_assertions(scenario):
-        then["properties"]["contract"] = {"required": ["k"]}
+        # the target is the pinned policy's, never the manifest's own (#62); the cross-field rule pins equality
+        then["properties"]["contract"] = {"required": ["k"], "properties": {"k": {"minimum": _policy_k(scenario)}}}
     else:
         then["properties"]["contract"] = {"not": {"required": ["k"]}}
     return {
@@ -276,7 +286,20 @@ MANIFEST_SCHEMA: dict = {
         "sacrifices": _arr(_obj({
             "check": _ref("id"), "floor": {"type": "number"}, "before": _SCORE, "after": _SCORE,
             "reason": _ref("text"),
-        })),
+            # #89: an adopted enumerated rung sacrifice (e.g. arrival_ts month+hour -> hour of day), with the
+            # measured k result at `from` that triggered it; present exactly when the plan holds that rung
+            "rungStep": _obj({
+                "table": _ref("name"), "column": _ref("name"), "from": _ref("id"), "to": _ref("id"),
+                "privacyTarget": _ref("id"), "k": {"type": "integer", "minimum": 2},
+                "atFrom": _obj({
+                    "unitsBefore": {"type": "integer", "minimum": 1},
+                    "unitsSuppressed": {"type": "integer", "minimum": 0},
+                    "share": {"type": "number", "minimum": 0, "maximum": 1},
+                    "maxShare": {"type": "number", "minimum": 0, "maximum": 1},
+                    "withinBound": {"const": False},
+                }),
+            }),
+        }, required=["after", "before", "check", "floor", "reason"])),
         "residualRisks": _arr(_RESIDUAL_RISK, 1),
         "fitFor": _arr(_ref("fit"), 1),
         "notFitFor": _arr(_ref("fit")),
