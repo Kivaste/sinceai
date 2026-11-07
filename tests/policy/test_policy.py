@@ -98,7 +98,7 @@ def test_health_hand_plan_matches_spec_table():
     assert ix[("ed_visits", "visit_id")]["rung"] == "id.pseudonym"
     assert ix[("lab_results", "visit_id")]["rung"] == "id.pseudonym"
     assert ix[("lab_results", "visit_id")]["params"] == ix[("ed_visits", "visit_id")]["params"]
-    assert ix[("ed_visits", "arrival_ts")]["rung"] == "ts.month_hour"
+    assert ix[("ed_visits", "arrival_ts")]["rung"] == "ts.hour_of_day"
     assert ix[("ed_visits", "municipality")]["rung"] == "geo.topn"
     assert ix[("ed_visits", "municipality")]["params"]["n"] >= 8
     assert ix[("ed_visits", "readmit_30d")]["rung"] == "keep"
