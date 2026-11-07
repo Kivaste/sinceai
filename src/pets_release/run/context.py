@@ -55,6 +55,9 @@ SCENARIO_SPEC = {
         "record_keys": {"conversations": "conversation_id", "turns": "turn_id", "customers": "customer_id"},
         "joins": [],
         "technical_identifiers": [],
+        # purpose checks score these record keys restored through the producer row map when released as
+        # pseudonyms (CS-U5 matches by turn_id; run.purpose.evaluate)
+        "purpose_lineage": {"turns": "turn_id"},
     },
 }
 

@@ -202,7 +202,7 @@ def _decide_turn_id(source: dict, policy) -> TurnIdDecision:
         labels = ", ".join(f"{k} {v}" for k, v in hits.items())
         just = {"rung": "id.pseudonym", "floor": "id.pseudonym", "decision": "released",
                 "reason": f"release-scope pseudonym: check {TURN_ID_CHECK} failed on the candidate ({labels}); "
-                          "CS-U5 reported twice: unmodified kit score and row-map-lineage adapted score"}
+                          "CS-U5 gated on the producer row-map lineage score; unmodified kit score reported too"}
     just = {"table": "turns", "column": "turn_id", "outputColumn": "turn_id", "source": "hand", **just}
     return TurnIdDecision(kept=status == "pass", assessment=assessment, justification=dict(sorted(just.items())))
 

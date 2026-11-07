@@ -2,7 +2,8 @@
 
 kit -> ``prepare`` (turn_id decision, pseudonyms, hour timestamps, redaction with the controller
 gazetteer) -> contract -> producer context (``run.context``, the same function ``verify --full`` uses) ->
-measurements (purpose checks before/after, CS-U5 twice on the fallback; held-out redaction recall) ->
+purpose checks (``run.purpose``; failing refuses; turn_id lineage through the producer row map, ungated
+CS-U5.unmodified on the fallback) -> held-out redaction recall ->
 ``write_release`` -> local spot-check sheet in ``<out>.scoring/`` (raw text: never in the repo).
 """
 from __future__ import annotations
@@ -36,7 +37,8 @@ def _sorted_like_writer(df: pd.DataFrame, final: list[str]):
 
 
 def run_cs_s1(*, kit, scenario: dict, created: str, key_text: str, out, tool_revision: str):
-    from pets_release.run.pipeline import RunError, RunOutcome
+    from pets_release.run.pipeline import RunError, RunOutcome, RunRefused
+    from pets_release.run.purpose import evaluate as evaluate_purpose
 
     policy = get_policy(SCENARIO)
     if scenario.get("dataset") != policy.dataset:
@@ -66,26 +68,32 @@ def run_cs_s1(*, kit, scenario: dict, created: str, key_text: str, out, tool_rev
         if rm["original_record_id"].tolist() != finals[stem]:
             raise RunError("row-map reconstruction disagrees with lineage")
 
-    turns_map = None
-    if not prep.turn_id.kept:  # lineage row map for the separately labelled adapted CS-U5 score
-        turns_map = pd.DataFrame({"protected_row": [str(i) for i in range(len(finals["turns"]))],
-                                  "original_record_id": finals["turns"]}, dtype=str)
-    util_block, util = cs_measure.utility(SCENARIO, source, ordered, turns_map, root=kit.root)
+    # Publication prerequisite (#60): every purpose check on full data, the same evaluation verify --full re-runs.
+    # A pseudonymised turn_id is scored through the producer row map (CS-U5 matches by turn_id); the kit score
+    # without it is the ungated CS-U5.unmodified entry.
+    purpose = evaluate_purpose(policy, source, ordered, root=kit.root, rowmaps=gate_ctx["rowmaps"])
+    util = {t["task"]: {k: t[k] for k in ("status", "before", "after")} for t in purpose.tasks}
+    if not purpose.ok:
+        sc = scoring_dir(out)
+        sc.mkdir(parents=True)
+        (sc / "refusal_report.json").write_bytes(canonical_bytes(
+            {"status": "refused", "scenario": SCENARIO, "reasons": list(purpose.reasons),
+             "purpose": [dict(t) for t in purpose.tasks]}))
+        (sc / UTILITY_REPORT).write_bytes(canonical_bytes(util))
+        raise RunRefused("purpose checks failed on the final release: " + ", ".join(purpose.reasons))
     red = cs_measure.redaction(kit.root, prep.spans)
 
     narrative = build_narrative(policy=policy, plan=prep.plan, scenario_ids=[s["id"] for s in kit.scenarios()],
-                                suppression={}, k=contract.get("k"))
+                                suppression={}, k=contract.get("k"), purpose=purpose)
     narrative["fieldJustifications"] = sorted(
         [prep.turn_id.justification if (j["table"], j["column"]) == ("turns", "turn_id") else j
          for j in narrative["fieldJustifications"]], key=lambda j: (j["table"], j["column"]))
-    narrative["measured"] = dict(narrative["measured"], utility=util_block, redaction=red["measured"],
+    narrative["measured"] = dict(narrative["measured"], redaction=red["measured"],
                                  privacy=not_measured("scorecard privacy components: measurer (ticket 22)"),
                                  baselines=not_measured("published baselines: measurer (ticket 22)"))
     narrative["residualRisks"] = sorted(
         [r for r in narrative["residualRisks"] if r["risk"] not in _HEALTH_ONLY_RISKS] + red["risks"],
         key=lambda r: r["risk"])
-    narrative["sacrifices"] = [dict(s, before=util.get(s["check"], {}).get("before"),
-                                    after=util.get(s["check"], {}).get("after")) for s in narrative["sacrifices"]]
 
     cand = Candidate(
         scenario=SCENARIO, recipient=recipient, tables=tuple(tables), contract=contract,

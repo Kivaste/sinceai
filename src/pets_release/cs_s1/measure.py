@@ -1,48 +1,20 @@
-"""CS-S1 measurements for the manifest: purpose checks before/after (CS-U5 twice when turn_id is a
-pseudonym) and exact-match redaction scores on the template-held-out split (ticket 14's harness pieces).
-Aggregates only; nothing here returns a row value."""
+"""CS-S1 redaction measurement for the manifest: exact-match scores on the template-held-out split (ticket 14's
+harness pieces). Purpose checks are ``run.purpose`` (#60). Aggregates only; nothing here returns a row value."""
 from __future__ import annotations
 
 import math
 from pathlib import Path
 
-from pets_release.cs_s1.lineage import restore_turn_ids
 from pets_release.manifest import not_measured
 
 GOLD = Path("metadata") / "pii_spans" / "customer_service__turns__text.jsonl"
 RESIDUAL_LABELS = ("PERSON", "ADDRESS", "LOCATION", "ORG", "DATE", "AGE")
-ADAPTED = "CS-U5.lineage-adapted"
-UTILITY_SOURCE = "pets-eval utility tasks in-process via the kiteval adapter (original vs original = before)"
 
 
 def _num(v):
     if v is None or (isinstance(v, float) and math.isnan(v)):
         return None
     return float(v)
-
-
-def utility(scenario_id, source, protected, rowmap_turns, *, root) -> tuple[dict, dict]:
-    """(measured.utility block, {task: {before, after, status}}). ``rowmap_turns``: row map of the
-    released turns when turn_id is a pseudonym (adds the separately labelled lineage-adapted CS-U5)."""
-    from pets_release.kiteval import purpose_check, purpose_checks
-
-    orig = {k: source[k] for k in ("conversations", "turns")}
-    before = {r["id"]: r for r in purpose_checks(scenario_id, orig, orig, root=root)}
-    after = {r["id"]: r for r in purpose_checks(scenario_id, orig, protected, root=root)}
-    tasks = []
-    for tid in sorted(after):
-        a, b = after[tid], before.get(tid, {})
-        status = a["status"] if a["status"] in ("ok", "not_answerable") else "error"
-        tasks.append({"task": tid, "status": status, "before": _num(b.get("score")), "after": _num(a.get("score"))})
-    if rowmap_turns is not None:
-        adapted_prot = dict(protected, turns=restore_turn_ids(protected["turns"], rowmap_turns))
-        a = purpose_check("CS-U5", orig, adapted_prot)
-        status = a["status"] if a["status"] in ("ok", "not_answerable") else "error"
-        tasks.append({"task": ADAPTED, "status": status, "before": _num(before.get("CS-U5", {}).get("score")),
-                      "after": _num(a.get("score"))})
-    tasks.sort(key=lambda t: t["task"])
-    block = {"status": "measured", "source": UTILITY_SOURCE, "tasks": tasks}
-    return block, {t["task"]: {k: t[k] for k in ("status", "before", "after")} for t in tasks}
 
 
 def _pred(spans) -> dict:

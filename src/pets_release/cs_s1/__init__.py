@@ -14,8 +14,8 @@
 one release-scope pseudonym in both tables, by the policy's linked group).
 
 ``restore_turn_ids(protected_turns, rowmap)``: the row-map-lineage adapter for CS-U5 when the
-fallback pseudonymised ``turn_id`` (D21): report the adapted score and the unmodified kit score,
-labelled separately.
+fallback pseudonymised ``turn_id`` (D21). ``run.purpose.evaluate`` scores CS-U5 through the producer
+row map (gated, floor from the policy) and reports the kit score without it as ``CS-U5.unmodified``.
 
 Notes for 21 / 16: put ``prep.turn_id.justification`` into ``fieldJustifications`` (it replaces the
 plan-derived entry for turns.turn_id); pass ``prep.gate_context`` merged into the gate context.

@@ -182,10 +182,11 @@ def _same_score(a, b) -> bool:
     return isinstance(a, (int, float)) and isinstance(b, (int, float)) and abs(float(a) - float(b)) <= 1e-12
 
 
-def purpose_problems(manifest: dict, release: Path, kit: Kit, source: dict) -> list[str]:
+def purpose_problems(manifest: dict, release: Path, kit: Kit, source: dict, rowmaps: dict | None = None) -> list[str]:
     """Producer-scope fresh utility check (``--full``): re-run the run's own purpose evaluation
     (``run.purpose.evaluate``) on the release folder; it must accept, and the signed ``measured.utility`` and
-    sacrifice scores must equal the re-run. Content-free lines (check IDs, reason codes)."""
+    sacrifice scores must equal the re-run. Content-free lines (check IDs, reason codes). ``rowmaps``: the fresh
+    producer row maps (``verify_context``, token inversion), the same lineage ``run`` scores through."""
     from pets_release.policy import get_policy
     from pets_release.run.purpose import evaluate
 
@@ -194,7 +195,7 @@ def purpose_problems(manifest: dict, release: Path, kit: Kit, source: dict) -> l
         released = _released_tables(release, manifest)
     except Exception:  # noqa: BLE001 - unknown state fails closed, content-free
         return ["purpose [producer]: unavailable (policy or released tables unreadable)"]
-    res = evaluate(policy, source, released, root=kit.root)
+    res = evaluate(policy, source, released, root=kit.root, rowmaps=rowmaps)
     out = [f"purpose [producer]: {r}" for r in res.reasons]
     util = manifest["measured"]["utility"]
     if util.get("status") != "measured":
@@ -310,7 +311,8 @@ def verify_release(release_dir, *, full: bool = False, kit=None, master_key=None
         if run_ctx.get("source") is None:
             problems.append("purpose [producer]: not_run (no source dataset)")
         else:
-            problems += (purpose or purpose_problems)(manifest, release, kit, run_ctx["source"])
+            problems += (purpose or purpose_problems)(manifest, release, kit, run_ctx["source"],
+                                                      run_ctx.get("rowmaps"))
     if result.refused and not problems:  # the runner's own verdict is a floor, never overridden
         problems.append("checks: runner refused")
 
