@@ -1,8 +1,50 @@
 <# Exercise the production selector CLI with synthetic changed-file lists from a temporary Git repo. #>
-param([ValidateSet('planted', 'missing', 'marker', 'tooling', 'mapped', 'fallback', 'incomplete', 'all')][string]$Case = 'all')
+param([ValidateSet('planted', 'missing', 'marker', 'tooling', 'mapped', 'fallback', 'incomplete', 'clean', 'all')][string]$Case = 'all')
 $ErrorActionPreference = 'Stop'
 $selector = Join-Path $PSScriptRoot 'affected-tests.ps1'
-$root = Join-Path (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path ('.scratch\affected-tests-' + [guid]::NewGuid().ToString('N'))
+if ($Case -eq 'clean') {
+  # Exercise a full real harness run from a checkout with NO scratch ignore rule.
+  # The checkout guard can observe transient writes, even if finally removes them.
+  $outside = Join-Path $env:LOCALAPPDATA ('Temp\opencode\affected-clean-' + [guid]::NewGuid().ToString('N'))
+  $invoking = Join-Path $outside 'checkout'
+  $scripts = Join-Path $invoking 'scripts\overnight'
+  New-Item -ItemType Directory -Force -Path $scripts | Out-Null
+  function CleanGit([string[]]$Arguments) {
+    $result = & git -C $invoking @Arguments
+    if ($LASTEXITCODE -ne 0) { throw 'clean-checkout regression setup/status failed' }
+    return ($result | Out-String)
+  }
+  try {
+    Copy-Item -LiteralPath $selector -Destination $scripts
+    Copy-Item -LiteralPath $PSCommandPath -Destination $scripts
+    [void](CleanGit @('init', '-q', '-b', 'main'))
+    [void](CleanGit @('add', '.'))
+    [void](CleanGit @('-c', 'user.name=test', '-c', 'user.email=test@example.invalid', 'commit', '-qm', 'synthetic invoking checkout'))
+    $before = CleanGit @('status', '--porcelain', '--untracked-files=all')
+    $harness = Join-Path $scripts 'test-affected-tests.ps1'
+    $child = Start-Process powershell.exe -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ('"' + $harness + '"'), '-Case', 'all') `
+      -WorkingDirectory $invoking -NoNewWindow -PassThru -RedirectStandardOutput (Join-Path $outside 'stdout.txt') -RedirectStandardError (Join-Path $outside 'stderr.txt')
+    $null = $child.Handle # Retain the process handle so Windows PowerShell preserves ExitCode.
+    $clock = [Diagnostics.Stopwatch]::StartNew()
+    $dirty = $false
+    while (-not $child.WaitForExit(50)) {
+      if ((CleanGit @('status', '--porcelain', '--untracked-files=all')) -cne $before) { $dirty = $true }
+      if ($clock.Elapsed.TotalSeconds -gt 65) {
+        & taskkill.exe /PID $child.Id /T /F | Out-Null
+        throw 'full harness cleanliness regression exceeded its 65-second bound'
+      }
+    }
+    $child.WaitForExit()
+    $after = CleanGit @('status', '--porcelain', '--untracked-files=all')
+    if ($child.ExitCode -ne 0) { throw ('full harness failed: ' + (Get-Content (Join-Path $outside 'stdout.txt') -Raw) + (Get-Content (Join-Path $outside 'stderr.txt') -Raw)) }
+    if ($dirty -or $after -cne $before) { throw 'full harness changed invoking checkout git status (transient or persistent scratch write)' }
+    Write-Output 'PASS clean: full harness leaves invoking checkout status unchanged throughout and after the run'
+  } finally {
+    Remove-Item -LiteralPath $outside -Recurse -Force
+  }
+  exit 0
+}
+$root = Join-Path $env:LOCALAPPDATA ('Temp\opencode\affected-tests-' + [guid]::NewGuid().ToString('N'))
 $repo = Join-Path $root 'repo with spaces'
 New-Item -ItemType Directory -Force -Path $repo | Out-Null
 function Invoke-TestGit([string[]]$Arguments) {
