@@ -1,4 +1,4 @@
-"""Fill the manifest's `measured` block: scorecard before/after (via the kit-eval adapter only), our
+﻿"""Fill the manifest's `measured` block: scorecard before/after (via the kit-eval adapter only), our
 person-k summary, and the published baselines. Aggregates only; nothing here prints or stores row values.
 
 "Before" is the original data scored against itself (identity row maps), through the same adapter and
@@ -158,12 +158,12 @@ def _identity_inputs(original_dir: Path, tables, record_keys: dict, out: Path):
     for name in tables:
         shutil.copyfile(original_dir / f"{name}.csv", release / f"{name}.csv")
         key = record_keys.get(name)
-        df = pd.read_csv(original_dir / f"{name}.csv", dtype=str, keep_default_na=False)
+        df = pd.read_csv(original_dir / f"{name}.csv", dtype=str, keep_default_na=False, na_filter=False)
         if key not in df.columns:
             raise MeasureRejected("record_key")
         ids = list(df[key])
         pd.DataFrame({"protected_row": range(len(ids)), "original_record_id": ids}).to_csv(
-            maps / f"rowmap_{name}.csv", index=False)
+            maps / f"rowmap_{name}.csv", index=False, lineterminator="\n")
         rowmaps[name] = maps / f"rowmap_{name}.csv"
         lineage[name] = Lineage(tuple(ids), frozenset())
     return release, rowmaps, lineage
