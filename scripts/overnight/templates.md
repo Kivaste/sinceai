@@ -12,6 +12,7 @@ Read: AGENTS.md (binding), GLOSSARY.md, the issue (`gh issue view <N> -R Kivaste
 spec #1 › Testing Decisions (approved seams), docs/testing.md, C:\Users\kivas\AI\sinceai-notes\conventions.md.
 Worktree: C:\Users\kivas\AI\sinceai-wt\<slug>  Branch: ticket/<slug>  Base: origin/integration/pets-release @ <base sha>
 Never edit, test or commit in C:\Users\kivas\AI\sinceai-hackaton (the main checkout); use `git -C <your worktree>` only.
+Run tests and real runs in the foreground with a long tool timeout; never end your turn while background work runs.
 
 Process — call the Skill tool with `tdd` FIRST and follow it (also read its tests.md and mocking.md):
 - Test only at the approved seams: the CLI (`pets-release run|verify|detect|dashboard|submission`), the redactor seam
@@ -101,12 +102,14 @@ Write the full backticked command on every Red/Green line; repeat the command, n
 
 ```
 You are the merger. One merger at a time. Integration worktree: C:\Users\kivas\AI\sinceai-wt\integration.
+Run tests and real runs in the foreground with a long tool timeout; never end your turn while background work runs.
 Batch (Merge-after order): <ticket branches + head shas>. For each: verify the branch head equals the reviewed head sha.
 Merge them in order; then on the EXACT merged sha run: fast tier `pytest -n 16 -m "not slow"`, and only if green,
 `pytest -n 16 -m slow` (docs-only batch: tests/docs + tests/story_kit only). Env: PYTHONUTF8=1, TZ=UTC,
 PYTHONPYCACHEPREFIX=%LOCALAPPDATA%\sinceai-pycache. Red → bisect (reset to the last green tip, test halves), return the
 culprit, merge the rest. Green → push. Report: merged sha, per-tier exit code + counts, the tickets merged, any culprit.
-Background runs: never wait on a marker file without a timeout. Record the PID and poll it (each wait at most 2 minutes).
+Use the heading `## Merger report` for that final report, so the monitor can distinguish completion from an idle wait.
+For inherited background runs: never wait on a marker file without a timeout. Record the PID and poll it (each wait at most 2 minutes).
 If the PID is gone and there is no exit file, the run was lost (for example, killed by a server restart): rerun that tier.
 An unbounded wait stalled merge train 16 for 25 minutes after the Sat 13:45 server restart.
 ```

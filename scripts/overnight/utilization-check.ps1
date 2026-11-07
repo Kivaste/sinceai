@@ -21,6 +21,8 @@
   Before utilization probes, reports newly dirty main-checkout paths (or unknown Git/snapshot state)
   through send-to-orchestrator.ps1, regardless of CPU, cooldown, phase or GitHub availability.
   -CheckoutCheckOnly runs just this guard. -DryRun never sends or advances its snapshot.
+  Session wait/idle guards then steer independently of utilization limits, including when checkout writes
+  were flagged. -SessionCheckOnly runs both guards without CPU/GitHub probes; unreadable API state is unknown.
 
 .EXAMPLE
   powershell -NoProfile -ExecutionPolicy Bypass -File scripts/overnight/utilization-check.ps1 -DryRun
@@ -41,7 +43,9 @@ param(
   [int]$BudgetSeconds = 90,
   [string]$MainCheckout = 'C:\Users\kivas\AI\sinceai-hackaton',
   [string]$StateDir,
+  [string]$IssueMapPath,
   [switch]$CheckoutCheckOnly,
+  [switch]$SessionCheckOnly,
   [switch]$DryRun
 )
 $ErrorActionPreference = 'Stop'
@@ -51,7 +55,7 @@ New-Item -ItemType Directory -Force -Path $StateDir | Out-Null
 $LogPath = Join-Path $StateDir 'utilization.log'
 $StatePath = Join-Path $StateDir 'utilization-state.json'
 $HbPath = Join-Path $StateDir 'heartbeat.json'
-$MapPath = Join-Path $RepoRoot '.scratch\local-spec\issue-map.json'
+$MapPath = if ($IssueMapPath) { $IssueMapPath } else { Join-Path $RepoRoot '.scratch\local-spec\issue-map.json' }
 $NowUtc = (Get-Date).ToUniversalTime()
 $Clock = [Diagnostics.Stopwatch]::StartNew()
 
@@ -142,6 +146,39 @@ function Get-MainCheckoutWrites([string]$Checkout, [string]$SnapshotPath) {
   }
 }
 function OcApi([string]$path) { return ((Must (Invoke-Exe $OcExe @('api', 'get', $path) 30) "opencode api get $path") | ConvertFrom-Json) }
+. (Join-Path $PSScriptRoot 'session-health.ps1')
+
+function Invoke-SessionHealthGuard {
+  $sessionHb = Read-Json $HbPath
+  try {
+    $script:OcExe = (Get-Command opencode -ErrorAction Stop).Source
+    $records = @(Get-SessionHealth $sessionHb)
+  } catch {
+    # Never forward API stderr, tool input or assistant text.
+    $records = @([pscustomobject]@{ session = 'unknown'; ticket = 'unknown'; status = 'unknown'; pattern = 'unknown'; age = 0 })
+  }
+  $alerts = @($records | Where-Object { $_.status -ne 'healthy' })
+  foreach ($record in $records) {
+    Write-Log ('session-health session={0} ticket={1} status={2} pattern={3} age_minutes={4}' -f $record.session, $record.ticket, $record.status, $record.pattern, $record.age)
+  }
+  if (-not $records.Count) { Write-Log 'session-health status=healthy checked=0' }
+  if ($alerts.Count) {
+    $text = '[session-health] ' + (($alerts | ForEach-Object { 'session={0} ticket={1} status={2} pattern={3} age_minutes={4}' -f $_.session, $_.ticket, $_.status, $_.pattern, $_.age }) -join "`n")
+    if ($DryRun) { Write-Output '----- session message (dry run, not sent) -----'; Write-Output $text }
+    else {
+      if (-not $sessionHb.session_id) { throw 'session alert cannot be sent: heartbeat has no session_id' }
+      $tmp = Join-Path $env:TEMP ('session-alert-{0}.md' -f [guid]::NewGuid().ToString('N'))
+      [IO.File]::WriteAllText($tmp, $text, (New-Object System.Text.UTF8Encoding($false)))
+      try {
+        $sent = Invoke-Exe 'powershell.exe' @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $PSScriptRoot 'send-to-orchestrator.ps1'), '-SessionId', $sessionHb.session_id, '-MessageFile', $tmp) 65
+        if ($sent.code -ne 0) { throw 'session alert delivery failed' }
+      } finally { Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue }
+    }
+  }
+  if (@($alerts | Where-Object { $_.status -eq 'unknown' }).Count) { return 2 }
+  if ($alerts.Count) { return 1 }
+  return 0
+}
 
 # ---------- one run at a time ----------
 $sha = [System.Security.Cryptography.SHA1]::Create()
@@ -183,7 +220,12 @@ try {
   }
   if (-not $DryRun -and $checkout.code -ne 2) { Write-JsonAtomic $checkoutStatePath $checkout.snapshot }
   # Standalone checkout-check seam: no capacity, GitHub or OpenCode probes.
-  if ($CheckoutCheckOnly -or $checkout.code -ne 0) { exit $checkout.code }
+  if ($CheckoutCheckOnly) { exit $checkout.code }
+  # Session liveness guards must run even when checkout writes or capacity are already flagged.
+  $sessionOutput = @(Invoke-SessionHealthGuard)
+  $sessionCode = [int]$sessionOutput[-1]
+  if ($sessionOutput.Count -gt 1) { $sessionOutput[0..($sessionOutput.Count - 2)] | Write-Output }
+  if ($SessionCheckOnly -or $sessionCode -ne 0 -or $checkout.code -ne 0) { exit [Math]::Max($checkout.code, $sessionCode) }
   $OcExe = (Get-Command opencode -ErrorAction Stop).Source
   $GhExe = (Get-Command gh -ErrorAction Stop).Source
   # ---------- inputs ----------
