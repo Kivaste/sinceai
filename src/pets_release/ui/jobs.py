@@ -83,7 +83,8 @@ class Jobs:
                                       env=self.env, capture_output=True, timeout=120, check=False)
             inventory = []
             if detector.returncode == 0:
-                inventory = pd.read_csv(io.BytesIO(detector.stdout), dtype=str, keep_default_na=False).to_dict("records")
+                inventory = pd.read_csv(io.BytesIO(detector.stdout), dtype=str,
+                                        keep_default_na=False, na_filter=False).to_dict("records")
             self.update(detectedInventory=inventory, detectorExit=detector.returncode)
             run_args = ["run", "--scenario", scenario, "--kit", args.kit,
                         "--out", release, "--created", args.created]

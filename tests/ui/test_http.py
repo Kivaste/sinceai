@@ -290,7 +290,7 @@ def test_choose_and_refused_result_views_show_purpose_and_failing_checks(tmp_pat
         import pandas as pd
         coarse_qis(folder)
         path = folder / "ed_visits.csv"
-        frame = pd.read_csv(path, dtype=str, keep_default_na=False)
+        frame = pd.read_csv(path, dtype=str, keep_default_na=False, na_filter=False)
         frame.loc[0, "disposition"] = "4111 1111 1111 1111"
         frame.to_csv(path, index=False, lineterminator="\n")
 
@@ -416,7 +416,7 @@ def test_protected_rows_require_current_verification_and_manifest_membership(tmp
             status, body = request(url, path)
             assert status == 200
             table = json.loads(body)["tables"][0]
-            expected = pd.read_csv(release / "ed_visits.csv", dtype=str, keep_default_na=False)
+            expected = pd.read_csv(release / "ed_visits.csv", dtype=str, keep_default_na=False, na_filter=False)
             assert table == {"file": "ed_visits.csv", "columns": list(expected.columns),
                              "rows": expected.head(2).values.tolist()}
             page = request(url, "/rows")[1]
@@ -442,7 +442,7 @@ def test_protected_rows_require_current_verification_and_manifest_membership(tmp
             (release / "privacy_manifest.json").unlink()
         elif case == "bad-contract":
             import hashlib
-            table = pd.read_csv(release / "ed_visits.csv", dtype=str, keep_default_na=False)
+            table = pd.read_csv(release / "ed_visits.csv", dtype=str, keep_default_na=False, na_filter=False)
             table["uncontracted"] = "synthetic-canary"
             table.to_csv(release / "ed_visits.csv", index=False, lineterminator="\n")
             manifest_path = release / "privacy_manifest.json"
