@@ -127,6 +127,8 @@ class Jobs:
             return state
         for field in PROOF_FIELDS:
             state.pop(field, None)
+        # The run-time verify exits were for other bytes: never render them as a current pass.
+        state["steps"] = [s for s in state["steps"] if not s["name"].startswith("verify")]
         state["status"] = "CHANGED"
         return state
 
