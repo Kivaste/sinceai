@@ -132,6 +132,20 @@ try { $owned = $mutex.WaitOne(0) } catch [System.Threading.AbandonedMutexExcepti
 if (-not $owned) { Write-Log 'action=skip reason="another watchdog run holds the mutex"'; exit 0 }
 
 try {
+  # ---------- (0) keep-awake + resume-from-suspend grace ----------
+  if (-not $Fixture -and -not $DryRun) {
+    $gapMin = 0; $lastLine = Get-Content $LogPath -Tail 1 -ErrorAction SilentlyContinue   # read BEFORE we log anything
+    if ($lastLine -match '^(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d)') { $gapMin = ((Get-Date) - [datetime]::ParseExact($matches[1], 'yyyy-MM-dd HH:mm:ss', $null)).TotalMinutes }
+    $kaPid = $null; $kaFile = Join-Path $StateDir 'keep-awake.pid'
+    if (Test-Path $kaFile) { $kaPid = [int](Get-Content $kaFile -ErrorAction SilentlyContinue) }
+    if (-not $kaPid -or -not (Get-Process -Id $kaPid -ErrorAction SilentlyContinue)) {
+      Start-Process -WindowStyle Hidden -FilePath 'powershell.exe' -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $PSScriptRoot 'keep-awake.ps1'))
+      Write-Log 'keep-awake was not running; started it'
+    }
+    # If our own previous run is far older than the 3-min cadence, the machine was suspended: every age below is
+    # inflated by the suspend, and the network may still be reconnecting. Log it and do not act this cycle.
+    if ($gapMin -gt 10) { Write-Log ('action=grace reason="resumed after suspend or missed runs (gap {0:N0} min); not acting this cycle"' -f $gapMin); exit 0 }
+  }
   # ---------- (a) heartbeat ----------
   $hb = Read-Json $HbPath
   $hbAge = $null
