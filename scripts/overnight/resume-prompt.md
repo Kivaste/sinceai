@@ -55,6 +55,8 @@ If `claude-agent/opus` is rate-limited or errors, use `openai/gpt-6.1-sol`. Log 
 - **At most 8 concurrent review sessions per provider** (xai, opencode-go). Review only a ticket's current head, and cancel a review when its head is superseded.
 - **Final whole-branch `code-review`:** `opencode-go/gemini-4-argon#medium` + `opencode-go/gpt-6-luna#medium`. Use `openai/gpt-6.1-sol` instead of Luna if its quota has reset.
 
+**GPT-6.1 Sol unlimited (D13f, Sat 07:20, user decision). This overrides the Sol limits and the tiering below:** the ChatGPT subscription was upgraded, so use `openai/gpt-6.1-sol#high` freely, with no 4-session cap (sanity limit 12 concurrent Sol sessions). **Every ticket**, core and routine, and every must-fix or follow-up delta review, gets **two** independent reviews: `xai/grok-4.7#medium` **and** `openai/gpt-6.1-sol#high`. Rule-audit passes: Sol high, with Grok high as a second pass. Final whole-branch review: Sol high + Grok high. Grok reviewers stay in every round. If Sol ever fails with a usage limit again, fall back as D13e describes and log it.
+
 **opencode-go quota exhausted (D13e, Sat 07:05). This overrides every opencode-go model named elsewhere in this brief:** `opencode-go/*` (Gemini 4 Argon, GPT-6 Luna, DeepSeek, opencode-go Grok) fails with "Go usage limit exceeded". Until `.scratch/local-overnight/go-available.json` exists:
 - **Core tickets:** `xai/grok-4.7#medium` + `openai/gpt-6.1-sol#high`.
 - **Routine tickets:** Grok only.

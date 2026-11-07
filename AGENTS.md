@@ -1,6 +1,6 @@
-# AGENTS.md
+﻿# AGENTS.md
 
-**sinceai** — purpose-first PETs tool for the TrustED PETs Transformer challenge, Since AI Hackathon 2026.
+**sinceai** â€” purpose-first PETs tool for the TrustED PETs Transformer challenge, Since AI Hackathon 2026.
 **Deadline: Sun 8 Nov 10:00 EET.**
 
 See `README.md` and `docs/` for the plan, spec and setup.
@@ -8,7 +8,7 @@ See `README.md` and `docs/` for the plan, spec and setup.
 ## Hard rules
 
 - **Never commit** anything from `Briefs/` (the challenge kit), any `rowmap_*.csv`, anything under a `truth/` directory, or secrets (`.env`, HMAC keys, other key material). These are gitignored; don't force-add them.
-- **Read every CSV with `dtype=str`** (e.g. `pd.read_csv(path, dtype=str)`). Never let pandas infer types — it mangles IDs, leading zeros and dates.
+- **Read every CSV with `dtype=str`** (e.g. `pd.read_csv(path, dtype=str)`). Never let pandas infer types â€” it mangles IDs, leading zeros and dates.
 - **Run `pets-eval` with `PYTHONUTF8=1`** and `--root` pointing at the kit (`Briefs/TRUSTED_PETS_PROVING_GROUND_2026 (1)/TRUSTED_PETS_PROVING_GROUND_2026`).
 - **Never send data values to any LLM or network service.** Schema/field names and aggregate metrics only; row values stay local.
 
@@ -60,9 +60,9 @@ These apply to every change. A skipped, missing or errored check is a fail, not 
 
 ### Review
 
-- Every ticket gets independent read-only reviews from model families other than the implementer's (how many and which is below, per `docs/decisions.md` D13b). No agent reviews its own change. The orchestrator records the reviews. A new head after fixes gets a fresh (delta) review pass.
-- Every implementer is Claude (Opus or Sonnet), so reviewers are always non-Claude. Since Sat 05:35 (D13b): core (`model:opus`) tickets get two reviews (`xai/grok-4.7#medium` + `opencode-go/gpt-6-luna#medium`) and routine tickets get one (`xai/grok-4.7#medium`). Rounds 2 and later are delta reviews of the fix only. After round 3, only high-severity findings block. The final integration-branch `/code-review` uses `opencode-go/gemini-4-argon` + `opencode-go/gpt-6-luna`.
-- Merge a ticket as soon as its required reviews pass and the full suite is green on the merged result. Then remove that ticket's worktree and delete its branch, locally and on origin (`scripts/overnight/resume-prompt.md` §2).
+- Every ticket gets independent read-only reviews from model families other than the implementer's (how many and which is below, per `docs/decisions.md` D13f). No agent reviews its own change. The orchestrator records the reviews. A new head after fixes gets a fresh (delta) review pass.
+- Every implementer is Claude (Opus or Sonnet), so reviewers are always non-Claude. Since Sat 07:20 (D13f): **every** ticket and every delta review gets two reviews, `xai/grok-4.7#medium` + `openai/gpt-6.1-sol#high`. Rounds 2 and later are delta reviews of the fix only. After round 3, only high-severity findings block. The final integration-branch `/code-review` uses `openai/gpt-6.1-sol#high` + `xai/grok-4.7#high`. (`opencode-go/*` models are unavailable until its quota resets; see D13e.)
+- Merge a ticket as soon as its required reviews pass and the full suite is green on the merged result. Then remove that ticket's worktree and delete its branch, locally and on origin (`scripts/overnight/resume-prompt.md` Â§2).
 
 ### Worktrees and commits
 
