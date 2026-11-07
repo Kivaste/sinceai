@@ -69,6 +69,14 @@ Scope <span class="scope-release">release</span> = checked on the released files
 <table><tr><th>File</th><th>Column</th><th>Form</th><th>Params</th><th>Required</th></tr>
 {% for f in s.forms %}<tr><td>{{ f.file }}</td><td>{{ f.column }}</td><td><code>{{ f.form }}</code></td><td>{{ f.params }}</td><td>{{ 'yes' if f.required else 'no' }}</td></tr>
 {% endfor %}</table>{% endif %}
+{% if s.qi %}<h3>Quasi-identifiers (contract)</h3>
+<table><tr><th>Table</th><th>Column</th><th>Derived from</th></tr>
+{% for q in s.qi %}<tr><td>{{ q.table }}</td><td>{{ q.column }}</td><td>{{ q.derived_from }}</td></tr>
+{% endfor %}</table>{% endif %}
+{% if s.tokens %}<h3>Tokens (contract)</h3>
+<table><tr><th>Table</th><th>Column</th><th>Scope</th></tr>
+{% for t in s.tokens %}<tr><td>{{ t.table }}</td><td>{{ t.column }}</td><td>{{ t.scope }}</td></tr>
+{% endfor %}</table>{% endif %}
 {% if s.asserts %}<h3>Export assertions</h3>
 <table><tr><th>Assertion</th><th>Value</th><th>Scope</th><th>Check (version)</th><th>Hits / denominator</th><th>Status</th></tr>
 {% for a in s.asserts %}<tr data-assertion="{{ a.name }}"><td>{{ a.name }}</td><td>{{ a.value|lower }}</td>
