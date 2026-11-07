@@ -145,3 +145,14 @@ def test_task_without_a_numeric_column_entry_is_an_error_not_a_guess(monkeypatch
     res = purpose_check("NEW-U1", {"conversations": ORIG}, {"conversations": ORIG})
     assert res["status"] == "error" and counts_as_fail(res)
     assert not seen  # never ran on guessed types
+
+
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), "x", [1]])
+def test_non_finite_score_is_an_error_not_ok(monkeypatch, bad):
+    from pets_eval.utility import UtilityTask
+
+    task = UtilityTask("CS-U4", "customer_service", "conversations", "d", "aggregate", lambda o, p: {"score": bad})
+    monkeypatch.setattr("pets_release.kiteval.purpose.all_tasks", lambda *a, **k: [task])
+    res = purpose_check("CS-U4", _tables(ORIG), _tables(ORIG))
+    assert res["status"] == "error" and res["score"] is None
+    assert counts_as_fail(res)
