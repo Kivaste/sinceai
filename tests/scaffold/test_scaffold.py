@@ -385,7 +385,7 @@ def _link(link: Path, target: Path) -> None:
         r = subprocess.run(["cmd", "/c", "mklink", "/J", str(link), str(target)], capture_output=True, check=False)
         if r.returncode == 0:
             return
-    pytest.skip("cannot create symlink or junction here")
+    pytest.fail("cannot create symlink or junction here: the link-refusal tests cannot run (fail, not skip)")
 
 
 def test_junction_into_truth_is_refused(tmp_path):
@@ -472,8 +472,8 @@ def test_package_data_globs_are_recursive_and_cover_nested_data():
 
 
 def test_built_wheel_ships_hook_and_nested_data(tmp_path):
-    pytest.importorskip("setuptools")
-    pytest.importorskip("wheel")
+    import setuptools  # noqa: F401  required build tools (dev extra): missing must fail, not skip
+    import wheel  # noqa: F401
     import zipfile
 
     root = Path(__file__).resolve().parents[2]
