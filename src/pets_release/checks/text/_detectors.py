@@ -433,6 +433,12 @@ def _cue_end(kind, lo, hi, text, pos):
             if not glued:
                 armed = False
             continue
+        k = _cues.glued_hedge_len(raw)
+        if k:  # a hedge glued to its value ("probably:<value>"): the delimiter arms, the remainder is next
+            words += 1
+            armed = True
+            pos = m.start(1) + k
+            continue
         if raw[:1] in ":=":
             armed = True
         tok = raw.rstrip(_TRAIL).lstrip(":=#")

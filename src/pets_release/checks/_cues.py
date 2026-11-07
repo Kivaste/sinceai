@@ -63,6 +63,17 @@ WINDOW = 12
 DATE_OR_TIME = re.compile(r"\d{1,2}[./]\d{1,2}(?:[./]\d{2,4})?|\d{1,2}:\d{2}")
 
 
+_GLUED_HEDGE = re.compile(r"([^\W\d_]+)([:=])(?=\S)")
+
+
+def glued_hedge_len(tok: str) -> int:
+    """Length of a leading hedge + ":"/"=" glued to a remainder ("probably:<value>"), else 0. The
+    remainder is the value position: walkers split the token there. Only a hedge word splits, so a
+    date/time ("12:30") never does."""
+    m = _GLUED_HEDGE.match(tok)
+    return m.end() if m and m.group(1).lower() in HEDGES else 0
+
+
 def is_punct(word: str) -> bool:
     """A separator/punctuation run ("-", "--", "/", "#", "\u00b7"): skipped between a cue and its value."""
     return not any(c.isalnum() for c in word)

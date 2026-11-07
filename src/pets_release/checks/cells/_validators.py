@@ -216,6 +216,15 @@ def _credential_shaped(v: str) -> bool:
 _BARE_NETWORK_CUE = re.compile(r"(?i)wi-?fi|wlan")
 
 
+def _split_glued_hedge(start: int, tok: str):
+    """A hedge glued to its value ("probably:<value>", "nyt=<value>") is two tokens: the hedge with its
+    trailing delimiter (which arms) and the remainder (judged as the value)."""
+    k = _cues.glued_hedge_len(tok)
+    if not k:
+        return [(start, start + len(tok), tok)]
+    return [(start, start + k, tok[:k]), (start + k, start + len(tok), tok[k:])]
+
+
 def _cued_values(cue, s: str, *, alpha_without_copula: bool) -> int:
     """Cue matches in ``s`` followed by a value; a cue inside a placeholder ("[USERNAME_1]") is no cue."""
     ph = [m.span() for m in _cues.PLACEHOLDER_RE.finditer(s)]
@@ -231,18 +240,17 @@ def _cued_value_counts(s: str, pos: int, *, alpha_without_copula: bool,
     after the cue counts too (usernames: "username mattikoski")."""
     armed = False  # a copula, followed by nothing but hedges, separators or a glued placeholder
     words = 0
-    toks = []
+    toks = []  # (start, end, text)
     for m in _CUE_TOKEN.finditer(s, pos):
-        toks.append(m)
+        toks.extend(_split_glued_hedge(m.start(), m.group(0)))
         if len(toks) > _cues.WINDOW:
             break
-    for i, m in enumerate(toks[:_cues.WINDOW]):
-        nxt = toks[i + 1].group(0) if i + 1 < len(toks) else None
-        tok = m.group(0)
-        if i == 0 and m.start() == pos and tok[0].isalpha():
+    for i, (start, end, tok) in enumerate(toks[:_cues.WINDOW]):
+        nxt = toks[i + 1][2] if i + 1 < len(toks) else None
+        if i == 0 and start == pos and tok[0].isalpha():
             return False  # the cue is the start of another word ("pinta", "passwordless")
         if _cues.is_placeholder(tok):
-            if not s[m.end():m.end() + 1].isalnum():
+            if not s[end:end + 1].isalnum():
                 armed = False  # the redacted value took the copula; "[SECRET_1] ok" is prose
             continue
         if tok[:1] in ":=":
@@ -276,9 +284,10 @@ def _cued_value_counts(s: str, pos: int, *, alpha_without_copula: bool,
             continue
         if _credential_shaped(val):
             return True
-        mid_clause_prose = plain_mid_clause_is_prose and not ends and nxt is not None and not _cues.is_punct(nxt)
-        if armed and _DATE_OR_TIME.fullmatch(word) and not mid_clause_prose:
-            return True  # a copula-cued date/time is a value, also directly before or glued to a placeholder
+        if armed and _DATE_OR_TIME.fullmatch(word):
+            # a copula-cued date/time is a value, also directly before or glued to a placeholder, and
+            # also mid-clause after a bare network cue (only a plain word there is prose)
+            return True
         plain_ok = (
             # (b) a plain word directly before a placeholder is not the value: the placeholder is
             not (nxt is not None and _cues.is_placeholder(nxt))

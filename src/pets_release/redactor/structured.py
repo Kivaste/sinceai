@@ -302,7 +302,7 @@ class StructuredPass:
     def _cue_tokens(self, view: ConversationView, i: int, masks) -> list[_Hit]:
         text = view.turns[i].text
         out: list[_Hit] = []
-        spans = [(m.start(), m.end()) for m in re.finditer(r"\S+", text)]
+        spans = _cue_scan_tokens(text)
         for idx, (s, e) in enumerate(spans):
             w = text[s:e].lower().strip(_TRAIL_PUNCT + "!")
             nxt = text[spans[idx + 1][0]:spans[idx + 1][1]].lower().strip(_TRAIL_PUNCT) if idx + 1 < len(spans) else ""
@@ -341,15 +341,23 @@ class StructuredPass:
                 low = raw.lower().strip(_TRAIL_PUNCT)
                 # a token with a digit is a value even if it starts like a cue ('Salasana123')
                 wordlike = not any(ch.isdigit() for ch in low)
-                # fillers, the gate's copulas and hedges ('is maybe X', "it's X") and further cue words
-                if wordlike and (low in FILLER or low in COPULAS or low in HEDGES or low in ("name", "id")
+                # fillers, the gate's copulas and hedges ('is maybe X', "it's X", 'probably:X' split in two)
+                # and further cue words
+                if wordlike and (low in FILLER or low in COPULAS or low.rstrip("=") in HEDGES or low in ("name", "id")
                                  or _cue_word(low, SECRET_CUES + USERNAME_CUES)) or not low or raw in (":", "-"):
                     if raw[-1] in _SENTENCE_END:
                         break  # the cue's sentence ended before any value
+                    if low in COPULAS or raw.endswith((":", "=")):
+                        intervening = 0  # the gate's rule: a later copula re-arms ('password for the router is X')
                     continue
                 ve = _strip_trailing(text, vs, ve)
                 val = text[vs:ve]
                 if any(vs < b and a < ve for a, b in masks):
+                    if _gate_date_or_time(val) and _copula_then_hedges(
+                            text[s:e], [text[a:b] for a, b in spans[start:j]]):
+                        # a copula-cued date or clock time is the value for the gate, although the denylist
+                        # keeps it out of number runs ('wifi is 12:30', 'password is 12.03.2021')
+                        out.append(_Hit(i, vs, ve, label, PRIORITY_CUE, None))
                     break
                 prev = [text[a:b].lower().strip(_TRAIL_PUNCT) for a, b in spans[start:j]]
                 # every cue word of the phrase counts ('wifi password is X': 'password' is the strong one)
@@ -393,7 +401,8 @@ class StructuredPass:
                     break
                 if not wordlike or raw[-1] in _SENTENCE_END:
                     break
-                intervening += 1
+                # a word ending in ':' or '=' re-arms like a copula ('password for the router: X')
+                intervening = 0 if raw.endswith((":", "=")) else intervening + 1
         return out
 
     # ------------------------------------------------------ run classifier
@@ -741,12 +750,31 @@ def _credential_ahead(text: str, spans: list[tuple[int, int]], j: int, stop: int
     return None
 
 
+def _gate_date_or_time(val: str) -> bool:
+    """A date or clock time as the gate reads one after a copula (the gate's pattern, shared)."""
+    from pets_release.checks import _cues
+
+    return _cues.DATE_OR_TIME.fullmatch(val) is not None
+
+
+def _cue_scan_tokens(text: str) -> list[tuple[int, int]]:
+    """Whitespace tokens of a turn for the cue scan; a hedge glued to its value ('probably:X', 'nyt=X') is two
+    tokens, the hedge with its delimiter and the value (the gate's own split, shared rather than copied)."""
+    from pets_release.checks import _cues  # lazily, as elsewhere: the checks package loads the registry
+
+    out = []
+    for m in re.finditer(r"\S+", text):
+        k = _cues.glued_hedge_len(m.group())
+        out.extend([(m.start(), m.start() + k), (m.start() + k, m.end())] if k else [(m.start(), m.end())])
+    return out
+
+
 def _copula_then_hedges(cue_tok: str, between: list[str]) -> bool:
     """A copula or colon between cue and value, followed by nothing but hedges ('password is probably X');
     any other word after the copula ('is the X', 'is not X') makes the plain word a description."""
     words = [t.lower().strip(_TRAIL_PUNCT) for t in between]
     raw = [t for t in between]
-    cop = [k for k, (wd, r) in enumerate(zip(words, raw)) if wd in COPULAS or r.endswith(":") or r in (":", "=")]
+    cop = [k for k, (wd, r) in enumerate(zip(words, raw)) if wd in COPULAS or r.endswith((":", "="))]
     if not cop:
         return cue_tok.endswith(":") and all(wd in HEDGES for wd in words)
     return all(wd in HEDGES for wd in words[cop[-1] + 1:])
