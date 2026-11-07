@@ -148,17 +148,18 @@ def phones(text):
 
 # ---------------------------------------------------------------- IBAN
 
-_IBAN_START = re.compile(r"(?<![A-Za-z0-9])([A-Za-z]{2})[ \t]*(\d{2})")
+# Country letters may be spelled one by one ("F I 2 1 ..."); digits may be spaced.
+_IBAN_START = re.compile(r"(?<![A-Za-z0-9])([A-Za-z])[ \t]?([A-Za-z])[ \t]*(\d)[ \t]*(\d)")
 
 
 def ibans(text):
     hits = []
     for m in _IBAN_START.finditer(text):
-        cc = m.group(1).upper()
+        cc = (m.group(1) + m.group(2)).upper()
         need = IBAN_LENGTHS.get(cc)
         if not need:
             continue
-        chars = [cc, m.group(2)]
+        chars = [cc, m.group(3), m.group(4)]
         n = 4
         pos = m.end()
         while n < need and pos < len(text):
@@ -180,17 +181,18 @@ def ibans(text):
 
 # ---------------------------------------------------------------- EMAIL (email view)
 
-_W = r"[A-Za-z0-9Ã…Ã„Ã–Ã¥Ã¤Ã¶!#$%&'*+=?^_`{|}~]"
+_W = r"[A-Za-z0-9ÅÄÖåäö!#$%&'*+=?^_`{|}~]"
 _WORD = rf"{_W}+(?:-{_W}+)*"
 _SPELLED = r"(?:[A-Za-z0-9][ \t]+){2,}[A-Za-z0-9]"
 _PART = rf"(?:{_SPELLED}|{_WORD})"
 _LSEP = rf"(?:[ \t]*[._\-{SPOKEN_DOT}][ \t]*)"
 _LOCAL = rf"{_PART}(?:{_LSEP}{_PART})*"
 _AT = rf"[ \t]*[@{SPOKEN_AT}][ \t]*"
-_DLAB = r"[A-Za-z0-9Ã…Ã„Ã–Ã¥Ã¤Ã¶](?:[A-Za-z0-9Ã…Ã„Ã–Ã¥Ã¤Ã¶-]*[A-Za-z0-9Ã…Ã„Ã–Ã¥Ã¤Ã¶])?"
+_DLAB = rf"(?:{_SPELLED}|[A-Za-z0-9ÅÄÖåäö](?:[A-Za-z0-9ÅÄÖåäö-]*[A-Za-z0-9ÅÄÖåäö])?)"
+_TLD = r"(?:(?:[A-Za-z][ \t]+)+[A-Za-z]|[A-Za-z]{2,24})"
 _DSEP = rf"(?:\.|[ \t]*{SPOKEN_DOT}[ \t]*)"
 _EMAIL_RE = re.compile(
-    rf"(?<![A-Za-z0-9Ã…Ã„Ã–Ã¥Ã¤Ã¶._-]){_LOCAL}{_AT}{_DLAB}(?:{_DSEP}{_DLAB})*{_DSEP}[A-Za-z]{{2,24}}(?![A-Za-z0-9])"
+    rf"(?<![A-Za-z0-9ÅÄÖåäö._-]){_LOCAL}{_AT}{_DLAB}(?:{_DSEP}{_DLAB})*{_DSEP}{_TLD}(?![A-Za-z0-9])"
 )
 
 
@@ -256,11 +258,11 @@ def _ip_identifying(ip) -> bool:
 # ---------------------------------------------------------------- DEVICE_ID
 
 _MAC_RE = re.compile(r"(?<![0-9A-Fa-f:-])[0-9A-Fa-f]{2}([:-])(?:[0-9A-Fa-f]{2}\1){4}[0-9A-Fa-f]{2}(?![0-9A-Fa-f:-])")
-_IMEI_RE = re.compile(r"(?i)\bimei\b[^\dÂ¦]{0,20}((?:\d[ \t-]?){14}\d)(?!\d)")
+_IMEI_RE = re.compile(r"(?i)\bimei\b[^\d¦]{0,20}((?:\d[ \t-]?){14}\d)(?!\d)")
 _BARE_15_RE = re.compile(r"(?<![\w-])\d{15}(?![\w-])")
 _SERIAL_RE = re.compile(
     r"(?i)\b(?:serial\s*(?:number|no\.?)|s/n|sarjanumero\w*|serienummer\w*|device\s*id|laitetunnus\w*)"
-    r"(?:[ \t]*(?:[:#=]|is|on|Ã¤r))*[ \t]*([A-Za-z0-9][A-Za-z0-9-]{5,})"
+    r"(?:[ \t]*(?:[:#=]|is|on|är))*[ \t]*([A-Za-z0-9][A-Za-z0-9-]{5,})"
 )
 
 
@@ -280,7 +282,7 @@ def device_ids(text):
 
 # ---------------------------------------------------------------- LICENSE_PLATE
 
-_PLATE_RE = re.compile(r"(?<![\w-])([A-ZÃ…Ã„Ã–]{2,3})[ \t]*-[ \t]*([1-9]\d{0,2})(?![\w-]|\.\d)")
+_PLATE_RE = re.compile(r"(?<![\w-])([A-ZÅÄÖ]{2,3})[ \t]*-[ \t]*([1-9]\d{0,2})(?![\w-]|\.\d)")
 _PLATE_DENY = {
     "UTF", "ISO", "MP", "TV", "CS", "HTTP", "SHA", "MD", "AES", "RSA", "USB", "PS", "PC",
     "CD", "DVD", "ID", "NO", "OK", "EU", "EN", "KB", "MB", "GB", "TB", "IP", "AM", "PM",
@@ -296,11 +298,11 @@ def plates(text):
 # ---------------------------------------------------------------- SECRET
 
 _SECRET_CUE = re.compile(
-    r"(?i)\b(?:password|passwd|pwd|passcode|salasana\w*|tunnussana\w*|lÃ¶senord\w*|"
+    r"(?i)\b(?:password|passwd|pwd|passcode|salasana\w*|tunnussana\w*|lösenord\w*|"
     r"pin(?:[ -]?(?:koodi\w*|kod\w*|code))?|api[ _-]?(?:key|avain\w*|nyckel\w*)|token|"
     r"access\s+code|security\s+code|verification\s+code|vahvistuskoodi\w*|turvakoodi\w*|"
-    r"kertakÃ¤yttÃ¶\w*|engÃ¥ngskod\w*|sÃ¤kerhetskod\w*|otp|cvv|cvc)\b"
-    r"(?:[ \t]*(?:[:=]|is|was|on|oli|Ã¤r|var|it's|its))*[ \t]*([^\sÂ¦,;]{4,})"
+    r"kertakäyttö\w*|engångskod\w*|säkerhetskod\w*|otp|cvv|cvc)\b"
+    r"(?:[ \t]*(?:[:=]|is|was|on|oli|är|var|it's|its))*[ \t]*([^\s¦,;]{4,})"
 )
 _SECRET_PATTERNS = re.compile(
     r"\bsk-[A-Za-z0-9_-]{16,}|\bAKIA[0-9A-Z]{16}\b|\bgh[pousr]_[A-Za-z0-9]{30,}|"
@@ -332,7 +334,7 @@ def secrets(text):
 
 # ---------------------------------------------------------------- URL with tokens
 
-_URL_RE = re.compile(r"(?i)\b(?:https?://|www\.)[^\sÂ¦<>\"']+")
+_URL_RE = re.compile(r"(?i)\b(?:https?://|www\.)[^\s¦<>\"']+")
 _TOKEN_KEYS = {
     "token", "access_token", "auth", "authtoken", "key", "apikey", "api_key", "sig",
     "signature", "session", "sessionid", "sid", "code", "password", "pwd", "reset",
@@ -363,8 +365,8 @@ def urls_with_tokens(text):
 # ---------------------------------------------------------------- USERNAME
 
 _USER_CUE = re.compile(
-    r"(?i)\b(?:username|user\s*name|user\s*id|login|kÃ¤yttÃ¤jÃ¤tunnu\w*|kÃ¤yttÃ¤jÃ¤nim\w*|"
-    r"anvÃ¤ndarnamn\w*|anvÃ¤ndar-id)\b(?:[ \t]*(?:[:=]|is|was|on|oli|Ã¤r|var))*[ \t]*([A-Za-z0-9._-]{3,})"
+    r"(?i)\b(?:username|user\s*name|user\s*id|login|käyttäjätunnu\w*|käyttäjänim\w*|"
+    r"användarnamn\w*|användar-id)\b(?:[ \t]*(?:[:=]|is|was|on|oli|är|var))*[ \t]*([A-Za-z0-9._-]{3,})"
 )
 _HANDLE_RE = re.compile(r"(?<![\w.@])@[A-Za-z][A-Za-z0-9_.]{2,29}")
 _USER_STOP = {"the", "same", "your", "my", "not", "and", "that", "this", "is", "was", "please",
@@ -384,9 +386,9 @@ def usernames(text):
 _ACCOUNT_CUE = re.compile(
     r"(?i)\b(?:account\s*(?:number|no\.?|nr\.?|#)|acct\.?|tilinumero\w*|asiakasnumero\w*|"
     r"customer\s*(?:number|no\.?|nr\.?|id)|kontonummer\w*|kundnummer\w*|"
-    r"member(?:ship)?\s*(?:number|no\.?)|jÃ¤sennumero\w*|contract\s*number|sopimusnumero\w*|"
+    r"member(?:ship)?\s*(?:number|no\.?)|jäsennumero\w*|contract\s*number|sopimusnumero\w*|"
     r"avtalsnummer\w*|policy\s*number|vakuutusnumero\w*)"
-    r"(?:[ \t]*(?:[:#=]|is|was|on|oli|Ã¤r|var))*[ \t]*((?:[A-Za-z]{1,4}[ \t-]?)?\d(?:[ \t-]?\d){4,})"
+    r"(?:[ \t]*(?:[:#=]|is|was|on|oli|är|var))*[ \t]*((?:[A-Za-z]{1,4}[ \t-]?)?\d(?:[ \t-]?\d){4,})"
 )
 
 

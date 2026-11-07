@@ -70,11 +70,14 @@ def registry():
 
 @pytest.fixture
 def gate(registry):
-    """gate(name, folder, contract, context=None) -> CheckRecord dict, via the real runner."""
+    """gate(name, folder, contract, context=None) -> CheckRecord dict, via the real runner.
+
+    The default context is the gate phase (no manifest written yet)."""
     from pets_release.checks import run_checks
 
     def _run(name, folder, contract, context=None):
-        result = run_checks(folder, contract, context or {}, checks=[registry[name]])
+        ctx = {"phase": "gate"} if context is None else context
+        result = run_checks(folder, contract, ctx, checks=[registry[name]])
         (rec,) = result.records
         return rec.to_dict()
 

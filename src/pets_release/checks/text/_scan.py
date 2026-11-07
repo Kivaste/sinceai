@@ -49,10 +49,28 @@ def text_fields(contract):
 
 
 class Conversation:
-    __slots__ = ("digit", "email", "raw", "rows")
+    """Source turns of one conversation (in order) plus cached normalised views.
+
+    ``views[kind]`` holds one view per turn; ``windows[kind]`` holds (idx, joined view, bounds)
+    for every N-turn window, computed from the joined *source* turns.
+    """
+
+    __slots__ = ("rows", "src", "views", "_windows")
 
     def __init__(self):
-        self.rows, self.digit, self.email, self.raw = [], [], [], []
+        self.rows, self.src = [], []
+        self.views = {"digit": [], "email": []}
+        self._windows = {}
+
+    def windows(self, kind):
+        if kind not in self._windows:
+            digit = self.views["digit"]
+            out = []
+            for idx in normalise.windows(len(self.src), lambda i: any(ch.isdigit() for ch in digit[i])):
+                joined, bounds = normalise.join(self.src, idx)
+                out.append((idx, joined, normalise.view(joined, kind), bounds))
+            self._windows[kind] = out
+        return self._windows[kind]
 
 
 class TextField:
@@ -123,58 +141,72 @@ def load(release, contract):
                 for r_i in sorted(groups[cid], key=order_key):
                     text = texts[r_i]
                     c.rows.append(r_i)
-                    c.raw.append(normalise.mask_placeholders(text))
-                    c.digit.append(normalise.digit_view(text))
-                    c.email.append(normalise.email_view(text))
+                    c.src.append(text)
+                    c.views["digit"].append(normalise.view(text, "digit"))
+                    c.views["email"].append(normalise.view(text, "email"))
                 convs.append(c)
             result.append(TextField(fname, col, convs, len(texts)))
     per_release[key] = result
     return result
 
 
-def _overlaps(taken, turn, start, end):
-    for s, e in taken.get(turn, ()):
-        if s < end and start < e:
-            return True
-    return False
+def _source_parts(src_text, kind, s, e, bounds):
+    """Map a hit [s, e) in view(src_text) to [(turn, start, end)] in source-turn offsets."""
+    _out, starts, ends = normalise.view(src_text, kind, with_map=True)
+    a, b = normalise.source_span(starts, ends, s, e)
+    parts = []
+    for bs, be, t in bounds:
+        lo, hi = max(a, bs), min(b, be)
+        if lo < hi:
+            parts.append((t, lo - bs, hi - bs))
+    return parts
+
+
+def _ov(a, b):
+    return a[0] == b[0] and a[1] < b[2] and b[1] < a[2]
+
+
+def _within(inner, outer_parts):
+    return any(inner[0] == o[0] and o[1] <= inner[1] and inner[2] <= o[2] for o in outer_parts)
+
+
+def _add(found, parts):
+    """Add a hit (list of (turn, start, end) source parts) unless it overlaps an existing one.
+
+    A hit that fully contains every hit it overlaps replaces them (a window hit extends a
+    fragment already found in one turn); any other overlap is the same identifier, dropped.
+    """
+    clash = [h for h in found if any(_ov(a, b) for a in h for b in parts)]
+    if clash and not all(_within(a, parts) for h in clash for a in h):
+        return
+    for h in clash:
+        found.remove(h)
+    found.append(parts)
 
 
 def detect(field: TextField, detector, view: str):
-    """Run one detector over single turns, then 2- and 3-turn windows.
+    """Run one detector over single turns, then over 2- and 3-turn windows.
 
-    Returns a list of hits, each a sorted tuple of row indices the hit touches. A window
-    hit counts only if it spans the first and last turn of the window and does not overlap
-    a hit already found.
+    Windows are normalised from the joined source turns. Returns a list of hits, each a
+    sorted tuple of row indices the hit touches. A window hit counts only if it spans the
+    first and last turn of the window; overlapping hits are merged (see ``_add``).
     """
     hits = []
     for conv in field.conversations:
-        views = conv.digit if view == "digit" else conv.email
-        taken: dict = {}
-        for t, text in enumerate(views):
+        found: list = []
+        for t, text in enumerate(conv.views[view]):
+            src = conv.src[t]
             for s, e in detector(text):
-                if not _overlaps(taken, t, s, e):
-                    taken.setdefault(t, []).append((s, e))
-                    hits.append((conv.rows[t],))
-        if len(views) < 2:
-            continue
-
-        def has_digit(i, views=views):
-            return any(ch.isdigit() for ch in views[i])
-
-        for idx in normalise.windows(len(views), has_digit):
-            joined, bounds = normalise.join(views, idx)
-            for s, e in detector(joined):
-                parts = []
-                for bs, be, t in bounds:
-                    lo, hi = max(s, bs), min(e, be)
-                    if lo < hi:
-                        parts.append((t, lo - bs, hi - bs))
-                touched = {p[0] for p in parts}
-                if idx[0] not in touched or idx[-1] not in touched:
-                    continue
-                if any(_overlaps(taken, t, ls, le) for t, ls, le in parts):
-                    continue
-                for t, ls, le in parts:
-                    taken.setdefault(t, []).append((ls, le))
-                hits.append(tuple(sorted(conv.rows[t] for t in touched)))
+                parts = _source_parts(src, view, s, e, [(0, len(src), t)])
+                if parts:
+                    _add(found, parts)
+        if len(conv.src) > 1:
+            for idx, joined_src, joined_view, bounds in conv.windows(view):
+                for s, e in detector(joined_view):
+                    parts = _source_parts(joined_src, view, s, e, bounds)
+                    touched = {p[0] for p in parts}
+                    if idx[0] in touched and idx[-1] in touched:
+                        _add(found, parts)
+        for parts in found:
+            hits.append(tuple(sorted({conv.rows[t] for t, _s, _e in parts})))
     return hits

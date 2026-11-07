@@ -1,15 +1,18 @@
 """Gate normaliser: an independent implementation, sharing no code with the redactor.
 
-Per turn it builds two views:
+Two views of a text:
 
 * the *digit view*: placeholders masked, spoken digits (fi/sv/en) converted when they sit
   next to another digit, spoken separators (dash/plus/slash/dot words) converted when they
   sit next to a digit;
-* the *email view*: placeholders masked, spoken "at" and "dot" words replaced by marker
-  characters so that only spelled-out emails use them, spoken dash/underscore converted.
+* the *email view*: the digit view plus spoken "at" and "dot" words replaced by marker
+  characters (so only spelled-out emails use them) and spoken dash/underscore converted.
 
-Per conversation, :func:`windows` yields joins of up to three consecutive turns so a fragment
-that ends one turn and one that starts a later turn form one candidate.
+Views are always computed from source text. For N-turn joins the *source* turns are joined
+first and the join is normalised as one text, so a spoken identifier split at any position
+(after its first digit, mid-group, at a spoken separator) normalises exactly as if unsplit.
+``view(text, kind, with_map=True)`` also returns, per output character, the source span it
+came from, so hits are located in source turns.
 """
 from __future__ import annotations
 
@@ -39,51 +42,80 @@ DASH_WORDS = {"viiva", "väliviiva", "miinus", "streck", "bindestreck", "minus",
 PLUS_WORDS = {"plus", "plussa"}
 SLASH_WORDS = {"slash", "kauttaviiva", "snedstreck"}
 DOT_WORDS = {"dot", "piste", "punkt", "point"}
-AT_WORDS = {"at", "ät", "miukumauku", "kissanhäntä", "snabela", "atmerkki", "at-merkki"}
+AT_WORDS = {"at", "ät", "miukumauku", "kissanhäntä", "snabela"}
 UNDERSCORE_WORDS = {"underscore", "alaviiva", "understreck"}
+_SEP_WORDS = DASH_WORDS | PLUS_WORDS | SLASH_WORDS | DOT_WORDS
 
 _TOKEN_RE = re.compile(r"\w+|[^\w\s]")
 _SKIPPABLE = {"-", "+", "/", ".", "(", ")", ",", ":"}
+_SNABEL_RE = re.compile(r"(?i)\bsnabel-a\b|\bat-merkki\b")
 
 
-def mask_placeholders(text: str) -> str:
-    return PLACEHOLDER_RE.sub(MASK, text)
+# ---------------------------------------------------------------- edit machinery
 
 
-def _has_digit(tok: str) -> bool:
+def _apply(text, edits, with_map):
+    """Apply sorted, non-overlapping (start, end, replacement) edits.
+
+    Returns (out, starts, ends): for each output char, the source span [start, end) it maps to.
+    """
+    out = []
+    starts, ends = ([], []) if with_map else (None, None)
+    last = 0
+    for s, e, rep in edits:
+        out.append(text[last:s])
+        out.append(rep)
+        if with_map:
+            starts.extend(range(last, s))
+            ends.extend(range(last + 1, s + 1))
+            starts.extend([s] * len(rep))
+            ends.extend([e] * len(rep))
+        last = e
+    out.append(text[last:])
+    if with_map:
+        starts.extend(range(last, len(text)))
+        ends.extend(range(last + 1, len(text) + 1))
+    return "".join(out), starts, ends
+
+
+def _mask_edits(text):
+    return [(m.start(), m.end(), MASK) for m in PLACEHOLDER_RE.finditer(text)]
+
+
+def _snabel_edits(text):
+    return [(m.start(), m.end(), " at ") for m in _SNABEL_RE.finditer(text)]
+
+
+def _has_digit(tok):
     return any(ch.isdigit() for ch in tok)
 
 
-def _neighbour(toks, i, step, separator_words):
+def _neighbour(toks, i, step):
     j = i + step
     while 0 <= j < len(toks):
         t = toks[j].group(0)
-        low = t.lower()
-        if t in _SKIPPABLE or low in separator_words:
+        if t in _SKIPPABLE or t.lower() in _SEP_WORDS:
             j += step
             continue
-        return low
+        return t.lower()
     return None
 
 
-def _digitish(tok) -> bool:
+def _digitish(tok):
     return tok is not None and (_has_digit(tok) or tok in DIGIT_WORDS)
 
 
-def digit_view(text: str) -> str:
-    text = mask_placeholders(text)
+def _digit_edits(text):
     toks = list(_TOKEN_RE.finditer(text))
-    seps = DASH_WORDS | PLUS_WORDS | SLASH_WORDS | DOT_WORDS
-    out = []
-    last = 0
+    edits = []
     for i, m in enumerate(toks):
         low = m.group(0).lower()
         rep = None
         if low in DIGIT_WORDS:
-            if _digitish(_neighbour(toks, i, -1, seps)) or _digitish(_neighbour(toks, i, 1, seps)):
+            if _digitish(_neighbour(toks, i, -1)) or _digitish(_neighbour(toks, i, 1)):
                 rep = DIGIT_WORDS[low]
-        elif low in seps and _digitish(_neighbour(toks, i, 1, seps)) and (
-            _digitish(_neighbour(toks, i, -1, seps)) or low in PLUS_WORDS or low in DASH_WORDS
+        elif low in _SEP_WORDS and _digitish(_neighbour(toks, i, 1)) and (
+            _digitish(_neighbour(toks, i, -1)) or low in PLUS_WORDS or low in DASH_WORDS
         ):
             if low in DASH_WORDS:
                 rep = "-"
@@ -94,39 +126,66 @@ def digit_view(text: str) -> str:
             else:
                 rep = "."
         if rep is not None:
-            out.append(text[last:m.start()])
-            out.append(rep)
-            last = m.end()
-    out.append(text[last:])
-    return "".join(out)
+            edits.append((m.start(), m.end(), rep))
+    return edits
 
 
-_SNABEL_RE = re.compile(r"(?i)\bsnabel-a\b|\bat-merkki\b")
+def _email_edits(text):
+    edits = []
+    for m in _TOKEN_RE.finditer(text):
+        low = m.group(0).lower()
+        if low in AT_WORDS:
+            edits.append((m.start(), m.end(), SPOKEN_AT))
+        elif low in DOT_WORDS:
+            edits.append((m.start(), m.end(), SPOKEN_DOT))
+        elif low in DASH_WORDS:
+            edits.append((m.start(), m.end(), "-"))
+        elif low in UNDERSCORE_WORDS:
+            edits.append((m.start(), m.end(), "_"))
+    return edits
+
+
+_STAGES = {
+    "digit": (_mask_edits, _digit_edits),
+    "email": (_mask_edits, _snabel_edits, _digit_edits, _email_edits),
+}
+
+
+def view(text, kind, with_map=False):
+    """Normalised view of ``text``; with_map also returns per-char source (starts, ends)."""
+    starts = ends = None
+    for stage in _STAGES[kind]:
+        out, s2, e2 = _apply(text, stage(text), with_map)
+        if with_map:
+            if starts is None:
+                starts, ends = s2, e2
+            else:
+                starts = [starts[i] for i in s2]
+                ends = [ends[i - 1] for i in e2]
+        text = out
+    if with_map:
+        return text, starts, ends
+    return text
+
+
+def source_span(starts, ends, s, e):
+    """Source [start, end) of output span [s, e)."""
+    return starts[s], ends[e - 1]
+
+
+def mask_placeholders(text: str) -> str:
+    return PLACEHOLDER_RE.sub(MASK, text)
+
+
+def digit_view(text: str) -> str:
+    return view(text, "digit")
 
 
 def email_view(text: str) -> str:
-    text = _SNABEL_RE.sub(lambda m: " at ", mask_placeholders(text))
-    text = digit_view(text)
-    toks = list(_TOKEN_RE.finditer(text))
-    out = []
-    last = 0
-    for m in toks:
-        low = m.group(0).lower()
-        rep = None
-        if low in AT_WORDS:
-            rep = SPOKEN_AT
-        elif low in DOT_WORDS:
-            rep = SPOKEN_DOT
-        elif low in DASH_WORDS:
-            rep = "-"
-        elif low in UNDERSCORE_WORDS:
-            rep = "_"
-        if rep is not None:
-            out.append(text[last:m.start()])
-            out.append(rep)
-            last = m.end()
-    out.append(text[last:])
-    return "".join(out)
+    return view(text, "email")
+
+
+# ---------------------------------------------------------------- N-turn joins
 
 
 def windows(n_turns: int, has_digit):
@@ -144,8 +203,8 @@ def windows(n_turns: int, has_digit):
             yield (k, k + 1, k + 2)
 
 
-def join(views, idx):
-    """Join the views at positions idx with a single space; return text and turn bounds."""
+def join(texts, idx):
+    """Join the source texts at positions idx with one space; return text and turn bounds."""
     parts = []
     bounds = []
     pos = 0
@@ -153,7 +212,7 @@ def join(views, idx):
         if n:
             parts.append(" ")
             pos += 1
-        parts.append(views[i])
-        bounds.append((pos, pos + len(views[i]), i))
-        pos += len(views[i])
+        parts.append(texts[i])
+        bounds.append((pos, pos + len(texts[i]), i))
+        pos += len(texts[i])
     return "".join(parts), bounds
