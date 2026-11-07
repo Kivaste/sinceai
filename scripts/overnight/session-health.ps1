@@ -1,4 +1,37 @@
 # Read-only session classification. API text/commands stay local; callers emit only these records.
+function Test-ShortRetry($Loop) {
+  $count = 0; $counter = $null
+  if ($Loop -is [Management.Automation.Language.ForStatementAst]) {
+    if ($Loop.Initializer.Extent.Text -notmatch '^\$(\w+)\s*=\s*(\d+)$') { return $false }
+    $counter = $matches[1]; $first = [long]$matches[2]
+    if ($Loop.Condition.Extent.Text -notmatch ('^\$' + [regex]::Escape($counter) + '\s+-lt\s+(\d+)$')) { return $false }
+    $count = [long]$matches[1] - $first
+    if ($Loop.Iterator.Extent.Text -notmatch ('^\$' + [regex]::Escape($counter) + '\+\+$')) { return $false }
+  } elseif ($Loop -is [Management.Automation.Language.ForEachStatementAst]) {
+    if ($Loop.Condition.Extent.Text -notmatch '^(\d+)\.\.(\d+)$') { return $false }
+    $count = [Math]::Abs([long]$matches[2] - [long]$matches[1]) + 1
+    $counter = $Loop.Variable.VariablePath.UserPath
+  } else { return $false }
+  if ($count -lt 1 -or $count -gt 120) { return $false }
+  # Only prove simple retries: nested loops and writes to the iteration counter defeat the bound.
+  $mutations = @($Loop.Body.FindAll({ param($node)
+    $node -is [Management.Automation.Language.LoopStatementAst] -or
+    ($node -is [Management.Automation.Language.AssignmentStatementAst] -and $node.Left.Extent.Text -ieq ('$' + $counter)) -or
+    ($node -is [Management.Automation.Language.UnaryExpressionAst] -and $node.Child.Extent.Text -ieq ('$' + $counter))
+  }, $true))
+  if ($mutations.Count) { return $false }
+  $delay = 0.0
+  foreach ($call in @($Loop.Body.FindAll({ param($node) $node -is [Management.Automation.Language.CommandAst] }, $true))) {
+    $name = $call.GetCommandName()
+    if ($name -in @('Set-Variable', 'Clear-Variable', 'Remove-Variable', 'Invoke-Expression')) { return $false }
+    if ($name -ine 'Start-Sleep') { continue }
+    if ($call.Extent.Text -match '(?i)^Start-Sleep\s+-(?:Milliseconds|m)\s+(\d+(?:\.\d+)?)$') { $delay += [double]$matches[1] / 1000 }
+    elseif ($call.Extent.Text -match '(?i)^Start-Sleep\s+(?:-(?:Seconds|s)\s+)?(\d+(?:\.\d+)?)$') { $delay += [double]$matches[1] }
+    else { return $false }
+  }
+  return ($count * $delay) -le 120
+}
+
 function Get-WaitPattern([string]$Command) {
   $tokens = $null; $errors = $null
   $ast = [Management.Automation.Language.Parser]::ParseInput($Command, [ref]$tokens, [ref]$errors)
@@ -29,6 +62,8 @@ function Get-WaitPattern([string]$Command) {
       $parent = $call.Parent
       while ($parent) {
         if ($parent -is [Management.Automation.Language.LoopStatementAst]) {
+          # Skip only the proven finite retry itself, never an enclosing unbounded loop.
+          if (Test-ShortRetry $parent) { $parent = $parent.Parent; continue }
           if ($name -ieq 'Test-Path') { return 'file-poll' }
           if ($name -ieq 'Get-Process') { return 'process-poll' }
           # Sleep-only loops are waits too, not productive descendants.
@@ -41,6 +76,37 @@ function Get-WaitPattern([string]$Command) {
   return 'none'
 }
 
+function Get-ProcessBirth($Process) {
+  if (-not $Process.CreationDate) { throw 'process birth unavailable' }
+  return ([DateTimeOffset]$Process.CreationDate).UtcDateTime
+}
+
+function Test-LiveWorker($Processes, $Tool, [string]$Command, [long]$Started) {
+  $toolStart = [DateTimeOffset]::FromUnixTimeMilliseconds($Started).UtcDateTime
+  $roots = @($Processes | Where-Object {
+    if ($Tool.state.metadata.pid) { $_.ProcessId -eq [long]$Tool.state.metadata.pid }
+    else { $_.CommandLine -and $_.CommandLine.Contains($Command) }
+  })
+  # PID alone can be recycled. A shell must have been born when this tool started (5s spawn allowance).
+  $roots = @($roots | Where-Object { [Math]::Abs(((Get-ProcessBirth $_) - $toolStart).TotalSeconds) -le 5 })
+  if ($roots.Count -ne 1) { throw 'process identity unavailable' }
+  $descendants = @{}
+  $descendants[[long]$roots[0].ProcessId] = Get-ProcessBirth $roots[0]
+  do {
+    $added = 0
+    foreach ($process in $Processes) {
+      $id = [long]$process.ProcessId; $parentId = [long]$process.ParentProcessId
+      if ($descendants.ContainsKey($parentId) -and -not $descendants.ContainsKey($id)) {
+        $birth = Get-ProcessBirth $process
+        # An older child belongs to a previous incarnation of its parent PID, not this tool.
+        if ($birth -lt $descendants[$parentId] -or $birth -gt $NowUtc.AddSeconds(5)) { throw 'process edge unavailable' }
+        $descendants[$id] = $birth; $added++
+      }
+    }
+  } while ($added)
+  return @($Processes | Where-Object { $descendants.ContainsKey([long]$_.ProcessId) -and $_.Name -notmatch '^(?i)(powershell|pwsh|cmd|conhost|sleep)(\.exe)?$' }).Count -gt 0
+}
+
 function Get-SessionHealth($Heartbeat) {
   if (-not $Heartbeat.session_id -or -not (Has $Heartbeat 'running')) { throw 'heartbeat unavailable' }
   $active = OcApi '/api/session/active'
@@ -50,7 +116,19 @@ function Get-SessionHealth($Heartbeat) {
   }
   $activeIds = @($active.data.PSObject.Properties | Where-Object { $_.Value.type -ne 'idle' } | ForEach-Object { $_.Name })
   $sessions = @{}
-  $running = @($Heartbeat.running | ForEach-Object { if ([string]$_ -match '^(?:merge:|#)?(\d+)$') { $matches[1] } else { throw 'running ticket identity unavailable' } })
+  $running = @()
+  $runningEntries = @(foreach ($entry in @($Heartbeat.running)) {
+    if ($entry -is [string]) { $entry.Split(',') | ForEach-Object { $_.Trim() } }
+    else { $entry }
+  })
+  for ($index = 0; $index -lt $runningEntries.Count; $index++) {
+    if ([string]$runningEntries[$index] -match '^(?:(?:merge:|review:|#)(\d+)|(\d+)[A-Za-z]*)$') {
+      $running += $matches[1] + $matches[2]
+    } else {
+      # Index the unknown entry without forwarding its untrusted text; keep scanning known identities.
+      [pscustomobject]@{ session = 'unknown'; ticket = 'unknown'; status = 'unknown'; pattern = "heartbeat-entry-$index"; age = 0 }
+    }
+  }
   $issueMap = Read-Json $MapPath
   if ((Test-Path -LiteralPath $MapPath) -and -not $issueMap) { throw 'issue map unavailable' }
   $searchTerms = @($running | ForEach-Object { '#' + $_ })
@@ -126,20 +204,11 @@ function Get-SessionHealth($Heartbeat) {
           $age = [Math]::Round(($NowUtc - [DateTimeOffset]::FromUnixTimeMilliseconds([long]$started).UtcDateTime).TotalMinutes, 1)
           $waitPattern = Get-WaitPattern $command
           if ($waitPattern -eq 'none' -and $age -gt 10) {
-            $processes = @(Get-CimInstance Win32_Process -ErrorAction Stop)
-            $rootIds = @()
-            if ($tool.state.metadata.pid) { $rootIds = @([long]$tool.state.metadata.pid) }
-            else {
-              $rootIds = @($processes | Where-Object { $_.CommandLine -and $_.CommandLine.Contains($command) } | ForEach-Object { [long]$_.ProcessId })
-            }
-            if (-not $rootIds.Count) { $status = 'unknown'; $pattern = 'process-identity'; break }
-            $descendantIds = @($rootIds)
-            do {
-              $children = @($processes | Where-Object { $descendantIds -contains $_.ParentProcessId -and $descendantIds -notcontains $_.ProcessId } | ForEach-Object { [long]$_.ProcessId })
-              $descendantIds += $children
-            } while ($children.Count)
-            $workers = @($processes | Where-Object { $descendantIds -contains $_.ProcessId -and $_.Name -notmatch '^(?i)(powershell|pwsh|cmd|conhost|sleep)(\.exe)?$' })
-            if (-not $workers.Count) { $waitPattern = 'no-live-worker' }
+            try {
+              $processes = @(Get-CimInstance Win32_Process -ErrorAction Stop)
+              $hasWorker = Test-LiveWorker $processes $tool $command ([long]$started)
+            } catch { $status = 'unknown'; $pattern = 'process-identity'; break }
+            if (-not $hasWorker) { $waitPattern = 'no-live-worker' }
           }
           if ($waitPattern -ne 'none') {
             $status = 'blocked-wait'; $pattern = $waitPattern

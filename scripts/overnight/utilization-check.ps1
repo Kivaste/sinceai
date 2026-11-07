@@ -22,7 +22,8 @@
   through send-to-orchestrator.ps1, regardless of CPU, cooldown, phase or GitHub availability.
   -CheckoutCheckOnly runs just this guard. -DryRun never sends or advances its snapshot.
   Session wait/idle guards then steer independently of utilization limits, including when checkout writes
-  were flagged. -SessionCheckOnly runs both guards without CPU/GitHub probes; unreadable API state is unknown.
+   were flagged. -SessionCheckOnly runs both guards without CPU/GitHub probes; unreadable API state is unknown.
+   -HeartbeatPath selects a read-only input independently of -StateDir (logs and output state).
 
 .EXAMPLE
   powershell -NoProfile -ExecutionPolicy Bypass -File scripts/overnight/utilization-check.ps1 -DryRun
@@ -43,6 +44,7 @@ param(
   [int]$BudgetSeconds = 90,
   [string]$MainCheckout = 'C:\Users\kivas\AI\sinceai-hackaton',
   [string]$StateDir,
+  [string]$HeartbeatPath,
   [string]$IssueMapPath,
   [switch]$CheckoutCheckOnly,
   [switch]$SessionCheckOnly,
@@ -54,7 +56,7 @@ if (-not $StateDir) { $StateDir = Join-Path $RepoRoot '.scratch\local-overnight'
 New-Item -ItemType Directory -Force -Path $StateDir | Out-Null
 $LogPath = Join-Path $StateDir 'utilization.log'
 $StatePath = Join-Path $StateDir 'utilization-state.json'
-$HbPath = Join-Path $StateDir 'heartbeat.json'
+$HbPath = if ($HeartbeatPath) { $HeartbeatPath } else { Join-Path $StateDir 'heartbeat.json' }
 $MapPath = if ($IssueMapPath) { $IssueMapPath } else { Join-Path $RepoRoot '.scratch\local-spec\issue-map.json' }
 $NowUtc = (Get-Date).ToUniversalTime()
 $Clock = [Diagnostics.Stopwatch]::StartNew()

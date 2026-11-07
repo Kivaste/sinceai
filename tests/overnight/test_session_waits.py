@@ -8,7 +8,7 @@ import pytest
 
 
 @pytest.mark.skipif(shutil.which("powershell.exe") is None, reason="Windows monitor")
-@pytest.mark.parametrize("case", ["idle", "wait", "long-waits", "workers", "discovery", "reports", "unknown", "scope", "unreadable", "mapped", "delivery", "pagination"])
+@pytest.mark.parametrize("case", ["idle", "wait", "long-waits", "workers", "discovery", "reports", "unknown", "scope", "unreadable", "mapped", "delivery", "pagination", "heartbeat-shapes", "heartbeat-unknown", "process-identity", "bounded-retry", "heartbeat-source"])
 def test_session_wait_monitor(case):
     root = Path(__file__).resolve().parents[2]
     result = subprocess.run(

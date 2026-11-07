@@ -1,5 +1,5 @@
 <# Real monitor CLI; only external API/process probes use hand-made synthetic fixtures. #>
-param([ValidateSet('idle', 'wait', 'long-waits', 'workers', 'discovery', 'reports', 'unknown', 'delivery', 'scope', 'unreadable', 'mapped', 'pagination')][string]$Case = 'idle')
+param([ValidateSet('idle', 'wait', 'long-waits', 'workers', 'discovery', 'reports', 'unknown', 'delivery', 'scope', 'unreadable', 'mapped', 'pagination', 'heartbeat-shapes', 'heartbeat-unknown', 'process-identity', 'bounded-retry', 'heartbeat-source')][string]$Case = 'idle')
 $ErrorActionPreference = 'Stop'
 $root = Join-Path $env:LOCALAPPDATA ('Temp\opencode\wait-test-' + [guid]::NewGuid().ToString('N'))
 $repo = Join-Path $root 'repo'; $state = Join-Path $root 'state'; $bin = Join-Path $root 'bin'
@@ -70,6 +70,62 @@ exit `$LASTEXITCODE
   Route '/api/session?archived=false&limit=100&search=12' @{ data = @(); cursor = @{ next = $null } }
   Route '/api/session/ses_idle/message?type=assistant&order=desc&limit=20' @{ data = @(@{ type = 'assistant'; time = @{ created = $now }; content = @(@{ type = 'text'; text = 'Waiting for the background run. SYNTHETIC_PRIVATE_TEXT' }) }); cursor = @{ next = $null } }
   [IO.File]::WriteAllText((Join-Path $root 'processes.json'), '[]')
+  if ($Case -eq 'heartbeat-source') {
+    # Rule: a live heartbeat can be read without putting monitor logs or snapshots beside it.
+    # Failure row: a planted default heartbeat must not override the explicitly selected source.
+    $source = Join-Path $root 'live-heartbeat.json'
+    [IO.File]::WriteAllText($source, '{"session_id":"ses_orchestrator","running":"125","phase":"done"}')
+    $before = [IO.File]::ReadAllText($source)
+    [IO.File]::WriteAllText((Join-Path $state 'heartbeat.json'), '{"running":["SYNTHETIC_PRIVATE_TICKET"]}')
+    $runner = Join-Path $root 'runner.ps1'
+    $script = [IO.File]::ReadAllText($runner).Replace("-IssueMapPath '$mapPath'", "-IssueMapPath '$mapPath' -HeartbeatPath '$source'")
+    [IO.File]::WriteAllText($runner, $script)
+    $explicit = Check
+    Assert ($explicit.code -eq 1 -and $explicit.output.Contains('session=ses_idle ticket=125 status=idle-without-report')) 'explicit heartbeat source must win over a planted default'
+    Assert ([IO.File]::ReadAllText($source) -ceq $before) 'heartbeat input must remain unchanged'
+    Assert (-not (Test-Path (Join-Path $root 'utilization.log'))) 'monitor log must stay in StateDir, not beside the heartbeat'
+    Write-Output 'PASS heartbeat-source: explicit input read unchanged; output stays in separate state directory'
+    exit 0
+  }
+  if ($Case -eq 'heartbeat-unknown') {
+    # Rule: an unrecognized running entry is unknown only for that entry, not for every session.
+    # Failure row: invalid entry beside valid identities -> known healthy and idle sessions both lost.
+    [IO.File]::WriteAllText((Join-Path $state 'heartbeat.json'), '{"session_id":"ses_orchestrator","running":["125r","SYNTHETIC_PRIVATE_TICKET","#24"],"phase":"done"}')
+    Route '/api/session/ses_idle/message?type=assistant&order=desc&limit=20' @{ data = @(@{ type = 'assistant'; content = @(@{ type = 'text'; text = '## Done-report' }) }); cursor = @{ next = $null } }
+    Route '/api/session?archived=false&limit=100&search=%2324' @{ data = @(@{ id = 'ses_other'; parentID = 'ses_orchestrator'; title = 'Fix #24' }); cursor = @{ next = $null } }
+    Route '/api/session/ses_other/message?type=assistant&order=desc&limit=20' @{ data = @(@{ type = 'assistant'; content = @(@{ type = 'text'; text = 'Waiting. SYNTHETIC_PRIVATE_TEXT' }) }); cursor = @{ next = $null } }
+    $partial = Check
+    Assert ($partial.code -eq 2 -and $partial.output.Contains('session=unknown ticket=unknown status=unknown pattern=heartbeat-entry-1')) 'unrecognized entry must retain a content-free indexed unknown result'
+    Assert ($partial.output.Contains('session=ses_idle ticket=125 status=healthy')) 'unrecognized entry must not hide a healthy session'
+    Assert ($partial.output.Contains('session=ses_other ticket=24 status=idle-without-report')) 'unrecognized entry must not hide a flagged session'
+    Assert (-not $partial.output.Contains('SYNTHETIC_PRIVATE')) 'unrecognized entry and assistant text must remain local'
+    Write-Output 'PASS heartbeat-unknown: one indexed unknown preserves healthy and flagged session results'
+    exit 0
+  }
+  if ($Case -eq 'heartbeat-shapes') {
+    # Rule: known heartbeat forms resolve independently to their numeric issue identities.
+    # Failure rows: letter suffix / review prefix -> whole scan unknown instead of healthy sessions.
+    [IO.File]::WriteAllText((Join-Path $state 'heartbeat.json'), '{"session_id":"ses_orchestrator","running":["125r","32r","review:120","merge:7",24,"#8","30, 32,106"],"phase":"done"}')
+    foreach ($ticket in @('125', '32', '120', '7', '24', '8', '30', '106')) {
+      $session = @{ id = "ses_ticket$ticket"; parentID = 'ses_orchestrator'; title = "Implement #$ticket" }
+      Route ('/api/session?archived=false&limit=100&search=' + [Uri]::EscapeDataString("#$ticket")) @{ data = @($session); cursor = @{ next = $null } }
+      Route "/api/session/ses_ticket$ticket/message?type=assistant&order=desc&limit=20" @{ data = @(@{ type = 'assistant'; content = @(@{ type = 'text'; text = '## Done-report' }) }); cursor = @{ next = $null } }
+    }
+    $mixed = Check
+    Assert ($mixed.code -eq 0) 'known mixed heartbeat identities must not collapse the scan to unknown'
+    foreach ($ticket in @('125', '32', '120', '7', '24', '8', '30', '106')) {
+      Assert ($mixed.output.Contains("session=ses_ticket$ticket ticket=$ticket status=healthy")) "known heartbeat form for issue $ticket must be classified"
+    }
+    Assert (-not $mixed.output.Contains('status=unknown')) 'known heartbeat identities must not produce unknown entries'
+    [IO.File]::WriteAllText((Join-Path $state 'heartbeat.json'), '{"session_id":"ses_orchestrator","running":"30,32,106","phase":"done"}')
+    $plain = Check
+    Assert ($plain.code -eq 0) 'plain comma-separated heartbeat must classify known sessions'
+    foreach ($ticket in @('30', '32', '106')) {
+      Assert ($plain.output.Contains("session=ses_ticket$ticket ticket=$ticket status=healthy")) "plain heartbeat issue $ticket must be classified"
+    }
+    Write-Output 'PASS heartbeat-shapes: comma-separated scalar, lists, numbers, suffix, review, merge and hash forms classified'
+    exit 0
+  }
   if ($Case -eq 'pagination') {
     # Rule: a text-free first page is not completion; follow the cursor to the newest text.
     # Failure row: idle session's report lies behind tool-only assistant messages -> unknown.
@@ -179,6 +235,33 @@ exit `$LASTEXITCODE
     Write-Output 'PASS unknown: malformed and failed API probes fail closed'
     exit 0
   }
+  if ($Case -eq 'bounded-retry') {
+    # Rule: short statically bounded retries are not unbounded polling; enclosing infinite loops still are.
+    # Failure rows: finite for/foreach retry containing sleep or Test-Path -> false blocked-wait.
+    $failures = 0
+    foreach ($command in @(
+      'for($i=0;$i -lt 20;$i++){try { Add-Content SYNTHETIC_PRIVATE_FILE ok; break } catch { Start-Sleep -Milliseconds 50 }}',
+      'foreach($attempt in 1..3){if(Test-Path SYNTHETIC_PRIVATE_FILE){break}; Start-Sleep -Seconds 3}'
+    )) {
+      Tool $command 30
+      $bounded = Check
+      if ($bounded.code -ne 0 -or -not $bounded.output.Contains('status=healthy')) {
+        Write-Output 'FAIL bounded-retry/finite'; $failures++
+      }
+    }
+    Assert ($failures -eq 0) "$failures bounded retry loops were falsely flagged"
+    foreach ($command in @(
+      'while($true){for($i=0;$i -lt 3;$i++){Start-Sleep 5}}',
+      'for($i=0;$i -lt 30;$i++){Start-Sleep 5}',
+      'for($i=0;$i -lt 3;$i++){$i=0; Start-Sleep 5}'
+    )) {
+      Tool $command 30
+      $unbounded = Check
+      Assert ($unbounded.code -eq 1 -and $unbounded.output.Contains('status=blocked-wait')) 'unbounded, long or counter-mutating retries must remain flagged'
+    }
+    Write-Output 'PASS bounded-retry: finite short retries healthy; enclosing waits, long and counter-mutating loops flagged'
+    exit 0
+  }
   if ($Case -eq 'long-waits') {
     # Rule: explicit long waits are flagged immediately, not only after ten minutes.
     # Failure rows: sleep >120 s / waitany >2 min / process poll / missing target -> healthy.
@@ -208,9 +291,14 @@ exit `$LASTEXITCODE
     # Rule: >10-minute shell with no live worker is flagged; a live pytest descendant is healthy.
     # Failure row: ordinary command with a lost worker -> silently healthy.
     Tool 'python -m pytest SYNTHETIC_PRIVATE_TEST'
+    $created = [DateTimeOffset]::FromUnixTimeMilliseconds($now - 720000).ToString('o')
+    $rootProcess = @{ ProcessId = 44000; ParentProcessId = 1; Name = 'powershell.exe'; CreationDate = $created }
+    [IO.File]::WriteAllText((Join-Path $root 'processes.json'), (ConvertTo-Json -InputObject @($rootProcess)))
     $lost = Check
     Assert ($lost.code -eq 1 -and $lost.output.Contains('pattern=no-live-worker')) '12-minute shell with no worker was not flagged'
-    [IO.File]::WriteAllText((Join-Path $root 'processes.json'), '[{"ProcessId":44000,"ParentProcessId":1,"Name":"powershell.exe"},{"ProcessId":44001,"ParentProcessId":44000,"Name":"python.exe"},{"ProcessId":44002,"ParentProcessId":44001,"Name":"python.exe"}]')
+    $child = @{ ProcessId = 44001; ParentProcessId = 44000; Name = 'python.exe'; CreationDate = [DateTimeOffset]::FromUnixTimeMilliseconds($now - 710000).ToString('o') }
+    $grandchild = @{ ProcessId = 44002; ParentProcessId = 44001; Name = 'python.exe'; CreationDate = [DateTimeOffset]::FromUnixTimeMilliseconds($now - 700000).ToString('o') }
+    [IO.File]::WriteAllText((Join-Path $root 'processes.json'), (ConvertTo-Json -InputObject @($rootProcess, $child, $grandchild)))
     $healthy = Check
     Write-Output $healthy.output
     Assert ($healthy.code -eq 0 -and $healthy.output.Contains('session=ses_idle ticket=125 status=healthy')) '12-minute pytest with live descendants must remain healthy'
@@ -221,6 +309,34 @@ exit `$LASTEXITCODE
     $milliseconds = Check
     Assert ($milliseconds.code -eq 0) 'millisecond values must not be interpreted as seconds'
     Write-Output 'PASS workers: lost worker flagged; live pytest descendants and bounded sleep healthy'
+    exit 0
+  }
+  if ($Case -eq 'process-identity') {
+    # Rule: PID plus creation time identifies the shell and every parent-child edge.
+    # Failure rows: reused root PID / missing birth time / stale child PID edge -> healthy from unrelated workers.
+    Tool 'python -m pytest SYNTHETIC_PRIVATE_TEST'
+    $started = [DateTimeOffset]::FromUnixTimeMilliseconds($now - 720000).ToString('o')
+    $recent = [DateTimeOffset]::FromUnixTimeMilliseconds($now - 60000).ToString('o')
+    $older = [DateTimeOffset]::FromUnixTimeMilliseconds($now - 800000).ToString('o')
+    $failures = 0
+    foreach ($row in @(
+      @{ name = 'reused-root'; rootTime = $recent; childTime = $recent },
+      @{ name = 'missing-root-time'; rootTime = $null; childTime = $recent },
+      @{ name = 'stale-child-edge'; rootTime = $started; childTime = $older },
+      @{ name = 'missing-child-time'; rootTime = $started; childTime = $null }
+    )) {
+      $tree = @(
+        @{ ProcessId = 44000; ParentProcessId = 1; Name = 'powershell.exe'; CreationDate = $row.rootTime },
+        @{ ProcessId = 44001; ParentProcessId = 44000; Name = 'python.exe'; CreationDate = $row.childTime }
+      )
+      [IO.File]::WriteAllText((Join-Path $root 'processes.json'), (ConvertTo-Json -InputObject $tree))
+      $identity = Check
+      if ($identity.code -ne 2 -or -not $identity.output.Contains('status=unknown pattern=process-identity')) {
+        Write-Output ('FAIL process-identity/' + $row.name); $failures++
+      }
+    }
+    Assert ($failures -eq 0) "$failures unproven process identities were not unknown"
+    Write-Output 'PASS process-identity: reused PIDs and missing or stale creation times remain unknown'
     exit 0
   }
   if ($Case -eq 'wait') {
