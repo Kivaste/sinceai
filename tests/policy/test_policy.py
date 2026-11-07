@@ -501,3 +501,52 @@ def test_policy_subrecords_are_closed():
     _bad("HEALTH-S1", residual_notes=({"id": "x"},))
     c = get_policy("CS-S1")
     _bad("CS-S1", privacy_targets=(dict(c.privacy_targets[0], extra=1),) + c.privacy_targets[1:])
+
+# ---- follow-up #48 ----------------------------------------------------------
+
+
+def test_cs_timestamp_floor_target_uses_the_canonical_rung():
+    from pets_release.ladders import LADDERS
+    t = next(t for t in get_policy("CS-S1").privacy_targets if t["kind"] == "timestamp_floor")
+    assert t["rung"] == "ts.hour" and t["rung"] in LADDERS["timestamp"]
+    c = get_policy("CS-S1")
+    _bad("CS-S1", privacy_targets=(dict(t, rung="hour"),) + tuple(x for x in c.privacy_targets if x is not t))
+
+
+def test_joint_qi_moves_are_validated_against_ladders_and_floors():
+    import dataclasses
+
+    from pets_release.policy import PolicyError
+
+    h = get_policy("HEALTH-S1")
+    dob = {"table": "ed_visits", "column": "date_of_birth"}
+    muni = {"table": "ed_visits", "column": "municipality"}
+    ok = (dict(dob, rung="age.band10"), dict(muni, rung="geo.topn"))
+    dataclasses.replace(h, joint_qi_moves=(ok,))
+    _bad("HEALTH-S1", joint_qi_moves=((dict(dob, rung="geo.topn"), dict(muni, rung="geo.topn")),))  # wrong ladder
+    _bad("HEALTH-S1", joint_qi_moves=((dict(dob, rung="ts.hour"), dict(muni, rung="geo.topn")),))
+    from pets_release.policy.model import FieldFloor
+    floors = {**h.floors, ("ed_visits", "date_of_birth"): FieldFloor("age", "age.band10", "x")}
+    with pytest.raises(PolicyError):  # age.band5 is finer than a band10 floor
+        dataclasses.replace(h, floors=floors, joint_qi_moves=((dict(dob, rung="age.band5"), dict(muni, rung="geo.topn")),))
+    _bad("HEALTH-S1", joint_qi_moves=((dict(dob, rung="age.band10"), dict(dob, rung="age.band10")),))  # duplicate column
+    _bad("HEALTH-S1", joint_qi_moves=((dict(dob, rung="age.band10"),
+                                       {"table": "ed_visits", "column": "triage", "rung": "keep"}),))  # not a QI
+
+
+def test_alt_floor_condition_is_machine_checked_and_exported():
+    h = get_policy("HEALTH-S1")
+    j = h.to_json()["altFloorConditions"]
+    assert j == [{"table": "ed_visits", "column": "patient_hetu", "check": "H-U6", "outcome": "fail_without"}]
+    key = ("ed_visits", "patient_hetu")
+    _bad("HEALTH-S1", alt_floor_conditions={key: {"check": "H-U99", "outcome": "fail_without"}})
+    _bad("HEALTH-S1", alt_floor_conditions={key: {"check": "H-U6", "outcome": "fail_without", "x": 1}})
+    _bad("HEALTH-S1", alt_floor_conditions={("ed_visits", "triage"): {"check": "H-U6", "outcome": "fail_without"}})
+
+
+def test_health_residual_notes_record_sex_and_the_renamed_age_band_blind_spot():
+    ids = {n["id"]: n for n in get_policy("HEALTH-S1").residual_notes}
+    assert ids["sex-withheld"]["status"] == "open"
+    assert ids["renamed-age-band-scorecard-blind-spot"]["status"] == "open"
+    sex = next(q for q in get_policy("HEALTH-S1").qi if q["column"] == "sex")
+    assert "note" in sex
