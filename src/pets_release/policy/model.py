@@ -40,6 +40,7 @@ _MOVE = {"table", "column", "rung"}
 _SUPPRESSION = {"method", "unit", "k", "max_share", "order", "then"}
 _NOTE = {"id", "status", "note"}
 _NOTE_STATUS = {"not_applicable", "open"}
+_ATTR_LIFT = {"max_lift", "attributes", "attacker", "reason"}  # D64 (#157)
 
 
 def _exact(rec, keys, what, optional=frozenset()):
@@ -81,6 +82,9 @@ class ScenarioPolicy:
     # Adopted only when k measured at `from` needs more suppression than the budget and `check` still passes
     # strictly at `to`; the release records the measured scores under the check's sacrifice entry.
     rung_sacrifices: tuple[dict, ...] = ()
+    # D64 (#157): {max_lift, attributes: [{table, column}], attacker, reason}. A plan is feasible only if every
+    # released bounded attribute's attribute-inference lift (minimiser.attr_lift) is at or under max_lift.
+    attribute_lift: dict | None = None
 
     def __post_init__(self):
         cols = set(self.floors)
@@ -163,6 +167,20 @@ class ScenarioPolicy:
             _exact(n, _NOTE, "residual note")
             if n["status"] not in _NOTE_STATUS:
                 raise PolicyError("residual note status invalid")
+        if self.attribute_lift is not None:
+            al = self.attribute_lift
+            _exact(al, _ATTR_LIFT, "attribute lift bound")
+            ml = al["max_lift"]
+            if not isinstance(ml, (int, float)) or isinstance(ml, bool) or not 1.0 <= ml < float("inf"):
+                raise PolicyError("attribute lift max_lift must be a finite number >= 1")
+            if not isinstance(al["attributes"], list) or not al["attributes"]:
+                raise PolicyError("attribute lift bound needs attributes")
+            for a in al["attributes"]:
+                _exact(a, {"table", "column"}, "attribute lift attribute")
+                if (a["table"], a["column"]) not in cols:
+                    raise PolicyError("attribute lift names an unknown column")
+            if not all(isinstance(al[k], str) and al[k].strip() for k in ("attacker", "reason")):
+                raise PolicyError("attribute lift needs an attacker and a reason")
         if self.suppression is not None:
             _exact(self.suppression, _SUPPRESSION, "suppression")
             if not 0 < self.suppression["max_share"] <= 1:
@@ -192,6 +210,9 @@ class ScenarioPolicy:
             ],
             "residualNotes": [dict(n) for n in self.residual_notes],
             "suppression": dict(self.suppression) if self.suppression else None,
+            **({"attributeLift": {**self.attribute_lift,
+                                  "attributes": [dict(a) for a in self.attribute_lift["attributes"]]}}
+               if self.attribute_lift is not None else {}),
             "linked": [[{"table": t, "column": c} for t, c in g] for g in self.linked],
             "paramMinimums": [
                 {"table": t, "column": c, **v} for (t, c), v in sorted(self.param_minimums.items())

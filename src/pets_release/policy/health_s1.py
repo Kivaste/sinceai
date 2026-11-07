@@ -73,6 +73,22 @@ _ROWS += withheld_table("published_weekly_stats", [
 ], "table withheld: " + _NOTE + "; unsuppressed, a differencing aid")
 
 FLOORS, DIRECT, _PLAN = build(_ROWS)
+
+# D64 (#157): bounded attribute-inference lift. Content-free; stated in the manifest via the residual note below.
+MAX_LIFT = 2.0
+LOS_BIN_MIN = 30
+LIFT_ATTACKER = ("the #139 red-team attribute-inference attacker: knows a released visit's quasi-identifiers and "
+                 "guesses the most common released value among the visits that match them; compared with always "
+                 "guessing the release's most common value (base rate); seeded sample of at most 3000 targets")
+LIFT_REASON = (f"lift = attacker accuracy / base-rate accuracy, at most {MAX_LIFT} for icd10_primary and "
+               f"los_minutes: knowing a visit's age band, municipality and arrival hour may at most double the "
+               f"chance of guessing its diagnosis or stay. Tighter is not reachable with the purpose floors kept: "
+               f"icd10 at chapter level fails H-U4 (measured on the kit, #157), so it stays at 3 characters; "
+               f"los_minutes is binned at least {LOS_BIN_MIN} minutes wide (H-U2 still at or above 0.9). "
+               f"A plan over the bound is refused, never relaxed")
+ATTRIBUTE_LIFT = {"max_lift": MAX_LIFT, "attacker": LIFT_ATTACKER, "reason": LIFT_REASON,
+                  "attributes": [{"table": "ed_visits", "column": "icd10_primary"},
+                                 {"table": "ed_visits", "column": "los_minutes"}]}
 # clinical_notes.author_name is a staff direct identifier (floor withheld)
 DIRECT = tuple(sorted(set(DIRECT) | {("clinical_notes", "author_name")}))
 
@@ -97,6 +113,12 @@ POLICY = ScenarioPolicy(
                  "suppression / suppression share needed, cap 0.10): full 0.536 / 0.663, CRP vs other 0.372 / 0.507, "
                  "withheld 0.043 / 0.099. The search withholds it and the cap holds, so the justified non-QI "
                  "fallback is not taken; H-U7 0.983 either way (it selects CRP by test_code)"},
+        {"id": "attribute-lift-bound", "status": "open",
+         "note": f"D64: attribute-inference lift (attacker accuracy / base-rate accuracy) at most {MAX_LIFT} for "
+                 f"icd10_primary and los_minutes, enforced by the search on the released visits (search log, final "
+                 f"step); a plan over it is refused. icd10 stays at 3 characters (chapter level fails H-U4); "
+                 f"los_minutes is binned at least {LOS_BIN_MIN} minutes wide. Residual against the stated attacker: "
+                 f"each attribute-inference-redteam-<column> entry over its -baseline entry"},
         {"id": "lab-test-code-identity", "status": "open",
          "note": "test_code is released exact for H-U7 and is not a detector QI, yet carries the same test identity "
                  "as test_name: a person's set of lab tests could single them out to someone who knows their test "
@@ -154,7 +176,10 @@ POLICY = ScenarioPolicy(
     linked=((("ed_visits", "visit_id"), ("lab_results", "visit_id")),),
     alt_floors={("ed_visits", "patient_hetu"): "id.pseudonym"},
     alt_floor_conditions={("ed_visits", "patient_hetu"): {"check": "H-U6", "outcome": "fail_without"}},
-    param_minimums={("ed_visits", "municipality"): {"rung": "geo.topn", "param": "n", "min": 8}},
+    param_minimums={("ed_visits", "municipality"): {"rung": "geo.topn", "param": "n", "min": 8},
+                    # D64 (#157): 30-minute stay bands, the width that brings the los_minutes lift under the bound
+                    ("ed_visits", "los_minutes"): {"rung": "num.bin", "param": "width", "min": LOS_BIN_MIN}},
+    attribute_lift=ATTRIBUTE_LIFT,
 )
 
 
