@@ -32,8 +32,8 @@ ALLOWED_SKIP_REASONS = (
     "runs-the-whole-test-suite-recursively",
     "measure-wire-needs-full-kit-scorecards",
     "submission-needs-ticket-30",
-    # the CS-S1 release needs ticket 23 (turn_id check); guarded below
-    "cs-s1-run-needs-ticket-23",
+    # D46: CS-S1 releases are future work, not an implicit passing demo step.
+    "cs-s1-deferred-d46",
 )
 SUBCOMMANDS = ("run", "verify", "detect", "dashboard", "submission")
 MARKER = re.compile(r"<!--\s*docs-test:\s*(run|skip|pending)\b([^>]*?)-->")
@@ -129,7 +129,7 @@ def test_measured_path_documents_module_cli_and_names_full_kit_dependency():
 
 
 @pytest.mark.parametrize("command,reason", [
-    ("run --scenario CS-S1", "cs-s1-run-needs-ticket-23"),
+    ("run --scenario CS-S1", "cs-s1-deferred-d46"),
     ("submission --out", "submission-needs-ticket-30"),
 ])
 def test_unmerged_commands_have_explicit_named_skips(command, reason):
@@ -242,10 +242,6 @@ def test_block(block, tmp_path):
     conf = _load_conftest()
     first = block["body"].strip().splitlines()[0]
     if block["kind"] == "skip":
-        if block["arg"] == "reason=cs-s1-run-needs-ticket-23":
-            assert not (ROOT / "src" / "pets_release" / "checks" / "turn_id").exists(), (
-                "ticket 23 has landed (checks/turn_id): promote the CS-S1 run block to run"
-            )
         _transcript(f"SKIP block {block['n']} ({block['arg']}): {first}")
         pytest.skip(f"named reason: {block['arg']}")
     if block["kind"] == "pending":

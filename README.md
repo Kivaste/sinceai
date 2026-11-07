@@ -54,7 +54,9 @@ Exit codes: `0` success; `1` refusal or verify failure; `2` usage error or unkno
 
 ## Demo
 
-The demo has three parts: HEALTH-S1 (ED visits to a university research group) in depth, CS-S1 (contact-centre transcripts to an LLM analytics vendor) for free text, and live detection on the `unseen` export.
+The supported release demo is HEALTH-S1 (ED visits to a university research group),
+with live detection on the `unseen` export. CS-S1 releases are not supported in
+this version (D46); they are future work, not a runnable release demo.
 
 ### 1. Live detection on `unseen`
 
@@ -125,15 +127,18 @@ tables remain local under `<out>.measure/`; row maps stay outside the release.
 Use fresh paths: an existing release or measure scratch folder is an error.
 The measured release supports the same `verify` and `verify --full` commands below.
 
-#### CS-S1 (planned, not supported by this merged build)
+#### CS-S1: unsupported in this version (D46)
 
-The current `run` pipeline accepts only HEALTH-S1. This CS-S1 command is a
-planned demo step, not a working release command: the CS-S1 run integration
-(#24) still needs the synthetic `turn_id` check (#23); its search is follow-up
-#96. The command ledger reports the named skip below, not a successful run.
-The measured wrapper does not bypass this scenario restriction.
+CS-S1 is dropped from this submission's release scope and deferred to future
+work (D46). The strict gate refuses the CS-S1 release rather than weakening
+privacy checks to publish it; builds without CS-S1 integration reject the scenario
+earlier as unsupported. This is an honest limitation, not a successful release.
+The measured wrapper does not bypass it. The command below is deliberately
+skipped, not an instruction to run a supported release. CS evaluation exports
+still ship through the submission packager under D37; they are not a gated CS-S1
+release.
 
-<!-- docs-test: skip reason=cs-s1-run-needs-ticket-23 -->
+<!-- docs-test: skip reason=cs-s1-deferred-d46 -->
 ```powershell
 .\.venv\Scripts\pets-release.exe run --scenario CS-S1 --out ..\sinceai-out\cs-s1 --created 2026-11-07T08:00:00Z --kit "$env:PETS_KIT"
 ```
