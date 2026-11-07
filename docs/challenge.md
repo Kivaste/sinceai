@@ -79,3 +79,19 @@ Optional: demo URL, pitch deck, up to 2 supporting documents.
 ### Optional organiser checks
 
 On request, put outputs in `pets_submission/` in our repo. The organisers can then run: (1) **stronger hidden attackers** for each domain (data broker, HR knowledge, colleagues, merchant, municipal insiders); (2) scoring of our `unseen` labels against private labels; (3) scoring of customer-service redaction on a hidden eval split.
+
+## Organiser clarifications (public answers, Sat 7 Nov)
+
+These are the organisers' answers to all teams, summarised. D40 records what they change for us.
+
+- **Privacy technology vs practical value:** both count. Show what is protected, why the chosen methods fit, how useful the data stays, and how the results are measured.
+- **One scenario or several:** neither is required, and covering more gives no automatic advantage. Judging uses the four published criteria (technical implementation, innovation, impact, presentation), not scenario count. Focus on quality and effectiveness.
+- **Conflicting privacy and utility targets:** identifying and explaining the trade-offs is part of the challenge. Explain the decisions, show their impact with measurements, and be transparent about which targets are met, which aren't, and what limits remain. "The goal is not to claim perfect protection, but to demonstrate a well-reasoned and measurable approach."
+- **Cloud-hosted or on-premise demo:** both are fine. Use synthetic, public or otherwise authorised data and follow sound security practice.
+- **What every team must show:**
+  1. identified data types and privacy risks;
+  2. the PETs selected and the reasoning behind them;
+  3. the transformed or protected output;
+  4. measurable privacy and utility results;
+  5. a clearly defined data-sharing scenario and its remaining limitations.
+- **pets-eval:** its measurements support the demonstration but don't replace the official judging.
