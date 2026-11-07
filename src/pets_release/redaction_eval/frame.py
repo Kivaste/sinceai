@@ -11,6 +11,7 @@ class Frame:
     texts: dict  # record_id -> untouched text
     gold: dict  # record_id -> list of {start,end,label}; [] when gold-absent
     conversation_of: dict = field(default_factory=dict)  # record_id -> conversation id
+    gold_dropped: dict = field(default_factory=lambda: {"ids": 0, "spans": 0})  # gold for ids not in texts
 
 
 def build_frame(turns, conversations, gold, split: str = "train") -> Frame:
@@ -50,6 +51,12 @@ def load_cs_frame(kit_root) -> Frame:
     return build_frame(turns.to_dict("records"), convs.to_dict("records"), gold)
 
 
+def count_dropped_gold(gold: dict, texts: dict) -> dict:
+    """Aggregate count of gold ids (and their spans) that have no text and are therefore dropped."""
+    gone = [k for k in gold if k not in texts]
+    return {"ids": len(gone), "spans": sum(len(gold[k]) for k in gone)}
+
+
 def load_clinical_notes_frame(kit_root) -> Frame:
     """Zero-shot frame: every health clinical note (no train/dev role)."""
     import pandas as pd
@@ -62,6 +69,7 @@ def load_clinical_notes_frame(kit_root) -> Frame:
         texts=texts,
         gold={k: gold.get(k, []) for k in texts},
         conversation_of={k: k for k in texts},
+        gold_dropped=count_dropped_gold(gold, texts),
     )
 
 
