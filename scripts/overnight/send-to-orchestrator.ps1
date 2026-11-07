@@ -2,13 +2,17 @@
 .SYNOPSIS
   Queue a message to the tracked orchestrator session (or -SessionId) via the OpenCode API.
   The message is read from a UTF-8 file so Windows PowerShell 5.1 never mangles JSON quoting.
-  Delivery is "queue": the running turn is not interrupted; the message is handled next.
+  Delivery defaults to "steer": the message is injected into the running turn at the next
+  step boundary (the turn is not aborted). "queue" waits until the turn ends. An orchestrator
+  that keeps working never ends its turn, so queued messages were never delivered
+  (Sat 12:01-12:33: 10 messages stuck in its inbox). Use -Delivery queue only for an idle session.
 .EXAMPLE
   powershell -NoProfile -File scripts/overnight/send-to-orchestrator.ps1 -MessageFile $env:TEMP\msg.md
 #>
 param(
   [Parameter(Mandatory = $true)][string]$MessageFile,
   [string]$SessionId,
+  [ValidateSet('steer', 'queue')][string]$Delivery = 'steer',
   [switch]$DryRun
 )
 $ErrorActionPreference = 'Stop'
@@ -35,9 +39,9 @@ if (-not $SessionId) {
   if (-not $SessionId) { Write-Error 'heartbeat has no session_id'; exit 2 }
 }
 $text = [IO.File]::ReadAllText((Resolve-Path $MessageFile).Path, [Text.Encoding]::UTF8)
-$body = @{ text = $text; delivery = 'queue' } | ConvertTo-Json -Compress
+$body = @{ text = $text; delivery = $Delivery } | ConvertTo-Json -Compress
 $argv = @('api', 'post', "/api/session/$SessionId/prompt", '--data', $body)
-if ($DryRun) { "would send $($text.Length) chars to $SessionId"; exit 0 }
+if ($DryRun) { "would send $($text.Length) chars to $SessionId (delivery=$Delivery)"; exit 0 }
 
 $psi = New-Object System.Diagnostics.ProcessStartInfo
 $psi.FileName = (Get-Command opencode).Source
