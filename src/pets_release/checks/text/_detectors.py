@@ -297,26 +297,40 @@ def plates(text):
 
 
 # ---------------------------------------------------------------- SECRET
+#
+# One table for every secret-type cue (general-knowledge fi/sv/en). After the cue and up to
+# four filler words, the value is collapsed from one token plus any following digit groups
+# or single characters ("4 8 2 1", "k 4 x 9 q", "kissa 1 2 3"); spoken digits arrive already
+# converted by the digit view. The hit spans cue + value, so a value in the next turn is
+# caught by the N-turn windows. Kinds:
+#   digits   - collapsed value all digits, length lo..hi
+#   code     - alphanumeric, contains a digit, length lo..hi
+#   secret   - length >= lo and secret-like (digit, inner capital or symbol), or >= 4 spelled chars
 
-_SECRET_CUE = re.compile(
-    r"(?i)\b(?:password|passwd|pwd|passcode|salasana\w*|tunnussana\w*|lösenord\w*|"
-    r"api[ _-]?(?:key|avain\w*|nyckel\w*)|token|"
-    r"access\s+code|security\s+code|verification\s+code|vahvistuskoodi\w*|turvakoodi\w*|"
-    r"kertakäyttö\w*|engångskod\w*|säkerhetskod\w*|otp)\b"
-    r"(?:[ \t]*(?:[:=]|is|was|on|oli|är|var|it's|its))*[ \t]*([^\s¦,;]{4,})"
-)
-_FILLER = r"(?:[ \t]*(?:[:=#]|is|was|on|oli|är|var|it's|its|my|minun|min|mitt))*[ \t]*"
-_DIGIT_SEQ = r"(\d(?:[ \t-]?\d)*)(?![ \t-]?\d)"
-# Short numeric secrets with cue-appropriate lengths: (cue regex, min digits, max digits).
-# Spoken digits arrive already converted by the digit view ("neljä kolme" -> "4 3").
-_SHORT_SECRETS = [
-    (re.compile(
-        r"(?i)\b(?:cvv2?|cvc2?|cvn|card\s+verification\s+(?:code|value)|turvakoodi\w*|"
-        r"turvanumero\w*|säkerhetskod\w*|security\s+code)\b" + _FILLER + _DIGIT_SEQ), 3, 4),
-    (re.compile(
-        r"(?i)\b(?:pin(?:[ -]?(?:koodi\w*|kod\w*|code|number|numero\w*|nummer\w*))?|"
-        r"tunnuslu(?:ku|vu)\w*|personal\s+identification\s+number)\b" + _FILLER + _DIGIT_SEQ), 4, 8),
+_CUE_TABLE = [
+    ("digits", 3, 4,
+     r"cvv2?|cvc2?|cvn|card\s+verification\s+(?:code|value)|turvakoodi\w*|turvanumero\w*|"
+     r"säkerhetskod\w*|security\s+code"),
+    ("digits", 4, 8,
+     r"pin(?:[ -]?(?:koodi\w*|kod\w*|code|number|numero\w*|nummer\w*))?|pinkod\w*|"
+     r"tunnuslu(?:ku|vu)\w*|personal\s+identification\s+number"),
+    ("code", 4, 10,
+     r"otp|one[\s-]?time\s+(?:code|password|passcode|pin)|verification\s+code|"
+     r"confirmation\s+code|auth(?:entication)?\s+code|sms\s+code|login\s+code|access\s+code|"
+     r"vahvistuskoodi\w*|varmennuskoodi\w*|kertakäyttö(?:koodi|salasana)\w*|"
+     r"tekstiviestikoodi\w*|engångs(?:kod|lösenord)\w*|verifieringskod\w*|bekräftelsekod\w*"),
+    ("secret", 4, 128,
+     r"password|passwd|pwd|passcode|passphrase|salasana\w*|tunnussana\w*|lösenord\w*|"
+     r"api[ _-]?(?:key|avain\w*|nyckel\w*)|token|secret\s+key"),
 ]
+_CUES = [(kind, lo, hi, re.compile(r"(?i)(?<![\w-])(?:" + rx + r")(?![\w])")) for kind, lo, hi, rx in _CUE_TABLE]
+_FILLERS = {
+    "is", "was", "on", "oli", "är", "var", "it's", "its", "my", "minun", "min", "mitt", "the",
+    "your", "now", "nyt", "nu", "code", "koodi", "kod", "number", "numero", "nummer", ":", "=",
+    "#", "-",
+}
+_VTOK = re.compile(r"[ \t]*([^\s\u00a6,;]+)")
+_TRAIL = ".!?)\"'"
 _SECRET_PATTERNS = re.compile(
     r"\bsk-[A-Za-z0-9_-]{16,}|\bAKIA[0-9A-Z]{16}\b|\bgh[pousr]_[A-Za-z0-9]{30,}|"
     r"\bxox[abprs]-[A-Za-z0-9-]{10,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|"
@@ -325,28 +339,67 @@ _SECRET_PATTERNS = re.compile(
 
 
 def _secret_like(tok: str) -> bool:
-    tok = tok.rstrip(".!?)\"'")
-    if len(tok) < 4:
-        return False
     has_digit = any(c.isdigit() for c in tok)
     mixed = any(c.isupper() for c in tok[1:]) and any(c.islower() for c in tok)
     symbol = any(not c.isalnum() for c in tok)
     return has_digit or mixed or symbol
 
 
+def _cue_value(text, pos):
+    """(collapsed value, end offset, token count, all single chars) after a cue, or None."""
+    fillers = 0
+    while True:
+        m = _VTOK.match(text, pos)
+        if not m:
+            return None
+        tok = m.group(1).rstrip(_TRAIL).lstrip(":=#")
+        if (not tok or tok.lower() in _FILLERS) and fillers < 4:
+            pos, fillers = m.end(), fillers + 1
+            continue
+        break
+    if not tok:
+        return None
+    parts = [tok]
+    end = m.start(1) + len(m.group(1).rstrip(_TRAIL))
+    pos = m.end()
+    while True:
+        n = _VTOK.match(text, pos)
+        if not n:
+            break
+        t = n.group(1).rstrip(_TRAIL)
+        if not t or not (t.isdigit() or (len(t) == 1 and t.isalnum())):
+            break
+        parts.append(t)
+        end = n.start(1) + len(t)
+        pos = n.end()
+        if n.group(1) != t:  # trailing punctuation ends the value
+            break
+    single = len(parts) >= 2 and all(len(x) == 1 for x in parts)
+    return "".join(parts), end, single
+
+
+def _value_ok(kind, lo, hi, value, single):
+    if kind == "digits":
+        digits = value.replace("-", "")
+        return digits.isdigit() and lo <= len(digits) <= hi
+    if kind == "code":
+        return value.isalnum() and any(c.isdigit() for c in value) and lo <= len(value) <= hi
+    return len(value) >= lo and len(value) <= hi and (_secret_like(value) or single)
+
+
 def secrets(text):
     hits = [(m.start(), m.end()) for m in _SECRET_PATTERNS.finditer(text)]
     urls = [m.span() for m in _URL_RE.finditer(text)]
-    for m in _SECRET_CUE.finditer(text):
-        if _overlaps_any(m.span(), urls):
-            continue
-        if _secret_like(m.group(1)):
-            hits.append(m.span())  # cue + value: a value in the next turn still touches the cue turn
-    for cue, lo, hi in _SHORT_SECRETS:
+    for kind, lo, hi, cue in _CUES:
         for m in cue.finditer(text):
-            n = sum(ch.isdigit() for ch in m.group(1))
-            if lo <= n <= hi and not _overlaps_any(m.span(1), hits):
-                hits.append(m.span())
+            if _overlaps_any(m.span(), urls):
+                continue
+            got = _cue_value(text, m.end())
+            if got is None:
+                continue
+            value, end, single = got
+            if _value_ok(kind, lo, hi, value, single):
+                hits.append((m.start(), end))  # cue + value: a next-turn value touches the cue turn
     return hits
 
 
