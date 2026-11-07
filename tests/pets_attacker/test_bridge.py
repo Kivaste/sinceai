@@ -25,7 +25,7 @@ def test_entries_cover_both_personas_with_method_names():
     assert ids == sorted(ids)  # the manifest requires risk-sorted order
     assert {"linkage-broker-news_clips_health", "attribute-inference-broker-news_clips_health",
             "linkage-insider", "attribute-inference-insider"} <= set(ids)
-    for r in risks:
+    for r in (r for r in risks if "redteam" not in r["risk"]):  # #139: no red_team block here (see below)
         assert set(r) == {"risk", "kind", "label", "rate", "description"}
         assert r["kind"] in ("linkage", "attribute_inference") and r["label"] is None
         assert r["rate"]["status"] == "measured"
@@ -61,7 +61,7 @@ def test_cli_writes_json_and_fails_closed(tmp_path):
     src.write_text(json.dumps(ATTACK), encoding="utf-8")
     out = tmp_path / "residual.json"
     assert bridge.main(["--attack", str(src), "--out", str(out)]) == 0
-    assert len(json.loads(out.read_text(encoding="utf-8"))["residualRisks"]) == 6
+    assert len(json.loads(out.read_text(encoding="utf-8"))["residualRisks"]) == 6 + 5  # #139: + 5 red-team entries (not measured: no block)
     src.write_text("{}", encoding="utf-8")
     assert bridge.main(["--attack", str(src), "--out", str(tmp_path / "no.json")]) == 2
     assert not (tmp_path / "no.json").exists()
@@ -78,3 +78,42 @@ def test_entries_validate_inside_the_real_manifest_schema():
     m["residualRisks"].sort(key=lambda r: r["risk"])
     new = [e for e in validate_manifest(m) if "residualRisks" in e]
     assert new == [], new
+
+
+RED = {"cross_dataset": {"evaluated": True, "reason": None, "n_targets": 1662, "reidentification_rate": 0.01,
+                         "guess_rate": 0.02},
+       "range_aware": {"evaluated": False, "reason": "error:RungError"},
+       "attribute_inference": {"evaluated": True, "reason": None, "columns": {
+           "icd10_primary": {"evaluated": True, "reason": None, "n_targets": 3000, "inference_rate": 0.3,
+                             "baseline_rate": 0.1}}}}
+
+
+def test_red_team_block_becomes_closed_entries_and_validates_in_the_manifest_schema():
+    """#139. Rows: measured attack -> rate + denominator; failed attack -> not_measured with its rendered reason;
+    per sensitive column an attacker entry and a -baseline entry."""
+    import copy
+    from pathlib import Path
+    from pets_release.manifest.validate import validate_manifest
+    by = {r["risk"]: r for r in bridge.residual_risks(dict(ATTACK, red_team=RED))}
+    assert by["linkage-redteam-cross-dataset"]["rate"]["value"] == 0.01
+    assert by["linkage-redteam-cross-dataset-guess"]["rate"]["denominator"] == {"unit": "rows", "n": 1662}
+    assert by["linkage-redteam-range-aware"]["rate"]["status"] == "not_measured"
+    assert "attack failed (RungError)" in by["linkage-redteam-range-aware-guess"]["rate"]["reason"]
+    assert by["attribute-inference-redteam-icd10_primary"]["rate"]["value"] == 0.3
+    assert by["attribute-inference-redteam-icd10_primary-baseline"]["rate"]["value"] == 0.1
+    fx = Path(__file__).parents[1] / "fixtures" / "manifest" / "release" / "privacy_manifest.json"
+    m = json.loads(fx.read_text(encoding="utf-8"))
+    m["residualRisks"] = sorted(list(by.values()) + [r for r in copy.deepcopy(m["residualRisks"])
+                                                     if r["kind"] in ("note", "tamper_limitation")],
+                                key=lambda r: r["risk"])
+    assert [e for e in validate_manifest(m) if "residualRisks" in e] == []
+
+
+def test_missing_red_team_block_is_not_measured_and_an_unknown_reason_refuses():
+    by = {r["risk"]: r["rate"] for r in bridge.residual_risks(ATTACK)}
+    red_ids = [k for k in by if "redteam" in k]
+    assert len(red_ids) == 5 and all(by[k]["status"] == "not_measured" for k in red_ids)
+    bad = json.loads(json.dumps(RED))
+    bad["range_aware"]["reason"] = "Some Free Text"  # only the attacker's own codes reach the manifest
+    with pytest.raises(bridge.BridgeError):
+        bridge.residual_risks(dict(ATTACK, red_team=bad))
