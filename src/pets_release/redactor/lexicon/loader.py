@@ -91,10 +91,11 @@ class Rules:
         return self.get("@case_ending", label, "include")
 
     def int_of(self, key: str, label: str, default: int) -> int:
+        raw = self.get(key, label, str(default))
         try:
-            return int(self.get(key, label, str(default)))
+            return int(raw)
         except ValueError:
-            return default
+            raise ValueError(f"boundaries.csv: {key} for {label} must be an integer, got {raw!r}") from None
 
 
 def load_rules(data_dir: Path | str | None = None) -> Rules:

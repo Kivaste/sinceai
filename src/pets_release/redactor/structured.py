@@ -503,6 +503,9 @@ def _value_key(label: str, digits: str, plus: bool) -> str:
     if label == "PHONE":
         from pets_release.pseudonym import normalise as pseudo_normalise
 
+        if digits.startswith("00358"):  # international call prefix written as 00
+            digits, plus = digits[2:], True
+
         return "phone\x00" + pseudo_normalise(("+" if plus or digits.startswith("358") else "") + digits, "PHONE")
     return label.lower() + "\x00" + digits
 
@@ -546,6 +549,8 @@ def _classify_digits(d: str, plus: bool, ctx: list[str]) -> tuple[str, int] | No
     if device and 14 <= n <= 20:
         return "DEVICE_ID", PRIORITY_CUE
     if d.startswith("358") and 11 <= n <= 13:
+        return "PHONE", PRIORITY_VALIDATED
+    if d.startswith("00358") and 13 <= n <= 15 and not plus:
         return "PHONE", PRIORITY_VALIDATED
     if d.startswith("0") and 7 <= n <= 11 and not plus:
         return "PHONE", PRIORITY_VALIDATED
