@@ -782,3 +782,105 @@ def test_refused_cli_with_removed_report_keeps_the_explicit_unknown(tmp_path):
         assert report["status"] == "REFUSED" and report["steps"][-1]["exit"] == 1
         assert "No refusal report available" in request(url, "/result")[1]
         assert request(url, "/api/rows")[0] == 422
+
+
+def protected_canaries(folder):
+    """Synthetic source values deliberately withheld by the production release."""
+    import pandas as pd
+
+    coarse_qis(folder)
+    path = folder / "ed_visits.csv"
+    frame = pd.read_csv(path, dtype=str, keep_default_na=False, na_filter=False)
+    frame.loc[0, "patient_name"] = "SyntheticSourceNameCanary"
+    frame.loc[1, "patient_name"] = "SyntheticSourceRemarksCanary"
+    frame.to_csv(path, index=False, lineterminator="\n")
+
+
+def assert_no_protected_canaries(body):
+    assert "SyntheticSourceNameCanary" not in body
+    assert "SyntheticSourceRemarksCanary" not in body
+
+
+def test_protected_demo_shows_verified_schema_forms_and_bindings_without_values(tmp_path):
+    """HTTP + real CLI seam: protected metadata comes only from the verified manifest."""
+    import html
+
+    with running(tmp_path, edit=protected_canaries) as (_, url, _, out):
+        assert request(url, "/api/run", data={"scenario": "HEALTH-S1"})[0] == 202
+        report = result(url)
+        assert report["status"] == "RELEASED"
+        signed = json.loads((out / "run-1" / "privacy_manifest.json").read_bytes())
+        assert report.get("contract") == signed["contract"]
+        bindings = report["bindings"]
+        for group in ("files", "inputs", "lexiconDigests"):
+            assert bindings[group] == {name: "bound digest" for name in signed["bindings"][group]}
+        assert bindings["contractDigest"] == "bound digest"
+        assert bindings["toolRevision"] == signed["bindings"]["toolRevision"][:12]
+        assert bindings["checkVersions"] == signed["bindings"]["checkVersions"]
+        status, body = request(url, "/demo/protected")
+        assert status == 200
+        page = html.unescape(body)
+        assert "Released table schemas and value forms" in page
+        assert f'{len(signed["bindings"]["files"])} bound files' in page
+        assert "Row counts: not recorded in the signed manifest" in page
+        for name, spec in signed["contract"]["files"].items():
+            assert name in page
+            assert f'{len(spec["columns"])} columns' in page
+            for column, rule in spec["columns"].items():
+                assert column in page and rule["form"] in page
+        assert "Required" in page and "Parameters" in page
+        assert "File and input bindings" in page and "checkVersions" in page
+        for digest in signed["bindings"]["files"].values():
+            assert digest not in body
+        for path in ("/api/result", "/result", "/demo/protected"):
+            assert_no_protected_canaries(request(url, path)[1])
+
+
+@pytest.mark.parametrize("case", ["changed-table", "planted-manifest", "stale-signature"])
+def test_protected_demo_withdraws_schema_and_bindings_when_verified_bytes_change(tmp_path, case):
+    """HTTP + real CLI seam: old proof cannot authorize new table/manifest/signature bytes."""
+    with running(tmp_path, edit=protected_canaries) as (_, url, kit, out):
+        assert request(url, "/api/run", data={"scenario": "HEALTH-S1"})[0] == 202
+        assert result(url)["status"] == "RELEASED"
+        release = out / "run-1"
+        if case == "changed-table":
+            with (release / "ed_visits.csv").open("a") as handle:
+                handle.write("SyntheticSourceNameCanary\n")
+        elif case == "planted-manifest":
+            path = release / "privacy_manifest.json"
+            manifest = json.loads(path.read_bytes())
+            manifest["residualRisks"][0]["description"] = "SyntheticPlantedFormClaim"
+            path.write_bytes(canonical_bytes(manifest))
+            from pets_release.manifest import validate_manifest_file
+            assert validate_manifest_file(release) == []
+        else:
+            swap_cells_and_rebind_digest(release, kit)
+        state = json.loads(request(url, "/api/result")[1])
+        assert state["status"] == "CHANGED"
+        assert "contract" not in state and "bindings" not in state
+        status, body = request(url, "/demo/protected")
+        assert status == 200
+        for text in ("Released table schemas and value forms", "File and input bindings",
+                     "bound files", "SyntheticPlantedFormClaim"):
+            assert text not in body
+        assert_no_protected_canaries(body)
+
+
+def test_protected_demo_never_publishes_metadata_for_unverified_states(tmp_path):
+    """HTTP + real CLI seam: idle, running and a planted pre-verification manifest lack proof."""
+    with running(tmp_path, edit=protected_canaries, swap_during_verify=True) as (_, url, _, _):
+        state = json.loads(request(url, "/api/result")[1])
+        assert state["status"] == "IDLE"
+        assert "contract" not in state and "bindings" not in state
+        assert request(url, "/api/run", data={"scenario": "HEALTH-S1"})[0] == 202
+        state = json.loads(request(url, "/api/result")[1])
+        assert state["status"] == "RUNNING"
+        assert "contract" not in state and "bindings" not in state
+        state = result(url)
+        assert state["status"] != "RELEASED"
+        assert "contract" not in state and "bindings" not in state
+        for path in ("/result", "/demo/protected", "/api/result"):
+            body = request(url, path)[1]
+            assert "Released table schemas and value forms" not in body
+            assert "File and input bindings" not in body
+            assert_no_protected_canaries(body)
