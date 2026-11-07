@@ -7,7 +7,6 @@ import re
 from pathlib import Path
 
 import pandas as pd
-import pytest
 from jsonschema import Draft202012Validator
 
 from pets_release.manifest import (
@@ -63,11 +62,41 @@ def test_fixture_gate_uses_ticket_11_registered_names():
     assert "release.row-k" not in gate
 
 
-def test_matches_ticket_04_registry_when_merged():
-    checks = pytest.importorskip("pets_release.checks", reason="ticket 04 not merged: not run, not a pass")
-    ASSERTION_CHECKS = checks.ASSERTION_CHECKS
+def test_manifest_binds_ticket_04_assertion_checks():
+    from pets_release.checks import ASSERTION_CHECKS
+    from pets_release.manifest import ASSERTION_EVIDENCE
 
     assert ASSERTION_CHECKS == TICKET_04_ASSERTION_CHECKS
+    assert {a: e["check"] for a, e in ASSERTION_EVIDENCE.items()} == ASSERTION_CHECKS
+
+
+# Assertion checks pinned in ASSERTION_CHECKS but registered by sibling tickets not yet merged (11: producer.*,
+# 05: text.health). When one lands, this set must shrink, and its scope/unit is then compared below.
+NOT_YET_REGISTERED = {"producer.key-material", "producer.person-k", "producer.unkeyed-hashes", "text.health"}
+
+
+def test_assertion_scope_and_unit_equal_the_registry():
+    from pets_release.checks import all_checks
+    from pets_release.manifest import ASSERTION_EVIDENCE, ASSERTION_SCOPES
+
+    registered = {c.name: c for c in all_checks()}
+    missing = {e["check"] for e in ASSERTION_EVIDENCE.values()} - set(registered)
+    assert missing == NOT_YET_REGISTERED
+    for name, e in ASSERTION_EVIDENCE.items():
+        assert ASSERTION_SCOPES[name] == e["scope"]
+        if e["check"] in registered:
+            c = registered[e["check"]]
+            assert (e["scope"], e["unit"]) == (c.scope, c.unit), name
+
+
+def test_fixture_extra_gate_checks_match_registered_scope_and_unit():
+    from pets_release.checks import all_checks
+
+    registered = {c.name: c for c in all_checks()}
+    for rec in manifest()["gate"]["checks"]:
+        if rec["check"] in registered:
+            c = registered[rec["check"]]
+            assert (rec["scope"], rec["denominator"]["unit"], rec["version"]) == (c.scope, c.unit, c.version)
 
 
 def test_schema_is_a_valid_2020_12_schema():

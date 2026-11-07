@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import json
 import sys
 from pathlib import Path
 
@@ -198,16 +199,26 @@ def _fj(table, column, output, rung, floor, reason) -> dict:
             "rung": rung, "floor": floor, "reason": reason, "source": "hand"}
 
 
+INPUTS = {"ed_visits": _tok("input", 1), "lab_results": _tok("input", 2)}
+
+
+def scope_id(scenario: str, recipient: str, inputs: dict, tool_revision: str) -> str:
+    """Copy of the pinned derivation (spec; ticket 06 release_scope_id): first 16 hex of SHA-256 of canonical JSON."""
+    payload = {"inputs": inputs, "recipient": recipient, "scenario": scenario, "toolRevision": tool_revision}
+    raw = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    return hashlib.sha256(raw).hexdigest()[:16]
+
+
 def manifest(files: dict[str, bytes]) -> dict:
     con = contract()
     gate_checks = sorted([_ev(*EVIDENCE[a]) for a in EVIDENCE] + EXTRA_GATE, key=lambda c: c["check"])
     m = {
         "schemaVersion": "1",
-        "release": {"scenario": SCENARIO, "recipient": RECIPIENT, "releaseScopeId": "0123456789abcdef",
+        "release": {"scenario": SCENARIO, "recipient": RECIPIENT, "releaseScopeId": scope_id(SCENARIO, RECIPIENT, INPUTS, TOOL_REVISION),
                     "created": CREATED},
         "bindings": {
             "files": {name: hashlib.sha256(data).hexdigest() for name, data in sorted(files.items())},
-            "inputs": {"ed_visits": _tok("input", 1), "lab_results": _tok("input", 2)},
+            "inputs": dict(INPUTS),
             "toolRevision": TOOL_REVISION,
             "checkVersions": {c["check"]: c["version"] for c in gate_checks},
             "lexiconDigests": {},

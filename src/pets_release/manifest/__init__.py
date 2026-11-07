@@ -22,8 +22,14 @@ Schema and validation
     LABEL_ASSERTIONS, ALL_ASSERTIONS   export-assertion names
     SCENARIOS                          scenarios a manifest may be issued for ("HEALTH-S1", "CS-S1")
     required_assertions(scenario)      exact, sorted tuple of assertion names the scenario's manifest must carry
-    ASSERTION_SCOPES                   {assertion: "release"|"producer"}; each evidence record's scope is pinned to
-                                       it (producer: keyMaterial, quasiIdentifiersBelowK, reversibleHashes)
+    ASSERTION_EVIDENCE                 {assertion: {check, scope, unit}}; each evidence record's check, scope and
+                                       denominator.unit are pinned to it. ``check`` comes from ticket 04's
+                                       ``pets_release.checks.ASSERTION_CHECKS`` (imported); scope/unit are tested
+                                       equal to the registered check's.
+    ASSERTION_SCOPES                   {assertion: "release"|"producer"}, derived from ASSERTION_EVIDENCE
+    release_scope_id(*, scenario, recipient, inputs, tool_revision) -> str
+                                       first 16 hex of SHA-256(canonical {inputs, recipient, scenario,
+                                       toolRevision}); validate_manifest recomputes and compares it
     validate_manifest(obj) -> list[str]
                                        sorted, content-free error codes ``"<json path>: <rule>"``; empty = valid.
                                        Runs the schema plus cross-field rules (evidence <-> assertions <-> gate
@@ -43,6 +49,8 @@ Writer obligations the schema imposes
     ``assertionEvidence`` are closed over ALL_ASSERTIONS and, per scenario, over exactly required_assertions().
     A CS-S1 manifest must bind at least one ``bindings.lexiconDigests`` entry (healthInText is lexicon-scoped).
     Check names in evidence come from ticket 04's ``ASSERTION_CHECKS``.
+    Not checked here: that ``contract`` columns agree with ``fieldJustifications``; the writer (ticket 16)
+    enforces that tie.
 
 CLI
     python -m pets_release.manifest validate <manifest.json | release_dir>
@@ -55,6 +63,7 @@ Fixture: ``tests/fixtures/manifest/release/`` is a hand-made HEALTH-S1 release (
 from pets_release.manifest.canonical import canonical_bytes, canonical_digest, loads_strict
 from pets_release.manifest.schema import (
     ALL_ASSERTIONS,
+    ASSERTION_EVIDENCE,
     ASSERTION_SCOPES,
     LABEL_ASSERTIONS,
     MANIFEST_SCHEMA,
@@ -66,6 +75,7 @@ from pets_release.manifest.validate import (
     MANIFEST_FILENAME,
     compute_signature,
     not_measured,
+    release_scope_id,
     signing_bytes,
     validate_manifest,
     validate_manifest_file,
@@ -73,6 +83,7 @@ from pets_release.manifest.validate import (
 
 __all__ = [
     "ALL_ASSERTIONS",
+    "ASSERTION_EVIDENCE",
     "ASSERTION_SCOPES",
     "LABEL_ASSERTIONS",
     "MANIFEST_FILENAME",
@@ -84,6 +95,7 @@ __all__ = [
     "compute_signature",
     "loads_strict",
     "not_measured",
+    "release_scope_id",
     "required_assertions",
     "signing_bytes",
     "validate_manifest",
