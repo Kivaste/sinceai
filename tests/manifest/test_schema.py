@@ -102,6 +102,7 @@ def _as_cs(m):
                                  key=lambda c: c["check"])
     m["bindings"]["checkVersions"] = {c["check"]: c["version"] for c in m["gate"]["checks"]}
     m["bindings"]["lexiconDigests"] = {"health-lexicon": "a" * 64}
+    m["release"]["releaseScopeId"] = _scope_id(m)
     return m
 
 
@@ -124,6 +125,68 @@ def test_flipping_assertion_scope_with_its_gate_record_is_invalid(m, name):
     ev["scope"] = flipped
     next(c for c in m["gate"]["checks"] if c["check"] == ev["check"])["scope"] = flipped
     invalid(m, f"$.assertionEvidence.{name}.scope: const")
+
+
+# --- each assertion is bound to its own registered check (ticket 04 ASSERTION_CHECKS) ---------------------------
+
+def _gate_record(m, check):
+    return next(c for c in m["gate"]["checks"] if c["check"] == check)
+
+
+@pytest.mark.parametrize("name", HEALTH)
+def test_evidence_repointed_at_another_gate_check_is_invalid(m, name):
+    # Re-point at a gate check that passed with 0 hits (release.file-digests), keeping gate agreement.
+    rec = dict(_gate_record(m, "release.file-digests"))
+    rec["scope"] = m["assertionEvidence"][name]["scope"]
+    _gate_record(m, "release.file-digests")["scope"] = rec["scope"]
+    m["assertionEvidence"][name] = rec
+    assert f"$.assertionEvidence.{name}.check: const" in validate_manifest(m)
+
+
+def test_swapped_evidence_is_invalid(m):
+    ev = m["assertionEvidence"]
+    ev["emails"], ev["phones"] = ev["phones"], ev["emails"]
+    errs = validate_manifest(m)
+    assert "$.assertionEvidence.emails.check: const" in errs
+    assert "$.assertionEvidence.phones.check: const" in errs
+
+
+@pytest.mark.parametrize("name", ALL_ASSERTIONS)
+def test_evidence_with_wrong_denominator_unit_is_invalid(m, name):
+    if name not in HEALTH:
+        m = _as_cs(m)
+    ev = m["assertionEvidence"][name]
+    wrong = "rows" if ev["denominator"]["unit"] != "rows" else "cells"
+    ev["denominator"]["unit"] = wrong
+    _gate_record(m, ev["check"])["denominator"]["unit"] = wrong
+    assert f"$.assertionEvidence.{name}.denominator.unit: const" in validate_manifest(m)
+
+
+# --- releaseScopeId is recomputed from the bound inputs (same derivation as ticket 06) ---------------------------
+
+def _scope_id(m):
+    import hashlib
+    import json
+
+    payload = {"inputs": m["bindings"]["inputs"], "recipient": m["release"]["recipient"],
+               "scenario": m["release"]["scenario"], "toolRevision": m["bindings"]["toolRevision"]}
+    raw = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    return hashlib.sha256(raw).hexdigest()[:16]
+
+
+def test_fixture_release_scope_id_uses_pinned_derivation(m):
+    assert m["release"]["releaseScopeId"] == _scope_id(m)
+
+
+@pytest.mark.parametrize("mutate", [
+    lambda m: m["release"].__setitem__("releaseScopeId", "0123456789abcdef"),
+    lambda m: m["release"].__setitem__("recipient", "another-recipient"),
+    lambda m: m["bindings"].__setitem__("toolRevision", "1" * 40),
+    lambda m: m["bindings"]["inputs"].__setitem__("ed_visits", "b" * 64),
+])
+def test_release_scope_id_mismatch_is_invalid(m, mutate):
+    mutate(m)
+    assert "$.release.releaseScopeId: mismatch" in validate_manifest(m)
 
 
 # --- assertion evidence ---------------------------------------------------------------------------------------
@@ -167,7 +230,7 @@ def test_evidence_without_assertion_is_invalid(m):
 
 def test_two_assertions_sharing_one_check_is_invalid(m):
     m["assertionEvidence"]["emails"] = dict(m["assertionEvidence"]["phones"])
-    invalid(m, "$.assertionEvidence.emails.check: shared")
+    invalid(m, "$.assertionEvidence.emails.check: const")
 
 
 def test_evidence_check_not_run_by_gate_is_invalid(m):
@@ -186,9 +249,56 @@ def test_check_version_not_bound_is_invalid(m):
     invalid(m, "$.bindings.checkVersions: gate-mismatch")
 
 
-def test_gate_check_not_passed_is_invalid(m):
-    m["gate"]["checks"][0]["status"] = "not_run"
-    invalid(m, "status: const")
+# --- not_applicable gate records (ticket 04 runner): allowed in the gate list, never as evidence ------------------
+
+def _make_not_applicable(rec):
+    rec["status"] = "not_applicable"
+    rec["denominator"]["n"] = 0
+    rec["hits"] = 0
+
+
+def test_not_applicable_gate_record_for_a_non_assertion_check_is_valid(m):
+    _make_not_applicable(_gate_record(m, "release.token-hex64"))
+    assert validate_manifest(m) == []
+
+
+@pytest.mark.parametrize("field,value,code", [
+    (("denominator", "n"), 3, "n: const"),
+    (("hits",), 1, "hits: const"),
+])
+def test_not_applicable_gate_record_must_have_zero_denominator_and_hits(m, field, value, code):
+    rec = _gate_record(m, "release.token-hex64")
+    _make_not_applicable(rec)
+    target = rec
+    for f in field[:-1]:
+        target = target[f]
+    target[field[-1]] = value
+    invalid(m, code)
+
+
+def test_pass_gate_record_with_zero_denominator_is_invalid(m):
+    _gate_record(m, "release.token-hex64")["denominator"]["n"] = 0
+    invalid(m, "n: minimum")
+
+
+@pytest.mark.parametrize("name", HEALTH)
+def test_not_applicable_record_cannot_back_an_assertion(m, name):
+    ev = m["assertionEvidence"][name]
+    _make_not_applicable(_gate_record(m, ev["check"]))
+    # evidence left as "pass": disagrees with the gate record
+    assert f"$.assertionEvidence.{name}: gate-mismatch" in validate_manifest(m)
+    # evidence copied from the not_applicable gate record: the evidence schema rejects it
+    m["assertionEvidence"][name] = {**_gate_record(m, ev["check"]),
+                                    "denominator": dict(_gate_record(m, ev["check"])["denominator"])}
+    errs = validate_manifest(m)
+    assert f"$.assertionEvidence.{name}.status: const" in errs
+    assert f"$.assertionEvidence.{name}.denominator.n: minimum" in errs
+
+
+@pytest.mark.parametrize("status", ["not_run", "error", "fail", None])
+def test_gate_check_not_passed_is_invalid(m, status):
+    m["gate"]["checks"][0]["status"] = status
+    invalid(m, "$.gate.checks[0].status: enum")
 
 
 # --- closed at every level ---------------------------------------------------------------------------------------

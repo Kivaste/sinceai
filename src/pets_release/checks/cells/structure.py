@@ -5,7 +5,7 @@ import re
 
 import numpy as np
 
-from pets_release.checks.cells._common import contract_files
+from pets_release.checks.cells._common import column_label, contract_files, file_label
 from pets_release.checks.records import Outcome, Violation, locations
 from pets_release.checks.registry import register
 from pets_release.checks.release import MANIFEST
@@ -20,7 +20,7 @@ def contract_files_check(release, contract, context):
     out = []
     for e in release.entries:
         if e not in allowed or not (release.path / e).is_file():
-            out.append(Violation("contract.files", "unexpectedFile", "high", e, None, 1))
+            out.append(Violation("contract.files", "unexpectedFile", "high", file_label(release, contract, e), None, 1))
     for f in sorted(files):
         if f not in release.entries:
             out.append(Violation("contract.files", "missingFile", "high", f, None, 1))
@@ -32,17 +32,19 @@ def row_maps_check(release, contract, context):
     out = []
     for e in release.entries:
         if "rowmap" in e.lower().replace("_", "").replace("-", ""):
-            out.append(Violation("release.row-maps", "rowMapFile", "high", e, None, 1))
+            out.append(Violation("release.row-maps", "rowMapFile", "high", file_label(release, contract, e), None, 1))
     for f in release.csv_files:
         for col in release.table(f).header:
-            if col.strip().lower() in ROWMAP_COLUMNS:
-                out.append(Violation("release.row-maps", "rowMapColumn", "high", f, col, 1))
+            canon = col.strip().lower()
+            if canon in ROWMAP_COLUMNS:  # reported by the fixed canonical name, never the raw header cell
+                out.append(Violation("release.row-maps", "rowMapColumn", "high", file_label(release, contract, f),
+                                     canon, 1))
     return Outcome(n=len(release.entries), violations=tuple(out))
 
 
 @register(name="release.empty-tables", version="1.0.0", scope="release", unit="files")
 def empty_tables_check(release, contract, context):
-    out = [Violation("release.empty-tables", "emptyTable", "high", f, None, 1)
+    out = [Violation("release.empty-tables", "emptyTable", "high", file_label(release, contract, f), None, 1)
            for f in release.csv_files if len(release.table(f).frame) == 0]
     return Outcome(n=len(release.csv_files), violations=tuple(out))
 
@@ -63,12 +65,14 @@ def contract_columns_check(release, contract, context):
             raise ValueError("contract requires an undeclared column")
         header = release.table(f).header
         seen = set()
-        for col in header:
+        for idx, col in enumerate(header):
             if col in seen:
-                out.append(Violation("contract.columns", "duplicateColumn", "high", f, col, 1))
+                out.append(Violation("contract.columns", "duplicateColumn", "high", f,
+                                     column_label(contract, f, idx, col), 1))
             seen.add(col)
             if col not in allowed:
-                out.append(Violation("contract.columns", "extraColumn", "high", f, col, 1))
+                out.append(Violation("contract.columns", "extraColumn", "high", f,
+                                     column_label(contract, f, idx, col), 1))
         for col in sorted(set(required) - set(header)):
             out.append(Violation("contract.columns", "missingRequiredColumn", "high", f, col, 1))
     return Outcome(n=n, violations=tuple(out))
@@ -140,11 +144,18 @@ def file_digests_check(release, contract, context):
     if not isinstance(bound, dict):
         raise TypeError("bindings.files must be a mapping")
     out = []
+    bound_sorted = sorted(bound)
+
+    def label(f):
+        if f in release.entries or f in contract_files(contract):
+            return file_label(release, contract, f)
+        return f"unlisted-bound#{bound_sorted.index(f)}"  # manifest-only name: content-free marker
+
     for f in sorted(set(digests) | set(bound)):
         if f not in bound:
-            out.append(Violation("release.file-digests", "digestMissing", "high", f, None, 1))
+            out.append(Violation("release.file-digests", "digestMissing", "high", label(f), None, 1))
         elif f not in digests:
-            out.append(Violation("release.file-digests", "boundFileMissing", "high", f, None, 1))
+            out.append(Violation("release.file-digests", "boundFileMissing", "high", label(f), None, 1))
         elif bound[f] != digests[f]:
-            out.append(Violation("release.file-digests", "digestMismatch", "high", f, None, 1))
+            out.append(Violation("release.file-digests", "digestMismatch", "high", label(f), None, 1))
     return Outcome(n=len(digests), violations=tuple(out))

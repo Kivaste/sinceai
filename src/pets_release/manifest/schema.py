@@ -7,6 +7,8 @@ pinned per scenario through ``allOf``/``if``/``then`` on ``release.scenario``.
 
 from __future__ import annotations
 
+from pets_release.checks import ASSERTION_CHECKS
+
 SCHEMA_VERSION = "1"
 
 LABEL_ASSERTIONS = (
@@ -21,9 +23,24 @@ _SCENARIO_ASSERTIONS = {
 SCENARIOS = tuple(sorted(_SCENARIO_ASSERTIONS))
 ALL_ASSERTIONS = tuple(sorted(set().union(*_SCENARIO_ASSERTIONS.values())))
 
-# Verification scope each assertion's evidence must carry (spec §14 "Scopes", D18).
-_PRODUCER = ("keyMaterial", "quasiIdentifiersBelowK", "reversibleHashes")
-ASSERTION_SCOPES = {n: ("producer" if n in _PRODUCER else "release") for n in ALL_ASSERTIONS}
+# Each assertion's evidence: the one check named by ticket 04's ASSERTION_CHECKS, with the verification scope
+# (spec §14 "Scopes", D18) and denominator unit that check registers. tests/manifest/test_fixture.py asserts
+# (scope, unit) equal the registry's for every registered check, and lists the ones not registered yet.
+_SCOPE_UNIT = {
+    **{n: ("release", "cells") for n in LABEL_ASSERTIONS},
+    "healthInText": ("release", "turns"),
+    "keyMaterial": ("producer", "cells"),
+    "quasiIdentifiersBelowK": ("producer", "persons"),
+    "rawTimestamps": ("release", "cells"),
+    "reversibleHashes": ("producer", "cells"),
+    "rowMaps": ("release", "files"),
+}
+if set(ASSERTION_CHECKS) != set(ALL_ASSERTIONS) or set(_SCOPE_UNIT) != set(ALL_ASSERTIONS):
+    raise ImportError("ticket 04 ASSERTION_CHECKS does not cover exactly the manifest's export assertions")
+ASSERTION_EVIDENCE = {
+    n: {"check": ASSERTION_CHECKS[n], "scope": _SCOPE_UNIT[n][0], "unit": _SCOPE_UNIT[n][1]} for n in ALL_ASSERTIONS
+}
+ASSERTION_SCOPES = {n: e["scope"] for n, e in ASSERTION_EVIDENCE.items()}
 
 ROLES = ("direct_identifier", "free_text", "non_sensitive", "quasi_identifier", "record_key", "sensitive_attribute",
          "technical_identifier")
@@ -80,10 +97,24 @@ _DEFS = {
         "check": _ref("checkName"), "version": _ref("version"), "scope": _ref("scope"),
         "status": _status("pass"), "denominator": _ref("denominator"), "hits": {"const": 0},
     }),
-    "gateCheck": _obj({
-        "check": _ref("checkName"), "version": _ref("version"), "scope": _ref("scope"),
-        "status": _status("pass"), "denominator": _ref("denominator"), "hits": {"type": "integer", "minimum": 0},
-    }),
+    # Gate records: "pass" (n >= 1, low-severity hits allowed) or ticket 04's "not_applicable" (n == 0, hits 0).
+    # Only "pass" evidence can back an assertion (see "evidence"); cross-field rules require evidence == gate record.
+    "gateCheck": {
+        **_obj({
+            "check": _ref("checkName"), "version": _ref("version"), "scope": _ref("scope"),
+            "status": {"enum": ["not_applicable", "pass"]},
+            "denominator": _obj({
+                "unit": {"enum": ["cells", "files", "persons", "rows", "turns"]},
+                "n": {"type": "integer", "minimum": 0},
+            }),
+            "hits": {"type": "integer", "minimum": 0},
+        }),
+        "allOf": [
+            {"if": {"properties": {"status": {"const": "not_applicable"}}, "required": ["status"]},
+             "then": {"properties": {"denominator": {"properties": {"n": {"const": 0}}}, "hits": {"const": 0}}},
+             "else": {"properties": {"denominator": {"properties": {"n": {"minimum": 1}}}}}},
+        ],
+    },
     "params": _map("paramName", {"oneOf": [{"type": "string", "maxLength": 200}, {"type": "number"},
                                            {"type": "boolean"}]}),
     "notMeasured": _obj({"status": _status("not_measured"), "reason": _ref("text")}),
@@ -164,7 +195,11 @@ def _assertion_maps(names) -> dict:
         "exportAssertions": {"type": "object", "properties": {n: {"const": False} for n in names},
                              "required": list(names), "additionalProperties": False},
         "assertionEvidence": {"type": "object", "properties": {
-            n: {"allOf": [_ref("evidence"), {"properties": {"scope": {"const": ASSERTION_SCOPES[n]}}}]}
+            n: {"allOf": [_ref("evidence"), {"properties": {
+                "check": {"const": ASSERTION_EVIDENCE[n]["check"]},
+                "scope": {"const": ASSERTION_EVIDENCE[n]["scope"]},
+                "denominator": {"properties": {"unit": {"const": ASSERTION_EVIDENCE[n]["unit"]}}},
+            }}]}
             for n in names}, "required": list(names), "additionalProperties": False},
     }
 

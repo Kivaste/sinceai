@@ -43,6 +43,23 @@ def test_unusable_key_is_rejected(m, bad):
         compute_signature(m, bad)
 
 
+def test_release_scope_id_equals_ticket_06(m):
+    from pets_release.manifest import release_scope_id
+    from pets_release.pseudonym import release_scope_id as ticket06
+
+    args = {"scenario": m["release"]["scenario"], "recipient": m["release"]["recipient"],
+            "tool_revision": m["bindings"]["toolRevision"]}
+    ours = release_scope_id(inputs=m["bindings"]["inputs"], **args)
+    assert ours == ticket06(input_digests=m["bindings"]["inputs"], **args) == m["release"]["releaseScopeId"]
+
+
+def test_signature_with_ticket_06_signing_key(m):
+    from pets_release.pseudonym import MasterKey, manifest_signing_key
+
+    sk = manifest_signing_key(MasterKey(b"m" * 40))
+    assert compute_signature(m, sk) == sk.hmac_sha256(signing_bytes(m)).hex()
+
+
 def test_key_object_returning_non_bytes_is_rejected(m):
     class Bad:
         def hmac_sha256(self, data):

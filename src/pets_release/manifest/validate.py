@@ -30,6 +30,12 @@ def not_measured(reason: str) -> dict:
     return {"status": "not_measured", "reason": reason}
 
 
+def release_scope_id(*, scenario: str, recipient: str | None, inputs: dict, tool_revision: str) -> str:
+    """First 16 hex of SHA-256(canonical {inputs, recipient, scenario, toolRevision}); same bytes as ticket 06."""
+    payload = {"inputs": dict(inputs), "recipient": recipient, "scenario": scenario, "toolRevision": tool_revision}
+    return canonical_digest(payload)[:16]
+
+
 def signing_bytes(manifest: dict) -> bytes:
     """Canonical bytes of ``manifest`` without its ``signature`` key (the HMAC payload)."""
     return canonical_bytes({k: v for k, v in manifest.items() if k != "signature"})
@@ -101,6 +107,10 @@ def _cross_field_errors(m: dict) -> list[str]:
         errs.append("$.bindings.checkVersions: gate-mismatch")
     if set(m["bindings"]["files"]) != set(m["contract"]["files"]):
         errs.append("$.bindings.files: contract-mismatch")
+    rel, b = m["release"], m["bindings"]
+    if rel["releaseScopeId"] != release_scope_id(scenario=rel["scenario"], recipient=rel["recipient"],
+                                                 inputs=b["inputs"], tool_revision=b["toolRevision"]):
+        errs.append("$.release.releaseScopeId: mismatch")
     if m["bindings"]["contractDigest"] != canonical_digest(m["contract"]):
         errs.append("$.bindings.contractDigest: mismatch")
 
