@@ -64,14 +64,21 @@ def smoke_checkout(tmp_path):
             frame.loc[0, "disposition"] = "4111 1111 1111 1111"
             frame.to_csv(path, index=False, lineterminator="\n")
 
-        def run(self, kit, *extra):
-            return subprocess.run([sys.executable, str(checkout / "scripts/release_smoke.py"),
+        def run(self, kit, *extra, fault=None):
+            launcher = [sys.executable]
+            if fault:
+                launcher.extend([str(ROOT / "tests/smoke/fault_cli.py"), fault])
+            return subprocess.run([*launcher, str(checkout / "scripts/release_smoke.py"),
                                    "--kit", str(kit), "--out-root", str(tmp_path / "evidence"), *extra],
                                   cwd=checkout, env=env, capture_output=True, text=True, encoding="utf-8",
                                   timeout=180, check=False)
 
         def record(self, sha):
             return json.loads((tmp_path / "evidence" / sha / "smoke.json").read_text(encoding="utf-8"))
+
+        def observation(self):
+            path = tmp_path / "fault-observation.json"
+            return json.loads(path.read_text(encoding="utf-8")) if path.is_file() else None
 
         def validate(self, record):
             path = tmp_path / "record.json"

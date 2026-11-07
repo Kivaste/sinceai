@@ -111,8 +111,12 @@ private scoring artefacts stay outside the checkout, in a new attempt directory.
   a plain release or a scratch candidate. Its verdict lives under
   `delivery.HEALTH-S1` in the same record and is mandatory for overall success.
 - CS-S1 follows `tests/smoke/expectations.json` **read from Git at that SHA**, not
-  from the working file or the presence of a release. It remains `refused` until
-  #24's change commits `released`; a released expectation runs the same four steps.
+  from the working file or the presence of a release. This ticket merges after
+  #24: from #24 on, CS-S1's committed expectation is `released`, requiring the
+  same four steps. Until that support lands, exit 2 is `run-unknown`, never an
+  accepted refusal. The generic expected-refusal branch remains covered by
+  synthetic gate refusals; measured delivery always requires `released` (#120
+  is a defect, not an expected refusal).
 - A release needs all expected CLI exits, explicit limited/full verify messages,
   passing applicable gate checks, person-k at the policy target (where applicable),
   every policy/catalogue purpose check at its threshold or enumerated sacrifice

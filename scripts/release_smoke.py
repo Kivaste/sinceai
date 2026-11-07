@@ -7,6 +7,7 @@ import math
 import os
 import re
 import secrets
+import stat
 import subprocess
 import sys
 import tempfile
@@ -272,7 +273,8 @@ def main():
         print("smoke: FAIL output must be outside the checkout")
         return 1
     evidence = output / sha
-    if evidence.is_symlink():
+    if evidence.is_symlink() or (os.name == "nt" and os.path.lexists(evidence)
+                                 and evidence.lstat().st_file_attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT):
         print("smoke: FAIL evidence directory is a link")
         return 1
     evidence.mkdir(parents=True, exist_ok=True)

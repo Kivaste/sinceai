@@ -1,10 +1,24 @@
 """Smoke verdicts through the real production CLI, never stubbed checks."""
 
 import json
+import os
 import shutil
+import subprocess
 from copy import deepcopy
+from pathlib import Path
 
 import pytest
+
+
+def test_committed_cs_expectation_requires_a_release(smoke_checkout):
+    """Rule: from #24 on, CS-S1 must release; exit 2 remains unknown (CLI seam)."""
+    expectations = json.loads((Path(__file__).parent / "expectations.json").read_text(encoding="utf-8"))
+    assert expectations == {"HEALTH-S1": "released", "CS-S1": "released"}
+    sha = smoke_checkout.commit(cs=expectations["CS-S1"])
+    smoke_checkout.run(smoke_checkout.kit())
+    cs = smoke_checkout.record(sha)["scenarios"]["CS-S1"]
+    assert cs["expected"] == "released"
+    assert set(cs["steps"]) == {"run", "verify-limited", "verify-full", "dashboard"}
 
 
 def test_released_expectation_refuses_at_the_real_gate(smoke_checkout):
@@ -51,6 +65,33 @@ def test_refused_expectation_cannot_release(smoke_checkout):
     assert health["steps"]["run"]["exitCode"] == 0
     assert result.returncode == 1
     assert health["pass"] is False
+
+
+def test_generic_expected_refusal_accepts_real_gate_failure(smoke_checkout):
+    """Rule: refusal is generic, confirmed by real failing gate counts (CLI seam)."""
+    sha = smoke_checkout.commit(health="refused")
+    smoke_checkout.run(smoke_checkout.kit(card=True))
+    health = smoke_checkout.record(sha)["scenarios"]["HEALTH-S1"]
+    assert health["steps"]["run"]["exitCode"] == 1
+    assert health["failures"]["rescan.payment-cards"] > 0
+    assert health["pass"] is True
+    assert health["error"] is None
+    assert not list((smoke_checkout.output / sha).glob("attempt-*/HEALTH-S1"))
+
+
+@pytest.mark.parametrize("expected", ["released", "refused"])
+def test_exit_two_is_unknown_for_every_expectation(smoke_checkout, expected):
+    """Rule: a real CLI usage/state error is never a release or refusal (CLI seam)."""
+    sha = smoke_checkout.commit(health=expected)
+    result = smoke_checkout.run(smoke_checkout.kit(), fault="existing-run-output")
+    assert smoke_checkout.observation() == {}
+    record = smoke_checkout.record(sha)
+    health = record["scenarios"]["HEALTH-S1"]
+    assert health["steps"]["run"]["exitCode"] == 2
+    assert health["error"] == "run-unknown"
+    assert health["pass"] is False
+    assert record["pass"] is False
+    assert result.returncode == 1
 
 
 def test_release_runs_both_verify_tiers_dashboard_and_checks_aggregates(smoke_checkout):
@@ -137,6 +178,85 @@ def test_requested_revision_must_match_actual_head(smoke_checkout):
     assert health["pass"] is False
     assert health["error"] == "revision-mismatch"
     assert result.returncode == 1
+
+
+def test_head_change_during_run_invalidates_every_lane(smoke_checkout):
+    """Rule: completion must recheck HEAD, even after a real passing release (CLI seam)."""
+    sha = smoke_checkout.commit()
+    result = smoke_checkout.run(smoke_checkout.kit(), fault="head-drift")
+    assert smoke_checkout.observation() == {}
+    assert smoke_checkout.git("rev-parse", "HEAD") != sha
+    record = smoke_checkout.record(sha)
+    health = record["scenarios"]["HEALTH-S1"]
+    assert health["steps"]["verify-full"]["exitCode"] == 0
+    assert health["gate"]["passed"] > 0
+    for lane in [*record["scenarios"].values(), *record["delivery"].values()]:
+        assert lane["error"] == "identity-changed"
+        assert lane["pass"] is False
+    assert record["sha"] == sha
+    assert record["pass"] is False
+    assert result.returncode == 1
+
+
+def test_interruption_leaves_atomically_invalidated_evidence(smoke_checkout):
+    """Rule: replace stale evidence atomically before work, even on abrupt exit (CLI seam)."""
+    sha = smoke_checkout.commit()
+    kit = smoke_checkout.kit()
+    smoke_checkout.run(kit)
+    assert smoke_checkout.record(sha)["scenarios"]["HEALTH-S1"]["pass"] is True
+    result = smoke_checkout.run(kit, fault="interrupt-after-invalidation")
+    assert result.returncode == 86
+    record = smoke_checkout.record(sha)
+    assert record["pass"] is False
+    assert all(lane["pass"] is False for lane in [*record["scenarios"].values(),
+                                                *record["delivery"].values()])
+    assert smoke_checkout.validate(record) == 0
+    # At the atomic rename boundary the old bytes still exist and the complete,
+    # canonical failed replacement is ready. Direct writes cannot satisfy this.
+    assert smoke_checkout.observation() == {
+        "previousHealthPassed": True,
+        "pendingPassed": False,
+        "pendingScenarioPasses": [False, False],
+        "canonical": True,
+    }
+
+
+def test_planted_wrong_tool_revision_is_rejected_before_verification(smoke_checkout):
+    """Rule: the released manifest must bind to this SHA, not another revision (CLI seam)."""
+    sha = smoke_checkout.commit()
+    result = smoke_checkout.run(smoke_checkout.kit(), fault="wrong-manifest-revision")
+    assert smoke_checkout.observation() == {}
+    record = smoke_checkout.record(sha)
+    health = record["scenarios"]["HEALTH-S1"]
+    assert health["steps"]["run"]["exitCode"] == 0
+    assert health["gate"]["passed"] > 0
+    assert health["error"] == "missing-or-invalid-step"
+    assert all(health["steps"][name]["status"] == "not-run"
+               for name in ("verify-limited", "verify-full", "dashboard"))
+    assert health["pass"] is False
+    assert record["pass"] is False
+    assert result.returncode == 1
+
+
+def test_linked_evidence_directory_cannot_redirect_records(smoke_checkout):
+    """Rule: planted symlink/junction evidence directories must fail before writes (CLI seam)."""
+    sha = smoke_checkout.commit()
+    smoke_checkout.output.mkdir()
+    target = smoke_checkout.output.parent / "planted-target"
+    target.mkdir()
+    sentinel = target / "sentinel.txt"
+    sentinel.write_text("unchanged", encoding="utf-8")
+    evidence = smoke_checkout.output / sha
+    if os.name == "nt":
+        subprocess.run(["cmd", "/c", "mklink", "/J", str(evidence), str(target)],
+                       capture_output=True, check=True, timeout=30)
+    else:
+        evidence.symlink_to(target, target_is_directory=True)
+    result = smoke_checkout.run(smoke_checkout.path / "missing-kit")
+    assert result.returncode == 1
+    assert "evidence directory is a link" in result.stdout
+    assert sorted(path.name for path in target.iterdir()) == ["sentinel.txt"]
+    assert sentinel.read_text(encoding="utf-8") == "unchanged"
 
 
 @pytest.mark.parametrize("missing", [False, True], ids=["errored-measured-cli", "missing-measured-cli"])
