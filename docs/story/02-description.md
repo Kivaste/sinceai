@@ -1,51 +1,24 @@
-﻿# Submission description
+# Submission description draft
 
-Character count: 4,731 of 5,000, counting the body below including all conditional blocks and remaining placeholders (4,554 after stripping comment markers). Real-run sources are recorded in 06.
-True for the current build when every conditional block is removed. A block is kept only once its enabling ticket has merged and the claim is verified (see the claims checklist in 06). Strip the HTML comment markers before submitting. The first two paragraphs work alone for voters.
+PREP. Body after the separator: no headings; limit 5,000 characters including
+spaces. Resolve placeholders and claim blocks only after final review and final-SHA
+proof. `06-numbers-to-fill.md` defines manifest selection, targets and missing values.
+This is not `docs/story/final/description.md`.
 
 ---
 
-Share data with a recipient without over-sharing: pets-release releases only the fields a stated purpose needs, then ships checks anyone can re-run offline.
+Share data without over-sharing. Purpose-First PETs starts from a recipient's data request, builds protected tables, and attaches a privacy manifest with checks the recipient can re-run.
 
-Most "anonymised" data is a claim. Ours is a release plus a privacy manifest where every statement names a check that ran on the actual files, with the cells scanned and the hits found.
+Data types and risks: HEALTH-S1 shares emergency-visit data with a university research group studying crowding and revisits, under controlled-research trust. The field inventory distinguishes direct identifiers, quasi-identifiers, sensitive attributes and free text. Removing names alone leaves linkage through ages, places, times and joins. Baseline scorecard privacy is {{manifest.measured.privacy.components[component=privacy].before}}; baseline share of rows below k=5 is {{manifest.measured.privacy.components[component=k_below_5_share].before}}. Separate attacker-persona rates are not measured unless the final manifest records them.
 
-## The problem
+PETs and why: fields the purpose checks do not need are withheld; keyed pseudonyms preserve necessary joins; generalisation and local suppression reduce detail. Each field justification records its ladder floor, chosen rung and reason. Read the actual rung, not the floor, as the release's detail. Any bounded search result is evidence about the candidates tried, not a global optimum.
+<!-- IF #127 -->Opt-in parallel search scores candidates in worker processes; byte-identical releases at different worker counts must be demonstrated on the final SHA.<!-- END IF -->
 
-A data controller must share data for a purpose: a hospital with a research group, a contact centre with an LLM vendor. Removing names is not enough, and an "anonymised" claim cannot be re-checked.
-Blanket k-anonymity (B2-k) scores 0.3990 mean scenario utility on HEALTH-S1; its H-U6, H-U7 and H-U8 results are null (cannot answer), not zero.
+Protected output: compare field names and value forms, never raw input rows. For HEALTH-S1, date_of_birth becomes age_band, patient_name and clinical_notes are withheld, and visit_id becomes a keyed pseudonym. The exact bands and time detail come from the final field justifications.
+<!-- IF #117 -->The web app shows only protected real-kit rows after display-time limited verification and manifest-file digest checks. It never shows raw input, row maps or truth/. Its label reads: “Synthetic kit data © Since AI ry, CC BY 4.0. In a real deployment only the recipient sees this view.”<!-- END IF -->
 
-## Purpose first
+Measured privacy and utility: scorecard privacy after protection is {{manifest.measured.privacy.components[component=privacy].after}}. Independent per-person minimum k is {{manifest.measured.privacy.components[component=person_k.min].after}}, with below-k person share {{manifest.measured.privacy.components[component=person_k.below_k_share].after}}. The scorecard misses renamed age_band; its privacy score does not prove zero risk. H-U2 after protection is {{manifest.measured.utility.tasks[task=H-U2].after}}, against 0.90. H-U4 after protection is {{manifest.measured.utility.tasks[task=H-U4].after}}; its policy-enumerated sacrifice floor is {{manifest.sacrifices[check=H-U4].floor}}. Meeting only that floor is not a full pass against 0.90. The targets met / not met table distinguishes original thresholds, accepted sacrifices and not measured values. Overall scorecard utility and composite are not measured in the current manifest; baseline scores are not substitutes.
+<!-- IF #24 -->CS-S1 shares redacted contact-centre turns with an external LLM analytics vendor. Each of NATIONAL_ID, PAYMENT_CARD, IBAN and SECRET has an exact-match recall target of 0.98, not just a combined target. SECRET remains an unmet target: {{manifest.residualRisks[risk=target-recall-secret].description}}. Later SECRET results are optimistic because held-out misses informed the redactor change; the target is not lowered. Gate zero hits and held-out recall answer different questions.<!-- END IF -->
 
-We start from the data request. The scenario's required analyses (purpose checks) decide which fields are released and at what detail; fields no purpose check needs are withheld. Today a hand-written plan per scenario picks the levels, and the manifest records a reason for every field.
-<!-- IF #26 search merged -->A measured search over detail ladders then picks the coarsest level at which every purpose check still passes.<!-- END IF -->
-
-## Four patterns
-
-1. Keyed pseudonyms. Identifiers become HMAC-SHA256 tokens under a secret key, so joins inside a release survive.
-<!-- IF #29 recipient keys -->Keys can be scoped per recipient, so two recipients cannot join their copies.<!-- END IF -->
-2. Fail-closed gate. A closed contract lists allowed files, columns and value forms. An independent rescan, a check for surviving original values and a per-person k check run on the candidate release. A high-severity hit, an error or a check that did not run means exit 1 and nothing is published. Refusal reports give counts and labels, never values.
-3. Privacy manifest. Each assertion, for example paymentCards or nationalIds, can only hold the literal false and is bound to a named check with version, denominator and hits. Claims are per label; we never claim "no identifiers remain". Risks that cannot be zero are listed as residual risks. The manifest is HMAC-signed.
-4. Fully offline. No network, no cloud model; sockets are blocked at start-up. The same input, key and creation time give a byte-identical release.
-
-Verification has two tiers. `pets-release verify <release>` lets the recipient re-run the release-derivable checks and always says "VERIFIED (limited)". `verify --full` with the kit and key re-runs everything, including the signature; a check that cannot run is a failure.
-
-## Scenario HEALTH-S1 (lead)
-
-Emergency-department visits go to a university research group studying crowding and revisits. Patient names and clinical notes are withheld; age is released in 10-year bands, arrival time as hour of day, the visit id as a keyed pseudonym. 53 columns were classified: 16 released, 37 withheld. Per-person k is checked over every released quasi-identifier.
-Required analyses after suppression (1.0 = same answer as the original): H-U2 0.9908, H-U4 0.7952, H-U6 0.9462, H-U7 0.9933, H-U8 0.9505. H-U4 is a policy-enumerated sacrifice, not a full pass. Scorecard privacy score 0.1716 before, 1.0000 after; the scorecard is blind to age_band, not proof of zero risk. Our per-person k minimum is 5 across 24,204 persons, with 0.0000 share below 5.
-
-<!-- IF #24 CS-S1 release -->## Scenario CS-S1 (free text)
-
-Contact-centre transcripts go to an external LLM vendor. Spoken ID numbers, cards, secrets and health remarks are redacted; people become consistent placeholders such as [PERSON_1] within one conversation. We report exact-match recall per label, not the scorer's overlap match: NATIONAL_ID {{measured.redaction.labels.NATIONAL_ID.recall}}, PAYMENT_CARD {{measured.redaction.labels.PAYMENT_CARD.recall}}, IBAN {{measured.redaction.labels.IBAN.recall}}, SECRET {{measured.redaction.labels.SECRET.recall}}.<!-- END IF -->
-
-## Honest limitations
-
-Pseudonymised data is still personal data, and whoever holds the key can re-link it. We do not claim anonymity. The data is synthetic and templated; real speech is messier. Recipient-mode digests catch accidents only; only `verify --full` checks the signature. The gate checks output form; linkage-attacker and attribute-inference rates are not measured in this release. A residual-risk entry reads "not measured" until a measurement exists.
-<!-- IF #24 CS-S1 release -->Names outside our gazetteers and indirect health remarks can survive in text; PERSON, ADDRESS and LOCATION are residual risks, not assertions.<!-- END IF -->
-
-## What is next
-
-An optional LLM front end that turns a request into a needs spec, seeing only the request text and the data dictionary, never data values. More scenarios through the same gate and manifest.
-
-
-
+Scenario and limitations: this release serves its named purpose checks, not individual care, individual profiling or arbitrary later reuse. Pseudonymised data is still personal data; the controller retains the key. Synthetic, templated kit data does not establish performance on real speech. Sacrifices and residual risks remain visible. A high-severity hit, missing required check or errored check refuses the candidate release; low-severity findings outside export assertions remain disclosed risks. Assertions are per label and require their own zero-hit evidence. Recipient verify re-runs release-scope checks and reports limited verification; only verify --full with inputs and key re-runs producer-scope checks and validates the signature. Final proof must include the actual gate totals, both verify outcomes and an honestly demonstrated refusal, not a recycled success line.
+<!-- IF #32 -->An optional LLM front end turns a data request and data dictionary into a needs spec, never receiving row values. This claim requires D39's go decision and final-SHA verification; it does not make release processing a cloud operation.<!-- END IF -->

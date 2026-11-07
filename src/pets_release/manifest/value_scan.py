@@ -4,7 +4,7 @@ The release rescans read CSV cells only, and the producer value checks look for 
 identifier typed into the manifest would otherwise pass every gate and reach the dashboard. This rule runs the
 same independent detectors as the release rescans (``checks.cells._validators``, via ``labels.LABEL_CHECKS``)
 over every manifest string, every map key (at any depth, ``bindings`` and ``signature`` included) and every
-number (as its exact JSON text: counts, scores, parameters alike). It is part of manifest validation, so it runs
+number (by its integer digits only, see ``_number_text``: counts, scores, parameters alike). It is part of manifest validation, so it runs
 after assembly in the writer, in the writer's self-scan, at step 1 of both verify tiers and in the dashboard.
 
 Exempt: only the pattern-locked digest/HMAC/timestamp VALUES listed in ``EXEMPT_VALUES``, and only when the value
@@ -15,6 +15,7 @@ else is an error, high or low severity alike (fail closed).
 from __future__ import annotations
 
 import json
+import math
 import re
 from typing import Any
 
@@ -47,6 +48,20 @@ def _exempt(path: tuple, value: str) -> bool:
     return False
 
 
+def _number_text(n: int | float) -> str:
+    """The identifier candidate of a JSON number: its integer digits (with sign), never its fractional digits.
+
+    An integer is scanned whole. A non-integer is scanned by the exact integer part of its value, so digits after
+    a decimal point never start or extend a match (#120: a decimal aggregate is not a card). Exponent form is
+    handled by value, not by text: ``4.1e+16`` is scanned as its full integer digits, ``4.1e-05`` as ``0``. A
+    non-finite float has no integer digits; its JSON text is scanned (strict parsing and the schema reject it)."""
+    if isinstance(n, int):
+        return str(n)
+    if not math.isfinite(n):
+        return json.dumps(n)
+    return str(int(n))  # truncates toward zero: exact for every finite double
+
+
 def _texts(node: Any, path: tuple, out: list) -> None:
     """(path, text) for every key, string and number under ``node``, minus the exempt digest values."""
     if isinstance(node, dict):
@@ -63,7 +78,7 @@ def _texts(node: Any, path: tuple, out: list) -> None:
     elif isinstance(node, bool) or node is None:
         return
     elif isinstance(node, (int, float)):
-        out.append((path, json.dumps(node)))  # the exact JSON text the canonical manifest carries
+        out.append((path, _number_text(node)))
     else:
         out.append((path, str(node)))  # not JSON-native: scanned as text (schema validation rejects it anyway)
 
