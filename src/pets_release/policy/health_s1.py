@@ -52,8 +52,8 @@ _ROWS = [
     _r(L, "lab_id", "identifier", "pseudonym", False, "record key", "pseudonym", REL),
     _r(L, "test_code", "categorical", "exact", False, "H-U7 (CRP)"),
     _r(L, "test_name", "lab_test", "exact", False, "QI (detector; D33): a person's set of lab tests can single them out",
-       "crp_other", {"ref_column": "test_code", "code": "P-CRP"},
-       "CRP vs other: H-U7 needs CRP identified only (it selects CRP by test_code); other tests grouped to raise k"),
+       "withheld", {}, "no check needs it (H-U7 selects CRP by test_code); as a QI, even its CRP-vs-other rung needs "
+       "more local suppression than the cap (measured, #106)"),
     _r(L, "value", "numeric", "exact", False, "H-U7 (CRP)"),
     _r(L, "unit", "categorical", "exact", False, "H-U7 (CRP)"),
     _r(L, "ref_range", "categorical", "exact", False, "no required check", "withheld", {}, "no check needs it"),
@@ -93,9 +93,10 @@ POLICY = ScenarioPolicy(
          "note": "D22: age_band is released as a renamed derived column, which the kit scorecard does not recognise as a QI; our per-person k over every released QI is authoritative"},
         {"id": "lab-test-name-qi", "status": "open",
          "note": "D33 branch A: lab_results.test_name is a QI (ladder full, CRP vs other, withheld) and counts in "
-                 "per-person k if released; the justified non-QI fallback is not taken. Open: test_code is released "
-                 "exact for H-U7 and is not a detector QI, yet carries the same test identity, so a person's set of "
-                 "lab tests could single them out to someone who knows their test history"},
+                 "per-person k if released; withheld, the cap holds, so the justified non-QI fallback is not taken. "
+                 "Open: test_code is released exact for H-U7 and is not a detector QI, yet carries the same test "
+                 "identity, so a person's set of lab tests could single them out to someone who knows their test "
+                 "history"},
     ),
     suppression={
         "method": "local_suppression", "unit": "persons", "k": 5, "max_share": 0.10,

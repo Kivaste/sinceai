@@ -17,9 +17,9 @@ sys.path.insert(0, str(ROOT / "tests" / "fixtures" / "manifest"))
 
 import build_fixture as fx
 
+from pets_release.detect.released import released_qis
 from pets_release.kit import Kit
 from pets_release.pseudonym import MasterKey
-from pets_release.detect.released import released_qis
 from pets_release.run.context import person_normaliser
 from pets_release.writer import Candidate, ProtectedTable
 from pets_release.writer.assemble import NARRATIVE_KEYS
