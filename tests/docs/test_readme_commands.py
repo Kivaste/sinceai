@@ -183,6 +183,30 @@ def test_every_block_has_a_marker_with_named_reason():
             assert re.fullmatch(r"ticket=\d+", b["arg"]), f"{where}: pending needs ticket=NN"
 
 
+def _add_submission_inputs(kit: Path) -> None:
+    """Synthetic customer_service tables and field catalog from the submission tests' fixture module."""
+    spec = importlib.util.spec_from_file_location("_sub_conftest", ROOT / "tests" / "submission" / "conftest.py")
+    sub = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(sub)
+    cs = kit / "data" / "customer_service"
+    cs.mkdir(parents=True, exist_ok=True)
+    (cs / "turns.csv").write_text(sub.CS_TURNS, encoding="utf-8", newline="")
+    (cs / "conversations.csv").write_text(sub.CS_CONVS, encoding="utf-8", newline="")
+    (kit / "metadata" / "field_catalog.csv").write_text(sub.CATALOG, encoding="utf-8", newline="")
+
+
+def _tables_without_record_key(release: Path) -> list[str]:
+    """Released tables whose record key (SCENARIO_SPEC) is not a released column, read from the manifest."""
+    import json
+
+    from pets_release.run.context import SCENARIO_SPEC
+
+    m = json.loads((release / "privacy_manifest.json").read_text(encoding="utf-8"))
+    keys = SCENARIO_SPEC[m["release"]["scenario"]]["record_keys"]
+    return sorted(f[:-4] for f, spec in m["contract"]["files"].items()
+                  if f[:-4] in keys and keys[f[:-4]] not in spec["columns"])
+
+
 @pytest.mark.parametrize("block", BLOCKS, ids=lambda b: f"block{b['n']}-{b['kind']}")
 def test_block(block, tmp_path):
     conf = _load_conftest()
@@ -238,6 +262,13 @@ def test_block(block, tmp_path):
         assert stmt.startswith(("pets-release ", r".\.venv\Scripts\pets-release.exe ")), (
             f"block {block['n']}: unrunnable statement {stmt!r}"
         )
+        if re.match(r"pets-release submission\b", stmt):
+            _add_submission_inputs(kit)  # after the release run, as in tests/submission (CS tables, catalog)
+            rel = re.search(r"--release\s+\.\.\\sinceai-out\\(\S+)", stmt)
+            assert rel, f"{stmt!r}: no --release under ..\\sinceai-out"
+            # #128: every released table keeps its record key (default plan too), so the row map is recomputable
+            unkeyed = _tables_without_record_key(out_root / rel.group(1))
+            assert not unkeyed, f"the release dropped the record key of {unkeyed}"
         args, proc = execute(stmt)
         executed += 1
         _transcript(f"$ {stmt}\nexit={proc.returncode}\n{proc.stdout[:800]}{proc.stderr[:300]}")
@@ -246,8 +277,68 @@ def test_block(block, tmp_path):
         if args and args[0] == "verify" and "--full" not in args:
             assert "VERIFIED (limited)" in proc.stdout, f"{stmt!r}: no limited-verification line"
             assert "VERIFIED (full)" not in proc.stdout
+        if args and args[0] == "submission":
+            built = "SUBMISSION BUILT (PARTIAL)" if "--partial" in args else "SUBMISSION BUILT (COMPLETE)"
+            assert built in proc.stdout, f"{stmt!r}: no {built!r} line: {proc.stdout[-300:]}"
         assert proc.returncode == 0, f"{stmt!r} exited {proc.returncode}: {proc.stdout[-300:]}{proc.stderr[:300]}"
     assert executed, f"block {block['n']} is marked run but executed no command"
+
+
+def _readme_complete_submission() -> str:
+    stmts = [s for b in BLOCKS if b["kind"] == "run" for s in _statements(b["body"])
+             if s.startswith("pets-release submission")]
+    assert len(stmts) == 1, "README must document exactly one runnable submission example"
+    assert "--partial" not in stmts[0]
+    return stmts[0]
+
+
+def _run_readme_submission(tmp_path, release_args: list[str]):
+    import json
+
+    rh = _load_run_helpers()
+    kit = rh.build_kit(tmp_path / "kit", rh.grouped_qis)
+    (kit / "data" / "unseen").mkdir()
+    shutil.copy(ROOT / "tests" / "fixtures" / "minikit" / "health" / "ed_visits.csv", kit / "data" / "unseen")
+    out_root = tmp_path / "out"
+    env = rh.env({"PETS_KIT": str(kit)})
+    stmt = _expand(_readme_complete_submission(), env).replace("..\\sinceai-out\\", str(out_root) + os.sep)
+    args = [a.strip('"') for a in shlex.split(stmt, posix=False)][1:]
+    release = Path(args[args.index("--release") + 1])
+    pre = subprocess.run([sys.executable, "-m", "pets_release", *release_args, "--kit", str(kit), "--out",
+                          str(release), "--created", "2026-11-07T08:00:00Z"], cwd=ROOT, env=env,
+                         capture_output=True, text=True, encoding="utf-8", check=False)
+    assert pre.returncode == 0, pre.stdout[-300:] + pre.stderr[-300:]
+    _add_submission_inputs(kit)
+    unkeyed = _tables_without_record_key(release)
+    proc = subprocess.run([sys.executable, "-m", "pets_release", *args], cwd=ROOT, env=env,
+                          capture_output=True, text=True, encoding="utf-8", check=False)
+    idx_path = out_root / "pets_submission" / "submission_index.json"
+    idx = json.loads(idx_path.read_text(encoding="utf-8")) if idx_path.is_file() else None
+    return unkeyed, proc, idx
+
+
+def _assert_complete_d46(proc, idx) -> None:
+    assert proc.returncode == 0, proc.stdout[-300:] + proc.stderr[-300:]
+    assert "SUBMISSION BUILT (COMPLETE)" in proc.stdout
+    assert idx["complete"] is True and idx["targetDatasets"] == ["health"] and idx["datasetsMissing"] == []
+    assert [o["scenario"] for o in idx["outOfScope"]] == ["CS-S1"]
+
+
+def test_readme_complete_submission_builds_on_a_hand_plan_release(tmp_path):
+    """The documented complete submission statement, run as written on a --plan hand HEALTH-S1 release (record
+    keys kept), builds a COMPLETE D46 bundle: health present, nothing missing, CS-S1 out of scope."""
+    unkeyed, proc, idx = _run_readme_submission(
+        tmp_path, ["run", "--scenario", "HEALTH-S1", "--plan", "hand"])
+    assert not unkeyed, f"the --plan hand release dropped the record key of {unkeyed}"
+    _assert_complete_d46(proc, idx)
+
+
+def test_readme_complete_submission_on_a_default_plan_release(tmp_path):
+    """The same statement on a default-plan (search) release: the search keeps every record key (#128), so the
+    packager recomputes the row maps and builds a COMPLETE D46 bundle instead of refusing rowmap_unverifiable."""
+    unkeyed, proc, idx = _run_readme_submission(tmp_path, ["run", "--scenario", "HEALTH-S1"])
+    assert not unkeyed, f"the default-plan release dropped the record key of {unkeyed}"
+    _assert_complete_d46(proc, idx)
 
 
 @pytest.mark.parametrize(

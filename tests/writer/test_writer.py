@@ -120,7 +120,7 @@ def test_every_assertion_is_literal_false_and_backed_by_a_clean_gate_record(tmp_
 def test_not_applicable_check_is_listed_in_gate_but_backs_nothing(tmp_path, monkeypatch):
     all_checks()
     na = Check(name="zz.text-only", version="1.0.0", scope="release", unit="turns",
-               run=lambda release, contract, context: Outcome.not_applicable(), applies_to=("text",))
+               run=lambda release, contract, context: Outcome.not_applicable(), applies_to=("enum",))
     monkeypatch.setitem(_registry._CHECKS, "zz.text-only", na)  # fixture contract has no text column
     out, res = _released(tmp_path)
     assert res.status == "released", res.reasons

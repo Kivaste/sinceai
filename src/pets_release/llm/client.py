@@ -1,0 +1,135 @@
+"""OpenAI-compatible chat-completions client with an injected transport.
+
+The transport is `(url, body_bytes, api_key, timeout) -> response_bytes`; it is the only thing that
+touches the network. The CLI supplies a subprocess transport (`transport.py`); tests supply fakes.
+Errors never carry the API key, the request text or model output.
+"""
+from __future__ import annotations
+
+import json
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass
+from urllib.parse import urlparse
+
+from pets_release.llm.dictionary import DataDictionary, validate_dictionary
+from pets_release.llm.draft import DraftRejected, build_draft, parse_model_output
+from pets_release.llm.prompt import build_messages
+from pets_release.llm.screen import MIN_KEY_CHECK, has_credential, has_value_shape
+from pets_release.llm.vocabulary import vocabulary_for
+from pets_release.llm.wire import exact_text
+
+MAX_REQUEST = 2000
+MAX_REPLY_BYTES = 262_144  # whole HTTP body; the sender enforces the same cap before buffering
+MAX_CONTENT_CHARS = 65_536  # model text, before JSON parsing
+TIMEOUT_S = 120
+Transport = Callable[[str, bytes, str, float], bytes]
+
+
+class LlmError(Exception):
+    """Configuration, transport or reply problem. The message is content-free."""
+
+
+@dataclass(frozen=True)
+class LlmConfig:
+    endpoint: str
+    model: str
+    api_key: str = ""
+
+    def __repr__(self) -> str:  # never print the key
+        return f"LlmConfig(endpoint={self.endpoint!r}, model={self.model!r}, api_key=<hidden>)"
+
+
+def resolve_config(endpoint: str | None, model: str | None, env: Mapping[str, str]) -> LlmConfig:
+    endpoint = endpoint or env.get("PETS_LLM_ENDPOINT", "")
+    model = model or env.get("PETS_LLM_MODEL", "")
+    if not endpoint:
+        raise LlmError("no endpoint: pass --endpoint or set PETS_LLM_ENDPOINT")
+    if not model:
+        raise LlmError("no model: pass --model or set PETS_LLM_MODEL")
+    if urlparse(endpoint).scheme not in ("http", "https") or not urlparse(endpoint).netloc:
+        raise LlmError("endpoint must be an http or https URL")
+    cfg = LlmConfig(endpoint, model, env.get("PETS_LLM_API_KEY", ""))
+    _check_key(cfg.api_key)
+    return cfg
+
+
+def _check_key(key: str) -> None:
+    """A configured key must be long enough for the echo screen to be meaningful; refuse before sending."""
+    if not isinstance(key, str):
+        raise LlmError("the API key is not text")
+    if key and len(key) < MIN_KEY_CHECK:
+        raise LlmError(f"the API key is shorter than {MIN_KEY_CHECK} characters, so a draft could not be screened for it; refused")
+
+
+def screen_request(text: str) -> str:
+    """The request must be plain language: no identifier-shaped values, bounded length. Exact `str` only."""
+    text = exact_text(text, "the data request", LlmError).strip()
+    if not text:
+        raise LlmError("the data request is empty")
+    if len(text) > MAX_REQUEST:
+        raise LlmError(f"the data request is longer than {MAX_REQUEST} characters")
+    if has_value_shape(text):
+        raise LlmError("the data request contains a value-shaped string (email, ID or long number); remove it")
+    return text
+
+
+def _wire_config(config: object) -> tuple[str, str, str]:
+    """Exact `LlmConfig` only; endpoint, model and key each read once and normalised to plain `str`."""
+    if type(config) is not LlmConfig:
+        raise LlmError("the configuration is not an LlmConfig; refused before sending")
+    return (
+        exact_text(config.endpoint, "the endpoint", LlmError),
+        exact_text(config.model, "the model name", LlmError),
+        exact_text(config.api_key, "the API key", LlmError),
+    )
+
+
+def _url(endpoint: str) -> str:
+    base = endpoint.rstrip("/")
+    return base if base.endswith("/chat/completions") else base + "/chat/completions"
+
+
+def draft_policy(
+    request: str, dictionary: DataDictionary, config: LlmConfig, transport: Transport
+) -> dict:
+    """Request text + typed dictionary in, validated DRAFT policy out. Raises LlmError or DraftRejected."""
+    # Every value that reaches the transport goes through `exact_text` first; only the copies are used below.
+    request = screen_request(request)
+    dictionary = validate_dictionary(dictionary)  # exact types first; use only the validated copy below
+    endpoint, model, api_key = _wire_config(config)
+    _check_key(api_key)
+    messages = build_messages(request, dictionary, vocabulary_for(dictionary.dataset))
+    body = json.dumps(
+        {"model": model, "messages": messages, "temperature": 0}, sort_keys=True
+    ).encode("utf-8")
+    try:
+        raw = transport(_url(endpoint), body, api_key, TIMEOUT_S)
+    except Exception:  # noqa: BLE001 - the exception text could echo the key or the endpoint
+        raise LlmError("the provider request failed") from None
+    if not isinstance(raw, (bytes, bytearray)) or len(raw) > MAX_REPLY_BYTES:
+        raise LlmError("the provider reply is missing or larger than the size limit")
+    try:
+        content = json.loads(raw)["choices"][0]["message"]["content"]
+    except (ValueError, KeyError, IndexError, TypeError):
+        raise LlmError("the provider reply is not a chat-completions response") from None
+    if not isinstance(content, str) or not content.strip():
+        raise LlmError("the provider reply has no text content")
+    if len(content) > MAX_CONTENT_CHARS:
+        raise LlmError("the model text is larger than the size limit")
+    draft = build_draft(parse_model_output(content), dictionary, request=request, model=model)
+    model_fields = {k: v for k, v in draft.items() if k != "requestSha256"}  # the digest is ours, not the model's
+    if has_credential(list(_strings(model_fields)), api_key):
+        raise DraftRejected("the draft contains a credential or the API key")
+    return draft
+
+
+def _strings(obj):
+    if isinstance(obj, str):
+        yield obj
+    elif isinstance(obj, dict):
+        for k, v in obj.items():
+            yield k
+            yield from _strings(v)
+    elif isinstance(obj, list):
+        for v in obj:
+            yield from _strings(v)

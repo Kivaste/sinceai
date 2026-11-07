@@ -98,14 +98,14 @@ def _as_cs(m):
           "denominator": {"unit": "turns", "n": 40}, "hits": 0}
     m["exportAssertions"]["healthInText"] = False
     m["assertionEvidence"]["healthInText"] = ev
-    m["gate"]["checks"] = sorted([c for c in m["gate"]["checks"] if c["check"] != old] + [dict(ev)],
+    m["gate"]["checks"] = sorted([c for c in m["gate"]["checks"] if c["check"] not in (old, ev["check"])] + [dict(ev)],
                                  key=lambda c: c["check"])
     m["bindings"]["checkVersions"] = {c["check"]: c["version"] for c in m["gate"]["checks"]}
     m["bindings"]["lexiconDigests"] = {"health-lexicon": "a" * 64}
     m["release"]["releaseScopeId"] = _scope_id(m)
     # a CS-S1 contract: its provenance must resolve in the CS-S1 policy's source schema (#62 round 3), so the
     # HEALTH-S1 tables are replaced by one synthetic conversations column justified from its CS-S1 source.
-    m["contract"] = {"files": {"conversations.csv": {"columns": {"intent": {"form": "^[a-z_]{1,32}$", "params": {"rung": "keep"}}},
+    m["contract"] = {"files": {"conversations.csv": {"columns": {"intent": {"form": "text", "params": {"rung": "keep"}}},
                                                       "required": ["intent"]}},
                      "qi": [], "tokens": []}
     m["fieldJustifications"] = [{"table": "conversations", "column": "intent", "outputColumn": "intent",
@@ -496,7 +496,8 @@ def test_cs_manifest_without_lexicon_digest_is_invalid(m):
 
 
 def test_health_manifest_may_bind_no_lexicon(m):
-    assert m["bindings"]["lexiconDigests"] == {} and validate_manifest(m) == []
+    m["bindings"]["lexiconDigests"] = {}
+    assert validate_manifest(m) == []
 
 
 # --- assertion maps are closed even when no scenario rule applies ------------------------------------------------
