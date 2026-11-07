@@ -85,3 +85,10 @@ def test_report_lists_passes_run():
     p = FixedPass("names", ["x"], "PERSON")
     r = redact_conversation("c", turns("x"), passes=[p])
     assert r.passes_run == ("names",)
+
+
+def test_default_placeholder_identity_uses_the_pseudonymisers_normaliser():
+    # ticket 06 folds Finnish case endings for names: 'Virtanen' and 'Virtaselle' are one person
+    p = FixedPass("names", ["Virtanen", "Virtaselle"], "PERSON")
+    r = redact_conversation("c1", turns("Virtanen soitti", "soitin Virtaselle"), passes=[p])
+    assert r.texts == {"t0": "[PERSON_1] soitti", "t1": "soitin [PERSON_1]"}

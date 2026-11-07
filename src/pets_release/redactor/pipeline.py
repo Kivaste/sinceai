@@ -15,6 +15,19 @@ from .structured import StructuredPass
 LEXICON_MODULE = "pets_release.redactor.lexicon"
 
 
+def placeholder_identity(label: str, value: str) -> str:
+    """Value identity for placeholder numbering: the pseudonymiser's normaliser (ticket 06: case,
+    separators, spoken digits, fi/sv name case endings) for the labels it knows, else the local one."""
+    from pets_release.pseudonym import normalise as pseudo_normalise
+
+    if label in PSEUDONYM_LABELS:
+        return pseudo_normalise(value, label)
+    return value_key(label, value)
+
+
+PSEUDONYM_LABELS = frozenset(importlib.import_module("pets_release.pseudonym.normalise").LABELS)
+
+
 @dataclass(frozen=True)
 class Redaction:
     spans: list[dict]  # Span = {record_id, start, end, label, placeholder}, sorted by turn order, start
@@ -59,7 +72,7 @@ def redact_conversation(
     conversation_id: str,
     turns: Sequence[Turn],
     passes: Sequence[Pass] | None = None,
-    normalise: Callable[[str, str], str] = value_key,
+    normalise: Callable[[str, str], str] = placeholder_identity,
 ) -> Redaction:
     """Redact one conversation. ``turns`` must be in conversation order.
 
