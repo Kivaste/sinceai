@@ -91,6 +91,23 @@ def test_empty_score_map_refuses(tmp_path, monkeypatch, capsys):
     _refused(code, out, capsys)
 
 
+@pytest.mark.parametrize("score,missing", [(False, False), (True, False), ("private-score-marker", False),
+                                         ("0.5", False), (float("nan"), False), (float("inf"), False),
+                                         (-float("inf"), False), (False, True)],
+                         ids=["false", "true", "string", "numeric-string", "nan", "inf", "negative-inf", "mixed-missing"])
+def test_rejected_non_numeric_score_refuses(tmp_path, monkeypatch, capsys, score, missing):
+    """Seam: CLI run. Rejected candidates must validate present scores, including alongside unknown scores."""
+    scores = {"check": score}
+    if missing:
+        scores["unscored"] = None
+    code, out = _run(tmp_path, monkeypatch,
+                     _edit(lambda e: not e["accepted"], lambda e: dict(e, scores=scores)))
+    captured = capsys.readouterr()
+    assert code == 2, captured.err
+    assert captured.err == "pets-release run: measured.search: a search step has a non-numeric purpose score\n"
+    assert not out.exists()
+
+
 def _drop_one_score(e):
     first = sorted(e["scores"])[0]
     return dict(e, scores={**e["scores"], first: None})
