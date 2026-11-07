@@ -57,12 +57,15 @@ These apply to every change. A skipped, missing or errored check is a fail, not 
 - Privacy tests call the production checks, and the real CLI at least once. Never hand-build both the writer and the reader in a test. A test that would still pass with the check deleted is not evidence.
 - TDD: write the rule the change adds, list the failure rows from trigger to result, and write a red test for each changed row before any code.
 - A defect class found twice becomes an automated test or a gate check in the same change.
+- **Run only the affected tests** (D27): `powershell -NoProfile -File scripts/overnight/affected-tests.ps1 -Worktree <your worktree> -Run`, which runs `pytest -n 2 -m "not slow"` on the tests mapped from your changed files. Don't run the whole suite. The merger runs the full suite on every merged result.
 
 ### Review
 
-- Every ticket gets two independent read-only reviews, from two different model families (`docs/decisions.md` D13: `claude-agent/sonnet`, `openai/gpt-6.1-sol`, `opencode-go/deepseek-v4.1-flash`). No agent reviews its own change. The orchestrator records the reviews. A new head after fixes gets a fresh review pass.
-- Since Sat 02:15 (D13a), every implementer is Claude (Opus or Sonnet), so ticket reviews and the final integration-branch `/code-review` use `openai/gpt-6.1-sol` and `opencode-go/deepseek-v4.1-flash`. Sonnet does not review Claude-written code.
-- Merge a ticket as soon as both reviews pass and the full suite is green on the merged result. Then remove that ticket's worktree and delete its branch, locally and on origin (`scripts/overnight/resume-prompt.md` §2).
+- Every ticket gets independent read-only reviews from model families other than the implementer's (how many and which is below, per `docs/decisions.md` D13f). No agent reviews its own change. The orchestrator records the reviews. A new head after fixes gets a fresh (delta) review pass.
+- **Implementers** (D13g, user decision): `claude-agent/opus` for core tickets and must-fixes in gate, verify, writer, manifest, keys, measurer and minimiser; **`openai/gpt-6.1-sol#high` for routine tickets, follow-ups, docs and test work**; Sonnet as fallback. **Reviewers always come from families other than the implementer's.** For Claude-written code (D13f), **every** ticket and every delta review gets two reviews, `xai/grok-4.7#medium` + `openai/gpt-6.1-sol#high`. For Sol-written code: `xai/grok-4.7#medium` + `claude-agent/sonnet`. Rounds 2 and later are delta reviews of the fix only. After round 3, only high-severity findings block. The final integration-branch `/code-review` uses `openai/gpt-6.1-sol#high` + `xai/grok-4.7#high`. (`opencode-go/*` models are unavailable until its quota resets; see D13e.)
+- **Reviews follow the `code-review` skill's two axes (D31):** Standards and Spec run as separate read-only sub-agents with a pinned `<base>...<head>`, using the prompts in `scripts/overnight/templates.md` §2–3. Verdicts are recorded per axis. Cross-map: Standards = Grok; Spec = Sol for Claude-written code, Sonnet for Sol-written code. Core fail-closed tickets get all four in round 1.
+- **Close on evidence (D31):** the done-report (templates.md §4) carries the real red and green commands with their outcomes, the affected-tests result, a real-run artefact for the exact head, and both axis verdicts. A ticket closes only when `scripts/overnight/check-done-report.ps1 -Issue <N>` exits 0.
+- Merge a ticket as soon as its required reviews pass and the full suite is green on the merged result. Then remove that ticket's worktree and delete its branch, locally and on origin (`scripts/overnight/resume-prompt.md` §2).
 
 ### Worktrees and commits
 
@@ -72,7 +75,7 @@ These apply to every change. A skipped, missing or errored check is a fail, not 
 
 ### Determinism
 
-- Run Python with `PYTHONUTF8=1` and `PYTHONDONTWRITEBYTECODE=1`, and set `TZ=UTC`. Sort rows before hashing or writing. Do not rely on set order or wall-clock time in outputs.
+- Run Python with `PYTHONUTF8=1` and `TZ=UTC`, and keep bytecode out of the tree with `PYTHONPYCACHEPREFIX=%LOCALAPPDATA%\sinceai-pycache` (D30). Don't set `PYTHONDONTWRITEBYTECODE` on the top-level test command: it forces a recompile on every run. Subprocess environments in the code may keep it, because they still read the shared cache. Sort rows before hashing or writing. Do not rely on set order or wall-clock time in outputs.
 - The same input, key and versions must produce a byte-identical release.
 
 ### Content-free artefacts
