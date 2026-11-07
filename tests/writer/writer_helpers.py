@@ -1,8 +1,12 @@
-"""Fixture candidate for the writer tests, built from ticket 02's hand-made synthetic fixture (no kit data)."""
+"""Fixture candidate, synthetic mini kit and producer context for the writer tests.
+
+Built from ticket 02's hand-made synthetic fixture; nothing is copied from the kit.
+"""
 from __future__ import annotations
 
 import csv
 import io
+import json
 import sys
 from pathlib import Path
 
@@ -13,14 +17,13 @@ sys.path.insert(0, str(ROOT / "tests" / "fixtures" / "manifest"))
 
 import build_fixture as fx
 
-from pets_release.checks import Outcome, all_checks
-from pets_release.checks.registry import Check
-from pets_release.manifest import ASSERTION_EVIDENCE, required_assertions
+from pets_release.kit import Kit
 from pets_release.pseudonym import MasterKey
 from pets_release.writer import Candidate, ProtectedTable
 from pets_release.writer.assemble import NARRATIVE_KEYS
 
 MASTER = MasterKey(fx.FIXTURE_MASTER_KEY)
+KIT_TABLES = ("clinical_notes", "ed_visits", "lab_results")  # clinical_notes is withheld from the release
 
 
 def _frame(data: bytes) -> pd.DataFrame:
@@ -41,32 +44,63 @@ def make_candidate(**over) -> Candidate:
                                      suppressed=frozenset({f"src-{stem}-dropped"})))
     full = fx.manifest(files)
     kw = {"scenario": fx.SCENARIO, "recipient": fx.RECIPIENT, "tables": tuple(tables), "contract": fx.contract(),
-              "inputs": dict(fx.INPUTS), "tool_revision": fx.TOOL_REVISION, "created": fx.CREATED,
-              "narrative": {k: full[k] for k in NARRATIVE_KEYS}, "lexicon_digests": {}}
+          "tool_revision": fx.TOOL_REVISION, "created": fx.CREATED,
+          "narrative": {k: full[k] for k in NARRATIVE_KEYS}, "lexicon_digests": {}}
     kw.update(over)
     return Candidate(**kw)
 
 
-def stub(name: str, *, status_outcome=None, scope=None, unit=None, applies_to=()) -> Check:
-    """A test-only stand-in for a producer-scope check that needs source context the fixture lacks."""
-    ev = {e["check"]: e for e in ASSERTION_EVIDENCE.values()}.get(name, {"scope": "producer", "unit": "cells"})
-    out = status_outcome or Outcome(n=10)
-    return Check(name=name, version="1.0.0", scope=scope or ev["scope"], unit=unit or ev["unit"],
-                 run=lambda release, contract, context: out, applies_to=tuple(applies_to))
+def source_tables(cand) -> dict[str, pd.DataFrame]:
+    """Synthetic source tables matching the candidate's lineage: one person per visit, labs joined to visits."""
+    by = {t.name: t for t in cand.tables}
+    visits, labs = by["ed_visits.csv"], by["lab_results.csv"]
+    vkeys = list(visits.final) + sorted(visits.suppressed)
+    lkeys = list(labs.final) + sorted(labs.suppressed)
+    return {
+        "clinical_notes": pd.DataFrame({"note_key": ["note-0", "note-1"], "visit_key": vkeys[:2],
+                                        "note_text": ["synthetic note", "synthetic note"]}, dtype=str),
+        "ed_visits": pd.DataFrame({"visit_key": vkeys,
+                                   "patient_id": [f"synthetic-person-{i:03d}" for i in range(len(vkeys))],
+                                   "patient_name": [f"Synthetic Person {i:03d}" for i in range(len(vkeys))]},
+                                  dtype=str),
+        "lab_results": pd.DataFrame({"lab_key": lkeys, "visit_key": [vkeys[i % len(vkeys)] for i in range(len(lkeys))]},
+                                    dtype=str),
+    }
 
 
-def checks_with_stubs(scenario: str = fx.SCENARIO, replace: dict | None = None) -> list[Check]:
-    """Full registry; ``producer.*`` checks and unregistered assertion checks replaced by passing stubs."""
-    reg = {c.name: c for c in all_checks()}
-    for name, c in list(reg.items()):  # ticket 11's checks need source context the fixture does not carry
-        if name.startswith("producer."):
-            reg[name] = stub(name, scope=c.scope, unit=c.unit)
-    for a in required_assertions(scenario):
-        ev = ASSERTION_EVIDENCE[a]
-        if ev["scope"] == "producer" or ev["check"] not in reg:
-            reg[ev["check"]] = stub(ev["check"])
-    for name, chk in (replace or {}).items():
-        reg[name] = chk
-    return sorted(reg.values(), key=lambda c: c.name)
+def make_kit(root: Path, cand=None) -> Kit:
+    """A minimal synthetic kit: metadata/scenarios.json plus data/health/<table>.csv for KIT_TABLES."""
+    cand = cand or make_candidate()
+    (root / "metadata").mkdir(parents=True, exist_ok=True)
+    (root / "metadata" / "scenarios.json").write_text(
+        json.dumps([{"id": "HEALTH-S1", "dataset": "health"}, {"id": "CS-S1", "dataset": "customer_service"}]),
+        encoding="utf-8")
+    d = root / "data" / "health"
+    d.mkdir(parents=True, exist_ok=True)
+    for name, frame in source_tables(cand).items():
+        frame.to_csv(d / f"{name}.csv", index=False, lineterminator="\n")
+    return Kit(root)
 
 
+def producer_context(cand) -> dict:
+    """Context ticket 11's producer checks read (k, source, rowmaps, record keys, person, joins, ids, keys)."""
+    by = {t.name: t for t in cand.tables}
+
+    def rowmap(t):  # the writer sorts rows; the checks need the writer's row order
+        pairs = sorted(zip(t.frame.itertuples(index=False, name=None), t.final, strict=True))
+        return pd.DataFrame({"protected_row": [str(i) for i in range(len(pairs))],
+                             "original_record_id": [k for _, k in pairs]}, dtype=str)
+
+    src = source_tables(cand)
+    return {
+        "k": 5,
+        "source": {"ed_visits": src["ed_visits"], "lab_results": src["lab_results"]},
+        "rowmaps": {"ed_visits": rowmap(by["ed_visits.csv"]), "lab_results": rowmap(by["lab_results.csv"])},
+        "record_keys": {"ed_visits": "visit_key", "lab_results": "lab_key"},
+        "person": {"table": "ed_visits", "column": "patient_id"},
+        "joins": [{"table": "lab_results", "column": "visit_key", "ref_table": "ed_visits",
+                   "ref_column": "visit_key"}],
+        "identifiers": [{"table": "ed_visits", "column": "patient_id"},
+                        {"table": "ed_visits", "column": "patient_name"}],
+        "keys": [fx.FIXTURE_MASTER_KEY],
+    }
