@@ -17,7 +17,8 @@ carry ``params.nullable: true`` (``contract_entry(rung)`` returns ``{form, param
 Every plan entry needs a valid ``floor`` (a rung ID or ``withheld``); else ``apply`` refuses.
 
 Rung params: ``geo.topn {n}``; ``num.round {unit}``; ``num.bin {width, origin=0}``;
-``age.band5|band10 {ref_column | ref_date, output="age_band"}``; ``id.pseudonym {label}``.
+``age.band5|band10 {ref_column | ref_date, output="age_band"}``; ``id.pseudonym {label}``;
+``lab.crp_other {ref_column="test_code", code="P-CRP"}`` (``CRP`` / ``other`` by the same row's lab code; D33).
 """
 
 from .apply import DEFAULT_AGE_COLUMN, KeyMaterial, apply, output_column

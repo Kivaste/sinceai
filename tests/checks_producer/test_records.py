@@ -11,6 +11,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from producer_helpers import with_detected
 
 import pets_release.checks as checks_pkg
 from pets_release.checks import all_checks, run_checks
@@ -59,6 +60,7 @@ CONTRACT = {"k": 5, "files": {}, "qi": [{"table": "ed_visits", "column": "sex", 
 
 
 def _records(rel, ctx):
+    ctx = with_detected(rel, CONTRACT, ctx)  # production detector QI set (#106)
     return {r["check"]: r for r in run_checks(rel, CONTRACT, ctx, checks=_ours()).to_dict()["records"]}
 
 
@@ -80,7 +82,8 @@ def test_every_check_refuses_its_planted_hit_through_the_runner_deterministicall
         for v in rec["violations"]:
             assert set(v) == VIOLATION_KEYS
             assert all(isinstance(x, int) for x in v["locations"])
-    assert run_checks(_release(h, "c"), CONTRACT, _ctx(h), checks=_ours()).refused
+    rel_c = _release(h, "c")
+    assert run_checks(rel_c, CONTRACT, with_detected(rel_c, CONTRACT, _ctx(h)), checks=_ours()).refused
 
 
 def test_planted_pass_file_does_not_turn_a_fail_into_a_pass(h):
