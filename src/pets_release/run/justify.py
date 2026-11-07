@@ -13,6 +13,7 @@ a different rung than the plan's, raises ``JustificationError``.
 """
 from __future__ import annotations
 
+import math
 import re
 
 from pets_release.ladders import WITHHELD, output_column
@@ -97,18 +98,34 @@ def _cited(text: str) -> list[int]:
     return [int(n) for n in re.findall(r"search step (\d+)", text)]
 
 
+def _measured_number(v) -> bool:
+    return isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
+
+
 def search_summary(log: list, stats: dict) -> dict:
-    """``measured.search``: one point per non-final candidate (risk = worst component, utility = mean score,
-    a missing score counting 0), the candidate count and the accepted count. Risk and utility are rounded to
-    6 decimals, like the manifest's other shares: a raw float's long digit run would read as an identifier
-    to the manifest identifier-shape scan (#61)."""
+    """``measured.search``: one point per non-final candidate (risk = worst component, utility = mean score),
+    the candidate count and the accepted count. Risk and utility are rounded to 6 decimals, like the manifest's
+    other shares: a raw float's long digit run would read as an identifier to the manifest identifier-shape
+    scan (#61).
+
+    Fails closed (#133): an unknown figure is never published as a measured 0.0. A step with an empty or
+    non-numeric risk map, with an empty score map, or accepted with a missing score, raises
+    ``JustificationError``. A rejected candidate with a check the search could not score (not answerable or
+    error) has an unknown utility: ``null``, never a stand-in 0.0."""
     steps = [e for e in log if e["step"] != "final"]
     points = []
     for e in steps:
-        risk = list(e["risk"].values()) or [0.0]
-        scores = [0.0 if v is None else float(v) for v in e["scores"].values()] or [0.0]
+        risk = list(e["risk"].values())
+        if not risk or not all(_measured_number(v) for v in risk):
+            raise JustificationError("measured.search: a search step has no measured risk")
+        if not e["scores"]:
+            raise JustificationError("measured.search: a search step has no purpose scores")
+        if e["accepted"] and any(v is None for v in e["scores"].values()):
+            raise JustificationError("measured.search: an accepted search step has a missing purpose score")
+        scores = list(e["scores"].values())
+        utility = None if any(v is None for v in scores) else round(sum(map(float, scores)) / len(scores), 6)
         points.append({"step": e["step"], "risk": round(float(max(risk)), 6),
-                       "utility": round(sum(scores) / len(scores), 6), "accepted": bool(e["accepted"])})
+                       "utility": utility, "accepted": bool(e["accepted"])})
     return {"status": "measured",
             "source": "search log in the scoring folder (search_log.jsonl): one candidate per point",
             "candidates": len(steps), "accepted": sum(1 for p in points if p["accepted"]),
