@@ -287,16 +287,18 @@ def test_contract_form_unknown_rung_raises():
         contract_form("withheld")
 
 
-# ---- ts.hour_of_day (07b): date-free `HH:00`, coarser than ts.month_hour
-def test_hour_of_day_is_on_timestamp_ladder_between_month_hour_and_day():
-    from pets_release.ladders.rungs import coarseness
+# ---- ts.hour_of_day (07b, #89): date-free `HH:00`, coarser than ts.month on the privacy order
+def test_hour_of_day_is_coarser_than_month_on_the_timestamp_ladder():
+    from pets_release.ladders.rungs import SACRIFICE_ONLY_RUNGS, at_least_as_coarse
 
     lad = LADDERS["timestamp"]
-    assert lad.index("ts.month_hour") < lad.index("ts.hour_of_day")
-    from pets_release.ladders.rungs import at_least_as_coarse
-
-    assert at_least_as_coarse("ts.hour_of_day", "ts.month_hour")
-    assert not at_least_as_coarse("ts.month_hour", "ts.hour_of_day")
+    assert lad == ("ts.exact", "ts.hour", "ts.month_hour", "ts.day", "ts.week", "ts.month", "ts.hour_of_day",
+                   "withheld")
+    for finer in ("ts.exact", "ts.hour", "ts.month_hour", "ts.day", "ts.week", "ts.month"):
+        assert at_least_as_coarse("ts.hour_of_day", finer)
+        assert not at_least_as_coarse(finer, "ts.hour_of_day")
+    assert at_least_as_coarse("withheld", "ts.hour_of_day")
+    assert "ts.hour_of_day" in SACRIFICE_ONLY_RUNGS
 
 
 def test_hour_of_day_form_values_and_nullable():
@@ -333,25 +335,10 @@ def test_hour_of_day_finer_than_floor_refused():
         apply(plan, {"t": pd.DataFrame({"x": TS}, dtype=str)}, FakeKeys())
 
 
-# ---- follow-up #89: ts.hour_of_day is a branch off the timestamp ladder, not a rung between month_hour and day
-def test_hour_of_day_not_comparable_with_date_rungs():
-    from pets_release.ladders.rungs import at_least_as_coarse, coarseness
-
-    for date_rung in ("ts.day", "ts.week", "ts.month"):
-        assert not at_least_as_coarse("ts.hour_of_day", date_rung)
-        assert not at_least_as_coarse(date_rung, "ts.hour_of_day")
-    for fine in ("ts.exact", "ts.hour", "ts.month_hour", "ts.hour_of_day"):
-        assert at_least_as_coarse("ts.hour_of_day", fine)
-    assert not at_least_as_coarse("ts.month_hour", "ts.hour_of_day")
-    assert at_least_as_coarse("withheld", "ts.hour_of_day")
-    assert at_least_as_coarse("ts.day", "ts.month_hour")
-    with pytest.raises(LadderError):  # no position on the total order: fail closed
-        coarseness("ts.hour_of_day")
-
-
-@pytest.mark.parametrize("rung,floor", [("ts.hour_of_day", "ts.day"), ("ts.day", "ts.hour_of_day"),
-                                       ("ts.month", "ts.hour_of_day"), ("ts.hour_of_day", "ts.week")])
-def test_apply_refuses_incomparable_rung_floor(rung, floor):
+# ---- follow-up #89: fail closed on unknown and cross-kind rungs
+@pytest.mark.parametrize("rung,floor", [("ts.month", "ts.hour_of_day"), ("ts.day", "ts.hour_of_day"),
+                                       ("ts.hour_of_day", "age.band5"), ("ts.nope", "ts.exact")])
+def test_apply_refuses_rung_finer_than_floor_or_unknown(rung, floor):
     plan = _plan([("t", "x", rung, None)])
     plan[0]["floor"] = floor
     with pytest.raises(LadderError):

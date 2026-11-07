@@ -3,9 +3,7 @@
 Phases, each in fixed (table, column) order; linked columns move as one unit:
   start        every permitted field at its floor (alternative floors only if the start is rejected)
   withhold     try withholding each released unit; adopt if every purpose check still passes
-  coarsen      step each released unit one rung coarser while adopted; the ladders are a partial order, so
-               every branch (e.g. ``ts.hour_of_day`` vs the date rungs from ``ts.month_hour``) is walked
-               independently and the better branch end is adopted (ties keep the spec-ladder branch)
+  coarsen      step each released unit one rung coarser while adopted
   joint        the policy's enumerated joint QI moves; adopt only on a strictly better objective
   sacrifice    only if the k shortfall still exceeds the suppression budget: coarsen sacrifice ``via``
                columns and retry joint moves, accepting a policy-enumerated sacrifice at or above its floor
@@ -21,8 +19,7 @@ strict-phase plan only in sacrifice ``via`` columns, at least one of them that c
 re-check a drop caused by suppression is also waived for an enumerated sacrifice at or above its floor whose
 ``via`` column is coarser than its floor, if the check passed strictly before suppression. Errors, not
 answerable and missing results are never waived. Objective: minimise the worst risk component, then the
-mean; ties prefer the strictly coarser plan on the ladders' partial order (never an incomparable rung), then the
-earlier candidate. At most ``budget`` candidate evaluations.
+mean; ties prefer the coarser plan, then the earlier candidate. At most ``budget`` candidate evaluations.
 """
 
 from __future__ import annotations
@@ -36,8 +33,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from pets_release.ladders import LADDERS, WITHHELD, apply, at_least_as_coarse, output_column
-from pets_release.ladders.rungs import BRANCH_RUNGS
+from pets_release.ladders import LADDERS, SACRIFICE_ONLY_RUNGS, WITHHELD, apply, output_column
 from pets_release.policy.model import validate_plan
 
 from . import risk as R
@@ -195,7 +191,8 @@ class _Search:
         lad = LADDERS[self.family(key)]
         if floor not in lad:  # alternative floor: that rung or withheld only
             return (floor, WITHHELD)
-        return tuple(r for r in lad[lad.index(floor):] if at_least_as_coarse(r, floor))  # skip incomparable rungs
+        # sacrifice-only rungs (#89) are never an ordinary step; only an enumerated rung sacrifice adopts one
+        return tuple(r for r in lad[lad.index(floor):] if r == floor or r not in SACRIFICE_ONLY_RUNGS)
 
     def rung_params(self, key, rung):
         """Params for ``rung`` on ``key``, or None if the rung cannot be parameterised (skipped)."""
@@ -230,18 +227,12 @@ class _Search:
     def digest(self, cand) -> str:
         return hashlib.sha256(canonical([[k[0], k[1], *cand[k][:2]] for k in sorted(cand)]).encode()).hexdigest()
 
-    def dominates(self, a, b) -> bool:
-        """``a`` is strictly coarser than ``b``: every column at a rung at least as coarse (the ladders' partial
-        order, so incomparable rungs such as ``ts.hour_of_day`` vs ``ts.day`` never count), one strictly."""
-        strict = False
-        for key in b:
-            ra, rb = a[key][0], b[key][0]
-            if ra == rb:
-                continue
-            if not at_least_as_coarse(ra, rb):
-                return False
-            strict = True
-        return strict
+    def coarseness(self, cand) -> float:
+        tot = 0.0
+        for key, (rung, _, floor) in cand.items():
+            lad = self.ladder(key, floor)
+            tot += lad.index(rung) / max(1, len(lad) - 1)
+        return tot
 
     def column(self, key, rung, pj, floor):
         """(output name, Series) via ticket 07's apply on a one-column plan (memoised)."""
@@ -333,15 +324,9 @@ class _Search:
         rv = {c: rv[c] for c in self.p.risk_vector}
         return {"results": results, "risk": rv, "cached": hits == len(self.checks), "pk": pk}
 
-    def risk_key(self, ev):
+    def objective(self, ev, cand):
         vals = list(ev["risk"].values()) or [0.0]
-        return (max(vals), sum(vals) / len(vals))
-
-    def better(self, ev, cand, ev_ref, ref) -> bool:
-        """Strictly better objective: lower (worst, mean) risk; on a tie, strictly coarser on the partial order.
-        Incomparable plans with equal risk are not better (the earlier candidate is kept)."""
-        a, b = self.risk_key(ev), self.risk_key(ev_ref)
-        return a < b or (a == b and self.dominates(cand, ref))
+        return (max(vals), sum(vals) / len(vals), -self.coarseness(cand))
 
     def failing(self, results):
         return sorted(c for c, r in results.items() if not _strict(r))
@@ -391,7 +376,7 @@ class _Search:
         rung or floor off the ladder, is never coarser)."""
         lad = LADDERS[self.family(key)]
         fl = self.floor_rung[key]
-        return rung in lad and fl in lad and rung != fl and at_least_as_coarse(rung, fl)
+        return rung in lad and fl in lad and lad.index(rung) > lad.index(fl)
 
     # ---------------------------------------------------------------- logging
     def moves(self, cand, cur):
@@ -464,7 +449,14 @@ class _Search:
 
         def try_strict(cand, desc, strictly_better=False):
             nonlocal cur, cur_ev
-            ok, ev, step = self._attempt_strict(cand, cur, cur_ev, desc, strictly_better)
+            ev = self.evaluate(cand)
+            fails = self.failing(ev["results"])
+            o_new, o_cur = self.objective(ev, cand), self.objective(cur_ev, cur)
+            better = o_new < o_cur if strictly_better else o_new[:2] <= o_cur[:2]
+            ok = not fails and better
+            why = "adopted" if ok else ("rejected (" + ",".join(fails) + " below 0.9 or not ok)" if fails
+                                        else "rejected (objective not improved)")
+            step = self.record(cand, cur, ev, ok, f"{desc}: {why}")
             if ok:
                 cur, cur_ev = cand, ev
             return ok, step
@@ -481,12 +473,23 @@ class _Search:
             ok, step = try_strict(cand, f"withhold {self._name(u)}")
             if ok:
                 step_reason(u[0], "withheld; every purpose check passes without it", step)
-        # coarsening pass: walk every branch of the unit's ladder (partial order) from the current rung
+        # coarsening pass
         for u in self.units:
-            end = self._walk(u, cur, cur_ev, self._attempt_strict, "coarsen", lambda ev: True)
-            if end is not None:
-                cur, cur_ev, step = end
-                step_reason(u[0], f"{cur[u[0]][0]}: coarsest rung at which every purpose check passes", step)
+            ok = True
+            while ok and not self.out_of_budget():
+                rung = cur[u[0]][0]
+                if rung == WITHHELD:
+                    break
+                nxt = self._next_rung(u, cur)
+                if nxt is None:
+                    break
+                r2, pj = nxt
+                cand = dict(cur)
+                for key in u:
+                    cand[key] = (r2, pj, cur[key][2])
+                ok, step = try_strict(cand, f"coarsen {self._name(u)} to {r2}")
+                if ok:
+                    step_reason(u[0], f"{r2}: coarsest rung at which every purpose check passes", step)
         # joint QI moves
         for i, mv in enumerate(self.p.joint_qi_moves):
             if self.out_of_budget():
@@ -502,17 +505,22 @@ class _Search:
         self.base_ev = cur_ev
         # sacrifice phase
         if self.p.sacrifices and self._needs_more(cur_ev):
-            def attempt_sacrifice(cand, state, state_ev, desc):
-                ev2, step = self._try_sacrifice(cand, state, state_ev, base, desc)
-                return ev2 is not None, ev2, step
-
             for u in self.units:
                 if not set(u) <= self.via_all:
                     continue
-                end = self._walk(u, cur, cur_ev, attempt_sacrifice, "sacrifice: coarsen", self._needs_more)
-                if end is not None:
-                    cur, cur_ev, step = end
-                    step_reason(u[0], f"{cur[u[0]][0]}: enumerated sacrifice to reach k", step)
+                while self._needs_more(cur_ev) and not self.out_of_budget():
+                    nxt = self._next_rung(u, cur) if cur[u[0]][0] != WITHHELD else None
+                    if nxt is None:
+                        break
+                    cand = dict(cur)
+                    for key in u:
+                        cand[key] = (nxt[0], nxt[1], cur[key][2])
+                    ev2, step = self._try_sacrifice(cand, cur, cur_ev, base,
+                                                    f"sacrifice: coarsen {self._name(u)} to {nxt[0]}")
+                    if ev2 is None:
+                        break
+                    cur, cur_ev = cand, ev2
+                    step_reason(u[0], f"{nxt[0]}: enumerated sacrifice to reach k", step)
             for i, mv in enumerate(self.p.joint_qi_moves):
                 if not self._needs_more(cur_ev) or self.out_of_budget():
                     break
@@ -528,7 +536,7 @@ class _Search:
 
     def _try_sacrifice(self, cand, cur, cur_ev, base, desc):
         ev = self.evaluate(cand)
-        ok = self.sacrifice_ok(ev["results"], cand, base) and self.better(ev, cand, cur_ev, cur)
+        ok = self.sacrifice_ok(ev["results"], cand, base) and self.objective(ev, cand) < self.objective(cur_ev, cur)
         fails = self.failing(ev["results"])
         why = "adopted" + (" (sacrificing " + ",".join(fails) + ")" if fails else "") if ok else (
             "rejected (" + ",".join(fails) + " not a waivable sacrifice)" if fails and not self.sacrifice_ok(
@@ -555,64 +563,17 @@ class _Search:
     def _name(self, u):
         return "+".join(f"{t}.{c}" for t, c in u)
 
-    def _attempt_strict(self, cand, ref, ref_ev, desc, strictly_better=False):
-        """Measure ``cand`` against ``ref``: every purpose check strict, and risk no worse (or, for joint
-        moves, a strictly better objective). Returns (ok, ev, step); the caller adopts."""
-        ev = self.evaluate(cand)
-        fails = self.failing(ev["results"])
-        better = (self.better(ev, cand, ref_ev, ref) if strictly_better
-                  else self.risk_key(ev) <= self.risk_key(ref_ev))
-        ok = not fails and better
-        why = "adopted" if ok else ("rejected (" + ",".join(fails) + " below 0.9 or not ok)" if fails
-                                    else "rejected (objective not improved)")
-        return ok, ev, self.record(cand, ref, ev, ok, f"{desc}: {why}")
-
-    def _successors(self, key, state):
-        """Immediate coarser rungs (with params, never ``withheld``) of the column's current rung on the
-        partial order bounded by its floor; spec-ladder rungs first, then branch rungs (e.g. from
-        ``ts.month_hour``: ``ts.day``, then ``ts.hour_of_day``)."""
-        rung, _, floor = state[key]
-        within = self.ladder(key, floor)
-        above = [r for r in self.ladder(key, rung) if r not in (rung, WITHHELD) and r in within
-                 and self.rung_params(key, r) is not None]
-        nxt = [s for s in above if not any(t != s and s in self.ladder(key, t) for t in above)]
-        lad = LADDERS[self.family(key)]
-        return sorted(nxt, key=lambda r: (r in BRANCH_RUNGS, lad.index(r)))
-
-    def _walk(self, u, state, ev, attempt, label, cont):
-        """Walk every branch from ``state`` one rung at a time while ``attempt`` accepts and ``cont`` holds.
-        Each branch is explored independently; its end is compared with the others by ``better`` (the first
-        branch wins ties, also incomparable ones). Steps on a branch not chosen are re-marked not accepted.
-        Returns (state, ev, step of the adopted rung) or None if nothing was accepted."""
+    def _next_rung(self, u, cur):
         key = u[0]
-        if state[key][0] == WITHHELD or not cont(ev):
-            return None
-        best, best_entries = None, []
-        for r2 in self._successors(key, state):
-            if self.out_of_budget():
-                break
-            pj = canonical(self.rung_params(key, r2))
-            cand = dict(state)
-            for k2 in u:
-                cand[k2] = (r2, pj, state[k2][2])
-            n0 = len(self.log)
-            ok, ev2, step = attempt(cand, state, ev, f"{label} {self._name(u)} to {r2}")
-            if not ok:
-                continue
-            end = self._walk(u, cand, ev2, attempt, label, cont) or (cand, ev2, step)
-            entries = [e for e in self.log[n0:] if e["accepted"]]
-            if best is None or self.better(end[1], end[0], best[1], best[0]):
-                self._unadopt(best_entries, end[0][key][0])
-                best, best_entries = end, entries
-            else:
-                self._unadopt(entries, best[0][key][0])
-        return best
-
-    @staticmethod
-    def _unadopt(entries, kept):
-        for e in entries:
-            e["accepted"] = False
-            e["reason"] = e["reason"].rsplit(": ", 1)[0] + f": measured, not adopted (branch ending at {kept} kept)"
+        rung, _, floor = cur[key]
+        lad = self.ladder(key, floor)
+        i = lad.index(rung) + 1
+        while i < len(lad) and lad[i] != WITHHELD:
+            pr = self.rung_params(key, lad[i])
+            if pr is not None:
+                return lad[i], canonical(pr)
+            i += 1
+        return None
 
     def _joint(self, mv, cur):
         cand = dict(cur)

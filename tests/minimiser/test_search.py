@@ -84,7 +84,8 @@ def test_plan_valid_against_policy(syn):
     assert r[("labs", "val")] == "withheld"
     assert r[("visits", "flag")] == "keep"
     assert r[("visits", "dx")] == "icd.3"  # chapter scores 0 on U-DX
-    assert r[("visits", "ts")] == "ts.hour_of_day"  # day has no hour (U-HOUR)
+    # day has no hour (U-HOUR); hour_of_day is sacrifice-only (#89) and not enumerated here
+    assert r[("visits", "ts")] == "ts.month_hour"
     assert r[("visits", "dob")] == "age.band10"
     assert r[("visits", "visit_id")] == r[("labs", "visit_id")] == "id.pseudonym"  # linked, U-JOIN
 

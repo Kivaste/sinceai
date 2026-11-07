@@ -13,7 +13,9 @@ VALIDATOR_FORMS = frozenset({"hex64", "text", "integer", "decimal", "enum"})
 
 # Ladders, finest first, `withheld` always last. Order follows the spec.
 LADDERS: dict[str, tuple[str, ...]] = {
-    "timestamp": ("ts.exact", "ts.hour", "ts.month_hour", "ts.hour_of_day", "ts.day", "ts.week", "ts.month", WITHHELD),
+    # ts.hour_of_day (date-free HH:00) is coarser than ts.month on the privacy order (#89): for linkage it drops
+    # all date meaning. It is in SACRIFICE_ONLY_RUNGS: never an ordinary coarsening step.
+    "timestamp": ("ts.exact", "ts.hour", "ts.month_hour", "ts.day", "ts.week", "ts.month", "ts.hour_of_day", WITHHELD),
     "age": ("age.band5", "age.band10", WITHHELD),
     "geo": ("geo.full", "geo.topn", WITHHELD),
     "icd10": ("icd.full", "icd.3", "icd.chapter", WITHHELD),
@@ -79,23 +81,15 @@ def contract_form(rung: str) -> str:
         raise LadderError(f"no contract form for rung {rung!r}") from None
 
 
-# The timestamp ladder is a walk order (the search tries rungs in this order), not a total privacy order.
-# `ts.hour_of_day` (date-free `HH:00`) is a branch: coarser than `ts.month_hour` and everything finer, but
-# NOT comparable with `ts.day`/`ts.week`/`ts.month` (it drops the date, they drop the hour). Spec ladder:
-# exact, hour, month_hour, day, week, month, withheld; hour_of_day hangs off month_hour.
-BRANCH_RUNGS: dict[str, frozenset[str]] = {
-    "ts.hour_of_day": frozenset({"ts.exact", "ts.hour", "ts.month_hour", "ts.hour_of_day"}),
-}  # rung -> rungs it is at least as coarse as (besides `withheld`)
+# Rungs a plan may hold only as a policy-enumerated rung sacrifice with measured scores (#89): no ordinary
+# coarsening step, score-sacrifice walk or joint move ever lands on one.
+SACRIFICE_ONLY_RUNGS = frozenset({"ts.hour_of_day"})
 
 
 def coarseness(rung: str) -> tuple[str, int]:
-    """(kind, position on its ladder) for a rung; `withheld` is kind '*'.
-
-    Refuses branch rungs: they have no position on a total order (use ``at_least_as_coarse``)."""
+    """(kind, position on its ladder) for a rung; `withheld` is kind '*'."""
     if rung == WITHHELD:
         return ("*", 10**6)
-    if rung in BRANCH_RUNGS:
-        raise LadderError(f"rung {rung!r} is not on a total order; compare with at_least_as_coarse")
     kind = RUNG_KIND.get(rung)
     if kind is None:
         raise LadderError(f"unknown rung {rung!r}")
@@ -103,8 +97,8 @@ def coarseness(rung: str) -> tuple[str, int]:
 
 
 def at_least_as_coarse(rung: str, floor: str) -> bool:
-    """True iff ``rung`` releases no more than ``floor`` (same ladder kind). Fail closed: incomparable rungs,
-    unknown rungs and rungs of different kinds are False; `withheld` is coarser than everything."""
+    """True iff ``rung`` releases no more than ``floor`` (same ladder kind, ladder position). Fail closed: unknown
+    rungs and rungs of different kinds are False; `withheld` is coarser than everything."""
     if rung not in KNOWN_RUNGS or floor not in KNOWN_RUNGS:
         return False
     if rung == WITHHELD:
@@ -112,10 +106,6 @@ def at_least_as_coarse(rung: str, floor: str) -> bool:
     if floor == WITHHELD:
         return False
     if RUNG_KIND[rung] != RUNG_KIND[floor]:
-        return False
-    if rung in BRANCH_RUNGS:
-        return floor in BRANCH_RUNGS[rung]
-    if floor in BRANCH_RUNGS:
         return False
     lad = LADDERS[RUNG_KIND[rung]]
     return lad.index(rung) >= lad.index(floor)
