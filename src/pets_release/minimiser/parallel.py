@@ -58,15 +58,12 @@ def _free_ram() -> int | None:
 
 
 def effective_workers(requested: int) -> int:
-    """``requested`` capped at min(cores, free RAM / 2 GiB), at least 1. Never recorded in any artefact."""
-    cores = os.cpu_count()
-    if cores is None:  # unknown core count: no pool (fail safe, never a guessed number)
-        return 1
-    n = min(int(requested), cores)
-    ram = _free_ram()
-    if ram is not None:
-        n = min(n, ram // RAM_PER_WORKER)
-    return max(1, n)
+    """``requested`` capped at min(cores, free RAM / 2 GiB), at least 1. Never recorded in any artefact. An
+    unmeasured core count or free memory is never replaced by a guess: the pool cannot be sized (WorkerFailed)."""
+    cores, ram = os.cpu_count(), _free_ram()
+    if cores is None or ram is None:
+        raise WorkerFailed("search workers: core count or free memory not measurable; run with --workers 1")
+    return max(1, min(int(requested), cores, ram // RAM_PER_WORKER))
 
 
 def _guard_active() -> bool:

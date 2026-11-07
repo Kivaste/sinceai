@@ -976,7 +976,10 @@ def search(policy, tables: Mapping[str, pd.DataFrame], keys, *, purpose: Callabl
     kw = {"purpose": purpose, "purpose_all": purpose_all, "kspec": kspec, "budget": budget,
           "read_sets": dict(read_sets or {}), "params": params, "redactor": redactor, "risk_extra": risk_extra}
     s = _Search(policy, tables, keys, **kw)
-    n = effective_workers(workers) if workers > 1 else 1
+    try:
+        n = effective_workers(workers) if workers > 1 else 1
+    except WorkerFailed as e:
+        raise MinimiserRefused(str(e)) from None
     if n > 1:  # workers get no keys, no redactor (keyed columns come from here) and never run the final re-check
         s.pool = Pool(n, {"policy": policy, "tables": tables, "keys": NoKeys(), **kw, "purpose_all": None,
                           "redactor": None}, s.main_columns)
