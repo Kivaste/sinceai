@@ -13,7 +13,7 @@ VALIDATOR_FORMS = frozenset({"hex64", "text", "integer", "decimal", "enum"})
 
 # Ladders, finest first, `withheld` always last. Order follows the spec.
 LADDERS: dict[str, tuple[str, ...]] = {
-    "timestamp": ("ts.exact", "ts.hour", "ts.month_hour", "ts.day", "ts.week", "ts.month", WITHHELD),
+    "timestamp": ("ts.exact", "ts.hour", "ts.month_hour", "ts.hour_of_day", "ts.day", "ts.week", "ts.month", WITHHELD),
     "age": ("age.band5", "age.band10", WITHHELD),
     "geo": ("geo.full", "geo.topn", WITHHELD),
     "icd10": ("icd.full", "icd.3", "icd.chapter", WITHHELD),
@@ -30,6 +30,8 @@ CONTRACT_FORMS: dict[str, str] = {
     "ts.exact": r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$",
     "ts.hour": r"^\d{4}-\d{2}-\d{2}T\d{2}:00$",
     "ts.month_hour": r"^\d{4}-\d{2}-01T\d{2}:00$",
+    # Date-free `HH:00`: pets_eval.to_hour parses it to the right hour (verified); no sentinel date needed.
+    "ts.hour_of_day": r"^\d{2}:00$",
     "ts.day": r"^\d{4}-\d{2}-\d{2}$",
     "ts.week": r"^\d{4}-W\d{2}$",
     "ts.month": r"^\d{4}-\d{2}$",
