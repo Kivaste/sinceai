@@ -13,6 +13,8 @@ Rows (trigger -> result):
   an item of a's enum that is a source value but not a released value of a -> fail
   a column name at a structural path (inventory[].column, contract key) -> pass
   the same column name (also a source value) as the whole fitFor[].reason or as an unrelated params key -> fail
+  (r3) a column name at measured.kSets.sets[].qi[].{table,column,derived_from} / withheld[].{table,column} -> pass
+  (r3) the same column name (a source value) at kSets withheld[].reason, sets[].reason, source, qi[].note -> fail
   prefix index + occurs == naive substring scan, on fixed boundary cases and seeded random cases
 """
 from __future__ import annotations
@@ -114,7 +116,19 @@ def test_column_name_at_structural_paths_passes(tmp_path):
     assert _status(_rel(tmp_path, m), _source()) == ("pass", 0)
 
 
+def test_column_name_at_k_sets_structural_paths_passes(tmp_path):
+    """#149 r3: measured.kSets.sets[].qi[].{table,column,derived_from} and withheld[].{table,column}."""
+    q = {"table": "t", "column": "chief_complaint", "derived_from": "chief_complaint"}
+    m = {"measured": {"kSets": {"status": "measured", "sets": [{"set": "scenario", "qi": [q]}],
+                                "withheld": [{"table": "t", "column": "chief_complaint", "reason": "policy floor"}]}}}
+    assert _status(_rel(tmp_path, m), _source()) == ("pass", 0)
+
+
 @pytest.mark.parametrize("manifest", [
+    {"measured": {"kSets": {"withheld": [{"table": "t", "column": "a", "reason": "chief_complaint"}]}}},
+    {"measured": {"kSets": {"sets": [{"set": "scenario", "status": "not_measured", "reason": "chief_complaint"}]}}},
+    {"measured": {"kSets": {"source": "chief_complaint"}}},
+    {"measured": {"kSets": {"sets": [{"set": "scenario", "qi": [{"table": "t", "note": "chief_complaint"}]}]}}},
     {"fitFor": [{"scenario": "HEALTH-S1", "reason": "chief_complaint"}]},
     {"pets": [{"table": "t", "column": "a", "params": {"chief_complaint": 1}}]},
     {"inventory": [{"table": "t", "column": "a", "note": "chief_complaint"}]},

@@ -30,6 +30,10 @@ Failure rows (trigger -> result):
   (#149 r2)                                          -> RELEASED at 19870a2 (header exemption at any path); must
                                                         refuse selfscan:manifest-value
   the same kit without the plant                     -> released (structural header paths stay exempt)
+  honest hand release with #146's measured.kSets (a withheld column name holding a source value) (#149 r3)
+                                                     -> REFUSED at 4b27878 (kSets name paths not listed); must release
+  a withheld note in kSets withheld[0].reason or kSets.source       -> refuses (free text stays scanned)
+  a source value equal to a column name as the whole kSets withheld[0].reason -> refuses
   honest hand release: a source category value occurs inside a column-name string (e.g. inventory[].column)
                                                      -> released (no false positive)
   (identifier values, e.g. patient_name or a raw visit_id, are already refused by producer.original-values in
@@ -232,6 +236,61 @@ def test_source_value_equal_to_header_honest_release_releases(tmp_path, monkeypa
     code, _ = _run(tmp_path, monkeypatch, None)
     capsys.readouterr()
     assert code == 0
+
+
+def test_honest_release_with_k_sets_names_releases(tmp_path, monkeypatch, capsys):
+    """#149 r3 (with #146): measured.kSets writes table/column names by construction (sets[].qi[], withheld[]);
+    a withheld column whose NAME contains a source value must not refuse the honest release."""
+    kit = build_kit(tmp_path / "kit", coarse_qis)
+    code, out = _run(tmp_path, monkeypatch, None)
+    capsys.readouterr()
+    assert code == 0
+    ks = json.loads((out / "privacy_manifest.json").read_text(encoding="utf-8"))["measured"]["kSets"]
+    names = {w["column"] for w in ks["withheld"]} | {q["column"] for s in ks["sets"] for q in s.get("qi", [])}
+    values = {v for t in ("clinical_notes", "ed_visits", "lab_results", "published_weekly_stats")
+              for _, s in _read(kit, t).items() for v in s.unique() if len(v) >= SCAN_MIN_LEN}
+    assert any(v in n for n in names for v in values)  # the kSets name exemption is really exercised
+
+
+def _plant_k_sets(monkeypatch, field: str, value: str):
+    from pets_release.run import pipeline
+
+    real = pipeline.build_narrative
+
+    def leaky(**kw):
+        nar = real(**kw)
+        ks = nar["measured"]["kSets"]
+        if field == "withheld.reason":
+            ks["withheld"][0]["reason"] = value
+        else:
+            ks[field] = value
+        return nar
+
+    monkeypatch.setattr(pipeline, "build_narrative", leaky)
+
+
+@pytest.mark.parametrize("field", ["withheld.reason", "source"])
+def test_withheld_note_in_k_sets_free_text_refuses(tmp_path, monkeypatch, capsys, field):
+    """The kSets free text (withheld[].reason, source) stays scanned."""
+    _kit_with_note(tmp_path)
+    _plant_k_sets(monkeypatch, field, f"note {NOTE}")
+    code, out = _run(tmp_path, monkeypatch, None)
+    capsys.readouterr()
+    assert code == 1 and not out.exists()
+    reasons = json.loads((out.parent / "rel.scoring" / "refusal_report.json").read_text(encoding="utf-8"))["reasons"]
+    assert "selfscan:manifest-value" in reasons
+
+
+def test_header_equal_source_value_as_k_sets_reason_refuses(tmp_path, monkeypatch, capsys):
+    """A source value equal to a column name, as the whole kSets withheld[0].reason, is scanned (not exempt)."""
+    _kit_with_header_value(tmp_path)
+    _plant_k_sets(monkeypatch, "withheld.reason", HEADER_VALUE)
+    code, out = _run(tmp_path, monkeypatch, None)
+    capsys.readouterr()
+    assert code == 1 and not out.exists()
+    reasons = json.loads((out.parent / "rel.scoring" / "refusal_report.json").read_text(encoding="utf-8"))["reasons"]
+    assert reasons == ["selfscan:check:producer.manifest-source-values:status:fail", "selfscan:manifest-value",
+                       "selfscan:refused"]
 
 
 def test_honest_release_with_category_inside_column_name_releases(tmp_path, monkeypatch, capsys):
