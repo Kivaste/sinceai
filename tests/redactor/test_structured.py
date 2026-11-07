@@ -273,3 +273,38 @@ def test_validated_hetu_is_not_swallowed_by_a_cross_turn_phone():
     # tail '0' + '010101-0101' would read as an 11-digit 0-leading phone number
     r = conv("numero alkaa 0", ("agent", "mm"), "010101-0101 on hetu")
     assert [x[3] for x in found(r)] == ["NATIONAL_ID"]
+
+
+# ---- review fixes (GPT-6.1 at 943801b) ---------------------------------------------------------
+def test_alphabetic_secret_and_username_after_explicit_cue():
+    t = "salasanani on Lumiukko"
+    assert found(conv(t)) == [("t0", 14, 22, "SECRET")]
+    p = "my password is sunflower."
+    assert found(conv(p)) == [("t0", 15, 24, "SECRET")]
+    u = "käyttäjätunnukseni on maijamaa"
+    assert found(conv(u)) == [("t0", 22, 30, "USERNAME")]
+
+
+def test_prose_after_secret_cue_is_not_a_secret():
+    for t in ("salasana on vaihdettu", "salasanani on unohtunut", "my password is wrong",
+              "the password is not working", "salasana on liian lyhyt", "lösenordet är fel",
+              "salasana on ok"):
+        assert found(conv(t)) == [], t
+
+
+def test_ipv6_compressed_forms():
+    t = "julkinen osoite 2a00:1450:4001:82a::200e näkyy"
+    assert found(conv(t)) == [("t0", 16, t.index(" näkyy"), "IP_ADDRESS")]
+    full = "ip 2a00:1450:4001:082a:0000:0000:0000:200e"
+    assert found(conv(full)) == [("t0", 3, len(full), "IP_ADDRESS")]
+    for ip in ("::1", "fe80::1", "fd12:3456:789a::1"):
+        assert found(conv(f"osoite {ip} ei toimi")) == [], ip
+
+
+def test_unrelated_other_speaker_turn_flushes_the_join():
+    a = "numero on nolla neljä nolla, yksi kaksi kolme"
+    b = "neljä viisi kuusi seitsemän"
+    r = conv(a, ("agent", "Kerrotteko vielä mikä teidän osoitteenne on"), b)
+    assert found(r) == []
+    ok = conv(a, ("agent", "joo, jatkakaa"), b)
+    assert [x[3] for x in found(ok)] == ["PHONE", "PHONE"]

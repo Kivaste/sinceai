@@ -54,7 +54,8 @@ _TRAIL_PUNCT = ".,;:?)]}'\"»”"
 _URL_RE = re.compile(r"(?i)\b(?:https?://|www\.)[^\s<>\"']+")
 _EMAIL_RE = re.compile(r"(?<![\w.+-])[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
 _IPV4_RE = re.compile(r"(?<![\w.])\d{1,3}(?:\.\d{1,3}){3}(?![\w]|\.\d)")
-_IPV6_RE = re.compile(r"(?<![\w:])(?:[0-9A-Fa-f]{1,4}:){2,7}[0-9A-Fa-f]{1,4}(?![\w:])")
+# IPv6 candidates incl. compressed '::' forms; validity is decided by ipaddress, not the regex
+_IPV6_RE = re.compile(r"(?<![\w:])[0-9A-Fa-f]{0,4}(?::[0-9A-Fa-f]{0,4}){2,7}(?![\w:])")
 _MAC_RE = re.compile(r"(?<![\w:-])[0-9A-Fa-f]{2}(?:([:-])[0-9A-Fa-f]{2})(?:\1[0-9A-Fa-f]{2}){4}(?![\w:-])")
 _PROPERTY_RE = re.compile(r"(?<![\w-])\d{1,3}-\d{1,3}-\d{1,4}-\d{1,4}(?![\w-])")
 _PLATE_RE = re.compile(r"(?<![\w-])[A-Za-zÅÄÖåäö]{2,3}-\d{1,3}(?![\w-])")
@@ -193,9 +194,13 @@ class StructuredPass:
         for m in _IPV6_RE.finditer(text):
             if any(m.start() < b and a < m.end() for a, b in masks):
                 continue
+            status = _ipv6_status(m.group())
+            if status is None:
+                continue  # not an address (e.g. a clock time)
             claim(m.start(), m.end())
-            if _ipv6_personal(m.group()):
-                out.append(_Hit(i, m.start(), m.end(), "IP_ADDRESS", PRIORITY_VALIDATED, None))
+            if status:
+                out.append(_Hit(i, m.start(), m.end(), "IP_ADDRESS", PRIORITY_VALIDATED,
+                                "ip6\x00" + status))
         for m in _PROPERTY_RE.finditer(text):
             claim(m.start(), m.end())
             out.append(_Hit(i, m.start(), m.end(), "PROPERTY_ID", PRIORITY_VALIDATED, None))
@@ -276,7 +281,7 @@ class StructuredPass:
                 w == "user" and idx + 1 < len(spans) and text[spans[idx + 1][0]:spans[idx + 1][1]].lower() in ("name", "id")
             ):
                 label = "USERNAME"
-            if label is None:
+            if label is None or text[s:e][-1] in _SENTENCE_END:
                 continue
             # skip filler words and further cue words, take the next value token
             for j in range(idx + 1, min(idx + 5, len(spans))):
@@ -287,13 +292,23 @@ class StructuredPass:
                 wordlike = not any(ch.isdigit() for ch in low)
                 if wordlike and (low in FILLER or low in ("name", "id")
                                  or _has_cue([low], SECRET_CUES + USERNAME_CUES)) or not low or raw in (":", "-"):
+                    if raw[-1] in _SENTENCE_END:
+                        break  # the cue's sentence ended before any value
                     continue
                 ve = _strip_trailing(text, vs, ve)
                 val = text[vs:ve]
                 if any(vs < b and a < ve for a, b in masks):
                     break
-                # values carry a digit (or, for user names, an '@'); plain words after a cue are prose
                 ok = any(c.isdigit() for c in val) or (label == "USERNAME" and "@" in val)
+                if not ok and _alpha_credential(val):
+                    # alphabetic values only in the shape "<password-type cue> <copula> [hedge] VALUE<end of clause>"
+                    prev = [text[a:b].lower().strip(_TRAIL_PUNCT) for a, b in spans[idx + 1:j]]
+                    strong = label == "USERNAME" or _has_cue([w], STRONG_SECRET_CUES)
+                    copula = (not prev and text[s:e].endswith(":")) or bool(prev) and (prev[-1] in COPULAS or (len(prev) >= 2 and prev[-1] in HEDGES
+                                                                     and prev[-2] in COPULAS))
+                    rest = text[ve:]
+                    clause_end = rest.strip() == "" or rest.lstrip()[:1] in ".,;!?)\"'"
+                    ok = strong and copula and clause_end
                 if label == "SECRET" and val.isdigit() and not (4 <= len(val) <= 8):
                     ok = False
                 if ok and len(val) >= 3:
@@ -428,8 +443,8 @@ class StructuredPass:
             speaker = turns[i].speaker
             for j in range(i + 1, min(len(turns), i + self.join_window)):
                 if turns[j].speaker != speaker:
-                    if runs[j]:
-                        break  # the other party said a number: not a continuation
+                    if not is_backchannel(turns[j].text):
+                        break  # the other party said something else: flush
                     continue
                 if not runs[j] or runs[j][0].words_before > HEAD_SLACK:
                     break
@@ -471,6 +486,40 @@ def _classify_digits(d: str, plus: bool, ctx: list[str]) -> tuple[str, int] | No
     return None
 
 
+BACKCHANNEL_MAX_WORDS = 4
+# Acknowledgements and "go on" prompts (fi/sv/en, general language). Only turns made of these words
+# continue an N-turn join; any other intervening turn of the other party flushes it.
+BACKCHANNEL_WORDS = frozenset(["joo", "juu", "jep", "jees", "mm", "mmm", "mhm", "mm-m", "aha", "ahaa", "okei", "ok", "okay", "oki", "selvä", "selvä", "kyllä", "niin", "just", "jatka", "jatkakaa", "jatkat", "jatkatko", "kiitos", "hyvä", "no", "ja", "sitten", "loput", "entä", "seuraavaksi", "ok-ei", "yes", "yeah", "yep", "yup", "sure", "right", "alright", "uh-huh", "uh", "huh", "go", "on", "please", "thanks", "thank", "you", "and", "then", "the", "rest", "next", "got", "it", "ja", "jo", "javisst", "okej", "precis", "fortsätt", "tack", "bra", "och", "sen", "resten", "nästa", "mhm", "visst"])
+
+
+def is_backchannel(text: str) -> bool:
+    words = re.findall(r"[^\W\d_]+(?:-[^\W\d_]+)?", text.lower())
+    if re.search(r"\d", text) or len(words) > BACKCHANNEL_MAX_WORDS:
+        return False
+    return all(w in BACKCHANNEL_WORDS for w in words)
+
+
+_SENTENCE_END = ".?!"
+STRONG_SECRET_CUES = ("salasan", "password", "passw", "lösenord", "passphrase", "verkkoavain", "tunnuslause")
+COPULAS = frozenset({"on", "oli", "is", "was", "är", "var", ":", "="})
+HEDGES = frozenset({"varmaan", "kai", "luultavasti", "ehkä", "probably", "maybe", "still", "edelleen", "nog",
+                    "kanske", "typ", "fortfarande", "nyt", "now", "nu"})
+# Words that commonly follow "password is / salasana on / lösenordet är" as prose, not as the value
+# (general-language list, not derived from the kit).
+CREDENTIAL_PROSE = frozenset(["not", "no", "none", "never", "ei", "eikä", "inte", "icke", "wrong", "incorrect", "invalid", "expired", "changed", "correct", "right", "ok", "okay", "fine", "working", "broken", "locked", "blocked", "lost", "forgotten", "unknown", "new", "old", "same", "different", "too", "very", "still", "also", "just", "really", "väärä", "oikea", "vanha", "uusi", "sama", "eri", "liian", "tosi", "vielä", "edelleen", "myös", "vain", "hukassa", "lukossa", "voimassa", "vanhentunut", "vaihdettu", "unohtunut", "kadonnut", "estetty", "jotain", "mikä", "mitä", "tämä", "tuo", "sinun", "teidän", "minun", "hyvä", "huono", "pitkä", "lyhyt", "fel", "rätt", "gammal", "gamla", "ny", "nya", "samma", "annan", "för", "mycket", "fortfarande", "också", "bara", "glömt", "ändrat", "borta", "låst", "spärrat", "något", "vad", "detta", "det", "din", "ditt", "er", "bra", "dålig", "lång", "kort", "the", "a", "an", "my", "your", "this", "that", "what", "something", "required", "needed"])
+
+
+def _alpha_credential(val: str) -> bool:
+    """An alphabetic credential right after an explicit cue: one token of 4-32 characters that is not a
+    common prose word and not a Finnish past participle ('vaihdettu', 'unohtunut')."""
+    low = val.lower()
+    if not (4 <= len(val) <= 32) or not re.fullmatch(r"[^\W\d_][\w!#$%&*+\-.@]*", val):
+        return False
+    if low in CREDENTIAL_PROSE or low in FILLER:
+        return False
+    return not re.search(r"(?:ttu|tty|nut|nyt|ttiin|tetty|tettu)$", low)
+
+
 def _is_email_word(t: Token) -> bool:
     low = t.text.lower()
     return t.text[0].isalnum() and low not in AT_WORDS and low not in DOT_WORDS and low not in JOIN_WORDS
@@ -483,11 +532,13 @@ def _joiner(t: Token) -> str | None:
     return JOIN_WORDS.get(low)
 
 
-def _ipv6_personal(s: str) -> bool:
+def _ipv6_status(s: str) -> str | None:
+    """None if not an IPv6 address; '' if valid but not personal (loopback, link-local, ULA, other
+    non-global); else the compressed canonical form (so '::'-compressed and full forms share a key)."""
     import ipaddress
 
     try:
         ip = ipaddress.IPv6Address(s)
     except ValueError:
-        return False
-    return ip.is_global
+        return None
+    return ip.compressed if ip.is_global else ""
