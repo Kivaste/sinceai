@@ -52,7 +52,9 @@ class FakeScorecard:
 
 
 def build(pair, out, *, scorecard=None, releases=None, **kw):
+    """The synthetic world has no CS-S1 release, so these builds are partial (completeness: test_completeness_cli)."""
     kit, rel = pair
+    kw.setdefault("partial", True)
     return build_submission(kit=Kit(kit), releases=releases if releases is not None else [rel], out=out,
                             master=MASTER, scorecard=scorecard or FakeScorecard(), **kw)
 
@@ -67,8 +69,8 @@ def test_layout_is_exactly_the_organiser_layout(world, tmp_path):
     tables = sorted(p.name for p in rel.glob("*.csv"))
     assert tables  # the release has tables
     expected = sorted(
-        ["customer_service_eval_redacted.csv", "customer_service_eval_spans.jsonl", "unseen_field_labels.csv",
-         "health/privacy_manifest.json"]
+        ["bundle_index.json", "customer_service_eval_redacted.csv", "customer_service_eval_spans.jsonl",
+         "unseen_field_labels.csv", "health/privacy_manifest.json"]
         + [f"health/{t}" for t in tables] + [f"health/rowmap_{t}" for t in tables])
     res = build(world, tmp_path / "pets_submission")
     files = tree(res.out)

@@ -33,6 +33,13 @@ UNSEEN = (
     "liisa.testi@example.net,2022-05-30,Sairaanhoitaja\n"
     "mikko.testi@example.com,2021-06-21,Hoitaja\n"
 )
+CATALOG = (
+    "dataset,table,column,privacy_role,data_kind,subtype\n"
+    "health,ed_visits,visit_id,record_key,identifier,id\n"
+    "health,lab_results,lab_id,record_key,identifier,id\n"
+    "health,clinical_notes,note_id,record_key,identifier,id\n"
+    "health,published_weekly_stats,stat_id,record_key,identifier,id\n"
+)
 
 
 def build_world(root: Path):
@@ -48,6 +55,8 @@ def build_world(root: Path):
     out = root / "rel" / "health"
     proc = cli(*run_args(kit, out))
     assert proc.returncode == 0, proc.stdout + proc.stderr
+    # record keys for the real out-of-process scorecard, so the real CLI can build a bundle on this kit
+    (kit / "metadata" / "field_catalog.csv").write_text(CATALOG, encoding="utf-8", newline="")
     return kit, out
 
 

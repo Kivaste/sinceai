@@ -1,6 +1,8 @@
-﻿"""``pets-release submission --out <dir> --release <dir> [--release <dir> ...] [--kit PATH]``.
+﻿"""``pets-release submission --out <dir> --release <dir> [--release <dir> ...] [--kit PATH] [--partial]``.
 
 Exit 0 built, 1 refused (content-free reason code), 2 usage error or unknown state (no key, kit or release).
+A complete bundle (every target scenario) is the default; a missing dataset refuses unless ``--partial``, and a
+partial build says PARTIAL on the built line and names the missing datasets.
 Prints the file list with SHA-256 digests and aggregate scorecard numbers only.
 """
 from __future__ import annotations
@@ -27,6 +29,8 @@ def main(argv: list[str]) -> int:
     p.add_argument("--out", required=True)
     p.add_argument("--release", action="append", default=[], help="a release folder (repeat per dataset)")
     p.add_argument("--kit", help="kit path (default: PETS_KIT)")
+    p.add_argument("--partial", action="store_true",
+                   help="build without the missing target datasets; the bundle says PARTIAL and lists them")
     a = p.parse_args(argv)
     kit_path = a.kit or os.environ.get("PETS_KIT")
     if not kit_path:
@@ -42,11 +46,17 @@ def main(argv: list[str]) -> int:
         print(f"pets-release submission: {e}", file=sys.stderr)
         return 2
     try:
-        res = build_submission(kit=kit, releases=a.release, out=a.out, master=master)
+        res = build_submission(kit=kit, releases=a.release, out=a.out, master=master, partial=a.partial)
     except SubmissionRefused as e:
-        print(f"REFUSED: {e.code}")
+        extra = f" (missing datasets: {', '.join(e.missing)}; pass --partial to build without them)" if e.missing else ""
+        print(f"REFUSED: {e.code}{extra}")
         return 1
-    print(f"SUBMISSION BUILT: {res.out.name} (scoring: {res.scoring.name})")
+    bundle = res.index["bundle"]
+    if bundle["complete"]:
+        print(f"SUBMISSION BUILT (COMPLETE): {res.out.name} (scoring: {res.scoring.name})")
+    else:
+        print(f"SUBMISSION BUILT (PARTIAL): {res.out.name} (scoring: {res.scoring.name})")
+        print(f"PARTIAL: missing datasets: {', '.join(bundle['datasetsMissing'])}")
     for rel, digest in res.files.items():
         print(f"  {digest}  {rel}")
     for d in res.datasets:

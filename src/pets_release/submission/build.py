@@ -31,7 +31,16 @@ from pets_release.writer import load_lineage, scoring_dir
 UNSEEN_FILE = "unseen_field_labels.csv"
 CS_REDACTED_FILE = "customer_service_eval_redacted.csv"
 CS_SPANS_FILE = "customer_service_eval_spans.jsonl"
-INDEX_FILE = "submission_index.json"
+INDEX_FILE = "submission_index.json"  # in <out>.scoring/: every file digest and the scorecard summaries
+BUNDLE_INDEX_FILE = "bundle_index.json"  # at the bundle root: complete or partial, what is present and missing
+TARGET_SCENARIOS = ("CS-S1", "HEALTH-S1")  # a complete bundle holds a verified release of each (spec #1)
+ROOT_FILES = (CS_REDACTED_FILE, CS_SPANS_FILE, UNSEEN_FILE)
+
+
+def target_datasets() -> tuple[str, ...]:
+    from pets_release.policy import get_policy
+
+    return tuple(sorted(get_policy(s).dataset for s in TARGET_SCENARIOS))
 
 
 @dataclass(frozen=True)
@@ -131,10 +140,14 @@ def _check_row_map(path: Path, table: Path, lineage, derived, *, recompute_expec
         raise SubmissionRefused("rowmap_invalid") from None
 
 
-def build_submission(*, kit: Kit, releases: Sequence, out, master: MasterKey,
+def build_submission(*, kit: Kit, releases: Sequence, out, master: MasterKey, partial: bool = False,
                      scorecard: Callable | None = None, passes: Sequence | None = None) -> SubmissionResult:
     """Build the submission at ``out`` (and ``<out>.scoring/`` with scorecard output and the index) or raise
-    SubmissionRefused. ``scorecard`` replaces the out-of-process evaluator (tests only; the CLI never passes it)."""
+    SubmissionRefused. ``scorecard`` replaces the out-of-process evaluator (tests only; the CLI never passes it).
+
+    Complete is the default: every target scenario's dataset must be supplied, else ``incomplete`` (with
+    ``missing``) and nothing is written. ``partial=True`` builds without the missing datasets; the bundle-root
+    index then says ``complete: false`` and lists them."""
     out = Path(out).absolute()
     scoring = scoring_dir(out)
     guards.refuse_inside_public_repo(out)
@@ -146,7 +159,14 @@ def build_submission(*, kit: Kit, releases: Sequence, out, master: MasterKey,
     parsed = [_read_release(kit, master, Path(r)) for r in releases]
     if len({r.dataset for r in parsed}) != len(parsed):
         raise SubmissionRefused("duplicate_dataset")
+    if any(r.scenario not in TARGET_SCENARIOS for r in parsed):
+        raise SubmissionRefused("not_a_target_scenario")
     parsed.sort(key=lambda r: r.dataset)
+    targets = target_datasets()
+    present = [r.dataset for r in parsed]
+    missing = [d for d in targets if d not in present]
+    if missing and not partial:
+        raise SubmissionRefused("incomplete", missing=missing)
     labels, unseen_counts = unseen_labels(kit)
     redacted, spans, cs_counts = cs_eval_outputs(kit, passes)
 
@@ -154,7 +174,11 @@ def build_submission(*, kit: Kit, releases: Sequence, out, master: MasterKey,
     build = Path(tempfile.mkdtemp(prefix=f".{out.name}.build-", dir=out.parent))
     sbuild = Path(tempfile.mkdtemp(prefix=f".{out.name}.scoring-build-", dir=out.parent))
     try:
-        files: dict[str, bytes] = {UNSEEN_FILE: labels, CS_REDACTED_FILE: redacted, CS_SPANS_FILE: spans}
+        bundle_index = {"complete": not missing, "targetDatasets": list(targets), "datasetsPresent": present,
+                        "datasetsMissing": missing, "rootFiles": sorted(ROOT_FILES),
+                        "customerServiceEval": cs_counts}
+        files: dict[str, bytes] = {UNSEEN_FILE: labels, CS_REDACTED_FILE: redacted, CS_SPANS_FILE: spans,
+                                   BUNDLE_INDEX_FILE: canonical_bytes(bundle_index)}
         for r in parsed:
             for t in r.tables:
                 files[f"{r.dataset}/{t}"] = (r.source / t).read_bytes()
@@ -176,10 +200,9 @@ def build_submission(*, kit: Kit, releases: Sequence, out, master: MasterKey,
         index = {"files": digests,
                  "datasets": [{"dataset": r.dataset, "scenario": r.scenario, "tables": [t[:-4] for t in r.tables],
                                "scorecard": s} for r, s in zip(parsed, summaries, strict=True)],
-                 "customerServiceEval": cs_counts, "unseen": unseen_counts}
+                 "customerServiceEval": cs_counts, "unseen": unseen_counts, "bundle": bundle_index}
         (sbuild / INDEX_FILE).write_bytes(canonical_bytes(index))
         guards.scan_key_material(sbuild, master)  # scorecard output and index hold no key either
-        guards.scan_key_material(sbuild, master)  # scorecard output and index: scoring files hold no key either
         os.rename(sbuild, scoring)
         try:
             os.rename(build, out)
