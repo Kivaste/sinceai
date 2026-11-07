@@ -19,7 +19,12 @@ if ($BodyFile) {
 }
 foreach ($try in 1..3) {
   if ($raw) { break }
-  $raw = & gh issue view $Issue -R $Repo --json number,title,labels,comments 2>$null | Out-String
+  $previousEncoding = [Console]::OutputEncoding
+  try {
+    # Windows PowerShell decodes native stdout using the console encoding; gh emits UTF-8.
+    [Console]::OutputEncoding = [Text.Encoding]::UTF8
+    $raw = & gh issue view $Issue -R $Repo --json number,title,labels,comments 2>$null | Out-String
+  } finally { [Console]::OutputEncoding = $previousEncoding }
   if ($LASTEXITCODE -eq 0 -and $raw -match '^\s*\{') { break }
   $raw = $null; Start-Sleep -Seconds (2 * $try)
 }

@@ -68,6 +68,8 @@ families × both axes. Delta rounds use the cross-map. Report findings under `##
 
 ## 4. Done-report (implementer output, posted by the orchestrator as the issue comment)
 
+Write the full backticked command on every Red/Green line; repeat the command, never "Same command".
+
 ```
 ## Done-report
 - Issue: #<N>
