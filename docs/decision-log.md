@@ -627,3 +627,14 @@ CS-S1 chain done-report + 4 reviews (23 + #53/#54/#56/#92) -> merge -> #63 -> 25
 - **Open:** AC3 of #32 (a drafted policy run through the search) is not amended by D47. The orchestrator asked the human at 15:00 and has no answer yet, so #32 doesn't close until AC3 is amended or met. No draft consumer is being built meanwhile.
 - **Why:** D47 (human, 15:12).
 - **Evidence:** D47 on main; session ses_e49db522.
+
+### Sat 15:20 - nudge 13:18Z handled
+
+- **When:** Sat 15:18-15:20 EET
+- **Decision:**
+  - #69: its branch builds on the deferred CS chain, so it needs a fresh branch after the pin. Native blocked-by #117 added; unlabelled.
+  - #131: on ticket/fu110-scorecard-k with a live owner. Native blocked-by #110 added.
+  - #94: no implementer work remains; it closes on the final proof. Unlabelled.
+  - #121: the native #117 edge already exists. The branch flag is the #129 monitor defect.
+- **Why:** None of them can be dispatched. The edges and labels stop repeat flags.
+- **Evidence:** issue comments on #69, #94 and #131.
