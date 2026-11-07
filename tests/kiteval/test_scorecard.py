@@ -339,6 +339,9 @@ def test_scorecard_child_and_caller_are_offline_without_a_guard_in_the_environme
         "child BLOCKED", "raised ScorecardRejected", "BLOCKED"]
 
 
-@pytest.mark.parametrize("wmi_unavailable", [False, True], ids=["normal", "wmi-unavailable"])
-def test_scorecard_probe_control_opens_a_socket_without_run_scorecard(kit, release, tmp_path, wmi_unavailable):
-    assert _scorecard_probe(kit, release, tmp_path, call=False, wmi_unavailable=wmi_unavailable) == ["OPEN"]
+def test_scorecard_probe_control_opens_a_socket_without_run_scorecard(kit, release, tmp_path):
+    assert _scorecard_probe(kit, release, tmp_path, call=False) == ["OPEN"]
+
+
+def test_scorecard_probe_control_opens_a_socket_when_wmi_is_unavailable(kit, release, tmp_path):
+    assert _scorecard_probe(kit, release, tmp_path, call=False, wmi_unavailable=True) == ["OPEN"]
