@@ -15,7 +15,9 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from conftest import write_minikit
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "run"))
+from run_helpers import build_kit, coarse_qis  # noqa: E402  (03's minikit copied into a kit folder)
 from e2e_harness import (
     CREATED,
     PYTHON,
@@ -29,14 +31,15 @@ from e2e_harness import (
     tree_digest,
 )
 
-needs_21 = pytest.mark.xfail(
-    strict=True, raises=AssertionError, reason="needs ticket 21 (`pets-release run`); not run until it lands"
-)
+
+
+def scoring(out: Path) -> Path:
+    return out.parent / (out.name + ".scoring")
 
 
 @pytest.fixture
 def kit(tmp_path):
-    return write_minikit(tmp_path / "kit")
+    return build_kit(tmp_path / "kit", coarse_qis)  # 03's synthetic minikit, QIs coarsened so k is reachable
 
 
 # ---- determinism through a command that exists today ---------------------------------------------
@@ -134,7 +137,6 @@ def test_planted_call_swallowed_by_handler_is_still_visible_to_the_test(tmp_path
 
 # ---- the whole pipeline: needs ticket 21 ---------------------------------------------------------
 
-@needs_21
 def test_two_cli_runs_are_byte_identical(kit, tmp_path):
     a, b = tmp_path / "out_a", tmp_path / "out_b"
     ra = run_release(kit, a, hashseed="0")
@@ -144,9 +146,9 @@ def test_two_cli_runs_are_byte_identical(kit, tmp_path):
     assert (a / "privacy_manifest.json").is_file()
     assert len(tree_digest(a)) > 1
     assert diff_trees(a, b) == []
+    assert diff_trees(scoring(a), scoring(b)) == []  # the private scoring folder is deterministic too
 
 
-@needs_21
 def test_run_is_independent_of_cwd_and_output_path(kit, tmp_path):
     a = tmp_path / "x" / "out"
     b = tmp_path / "a-much-longer" / "nested" / "name"
@@ -157,7 +159,6 @@ def test_run_is_independent_of_cwd_and_output_path(kit, tmp_path):
     assert diff_trees(a, b) == []
 
 
-@needs_21
 def test_different_key_changes_the_release(kit, tmp_path):
     """Guards against a run that ignores the key (a determinism test that passes vacuously)."""
     a, b = tmp_path / "ka", tmp_path / "kb"
@@ -166,7 +167,6 @@ def test_different_key_changes_the_release(kit, tmp_path):
     assert diff_trees(a, b) != []
 
 
-@needs_21
 def test_planted_network_call_inside_run_fails_the_run(kit, tmp_path):
     """Plant a socket call in the kit loader the real `run` uses; the run must fail, not swallow it."""
     marker = tmp_path / "planted.marker"
@@ -184,7 +184,8 @@ def test_planted_network_call_inside_run_fails_the_run(kit, tmp_path):
         "raise SystemExit(cli.main(sys.argv[2:]))\n"
     )
     out = tmp_path / "planted_out"
-    args = ["run", "--scenario", "HEALTH-S1", "--kit", str(kit), "--out", str(out), "--created", CREATED]
+    args = ["run", "--scenario", "HEALTH-S1", "--plan", "hand", "--kit", str(kit), "--out", str(out),
+            "--created", CREATED]
     r = run_python(wrapper, str(marker), *args)
     assert marker.is_file(), "the planted call was never reached by `run`"
     assert r.returncode != 0
@@ -192,7 +193,6 @@ def test_planted_network_call_inside_run_fails_the_run(kit, tmp_path):
     assert not (out / "privacy_manifest.json").exists()
 
 
-@needs_21
 def test_run_child_processes_inherit_the_block(kit, tmp_path):
     """A plain python child launched from inside the run path (as the scorecard is) cannot open a socket."""
     marker = tmp_path / "child.marker"
@@ -209,7 +209,8 @@ def test_run_child_processes_inherit_the_block(kit, tmp_path):
         "raise SystemExit(cli.main(sys.argv[2:]))\n"
     )
     out = tmp_path / "o"
-    args = ["run", "--scenario", "HEALTH-S1", "--kit", str(kit), "--out", str(out), "--created", CREATED]
+    args = ["run", "--scenario", "HEALTH-S1", "--plan", "hand", "--kit", str(kit), "--out", str(out),
+            "--created", CREATED]
     r = run_python(wrapper, str(marker), *args)
     assert r.returncode == 0, r.stderr
     assert marker.is_file(), "the run never reached the planted child launch"

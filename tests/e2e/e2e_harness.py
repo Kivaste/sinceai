@@ -53,7 +53,8 @@ def run_release(kit: Path, out: Path, *, created: str = CREATED, scenario: str =
                 extra_args: list[str] | None = None) -> subprocess.CompletedProcess[str]:
     """`pets-release run` with a fixed --created and test key."""
     env = {"PETS_HMAC_KEY": key} if key is not None else None
-    args = ["run", "--scenario", scenario, "--kit", str(kit), "--out", str(out), "--created", created]
+    args = ["run", "--scenario", scenario, "--plan", "hand", "--kit", str(kit), "--out", str(out),
+            "--created", created]
     return run_cli(args + (extra_args or []), cwd=cwd, env=env, hashseed=hashseed)
 
 
