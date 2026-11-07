@@ -34,6 +34,36 @@ _TRUTH_RE = re.compile(r"""(^|[\\/'"])truth([\\/'"]|$)""", re.MULTILINE)
 TRUTH_SCAN_EXEMPT = frozenset({"pets_release/kit.py"})
 
 
+# #138: the measured run starts the attacker as a separate child process from this one file, so the file may
+# name the attacker only as these exact module-name string constants. Every other mention, any dynamic-import
+# or exec route, and an unparseable or unreadable file are still violations. The truth scan and the runtime
+# guard are unchanged for it.
+ATTACKER_LAUNCHER = "pets_release/measure/attackers.py"
+LAUNCHER_CONSTANTS = frozenset({ATTACKER, ATTACKER + ".bridge"})
+_DYNAMIC = frozenset({"importlib", "__import__", "import_module", "runpy", "run_module", "run_path", "pkgutil",
+                      "exec", "eval", "compile"})
+
+
+def _launcher_violates(text: str) -> bool:
+    import ast
+
+    try:
+        tree = ast.parse(text)
+    except (SyntaxError, ValueError):
+        return True
+    allowed = 0
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Constant) and node.value in LAUNCHER_CONSTANTS:
+            allowed += 1
+        elif getattr(node, "id", None) in _DYNAMIC or getattr(node, "attr", None) in _DYNAMIC:
+            return True  # a Name or Attribute naming a dynamic-import or exec route
+        elif isinstance(node, (ast.Import, ast.ImportFrom)):
+            names = [a.name for a in node.names] + ([node.module or ""] if isinstance(node, ast.ImportFrom) else [])
+            if any(n.split(".")[0] in _DYNAMIC or n in _DYNAMIC for n in names):
+                return True
+    return text.count(ATTACKER) != allowed  # any mention outside the exact constants (import, comment, string)
+
+
 class BoundaryError(ValueError):
     """The scan could not be performed (bad root)."""
 
@@ -55,13 +85,15 @@ def _text(p: Path) -> str | None:
         return None
 
 
-def _scan(src: Path, pattern, *, inside_attacker: bool = False, exempt=frozenset()) -> list[str]:
+def _scan(src: Path, pattern, *, inside_attacker: bool = False, exempt=frozenset(), special=None) -> list[str]:
     out = []
     for p in _py_files(src, inside_attacker=inside_attacker):
-        if p.relative_to(src).as_posix() in exempt:
+        rel = p.relative_to(src).as_posix()
+        if rel in exempt:
             continue
         t = _text(p)
-        if t is None or pattern(t):  # unreadable = violation
+        check = special.get(rel, pattern) if special else pattern
+        if t is None or check(t):  # unreadable = violation
             out.append(str(p))
     return out
 
@@ -72,8 +104,9 @@ def truth_references(src: Path) -> list[str]:
 
 
 def attacker_importers(src: Path) -> list[str]:
-    """Files outside the attacker package mentioning `pets_attacker` at all (or unreadable)."""
-    return _scan(src, lambda t: ATTACKER in t)
+    """Files outside the attacker package mentioning `pets_attacker` at all (or unreadable). The one launcher
+    file (#138) may name it only as its exact module-name constants."""
+    return _scan(src, lambda t: ATTACKER in t, special={ATTACKER_LAUNCHER: _launcher_violates})
 
 
 def attacker_reads_truth(src: Path) -> bool:

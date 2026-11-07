@@ -213,6 +213,55 @@ def test_runtime_unknown_open_target_type_is_a_hook_error(tmp_path: Path):
     assert "hook-error" in v and "runtime-check-failed" in v
 
 
+# --- #138: the measured run's attacker launcher ----------------------------------------------------------
+# Rule: pets_release/measure/attackers.py starts the attacker as a separate child process, so it may name the
+# attacker only as the two exact module-name string constants. Any other mention (import, from-import, comment,
+# other string), any dynamic-import or exec route (importlib, __import__, runpy, pkgutil, exec, eval, compile),
+# or an unparseable/unreadable file is still a violation. Every other file keeps the any-mention rule.
+# Rows: launcher with the constants only -> clean; each planted route -> flagged; constants elsewhere -> flagged.
+LAUNCHER = "pets_release/measure/attackers.py"
+CONSTANTS = 'ATTACKER_MODULE = "pets_attacker"\nBRIDGE_MODULE = "pets_attacker.bridge"\n'
+
+
+def test_launcher_naming_the_attacker_only_in_its_module_constants_is_clean(tmp_path: Path):
+    _plant(tmp_path, LAUNCHER, CONSTANTS + "import subprocess, sys\n"
+                                           "subprocess.run([sys.executable, '-m', ATTACKER_MODULE])\n")
+    assert attacker_importers(tmp_path / "src") == []
+
+
+@pytest.mark.parametrize("extra", [
+    "import pets_attacker\n",
+    "from pets_attacker import cli\n",
+    "from pets_attacker.bridge import main\n",
+    "# pets_attacker\n",
+    'OTHER = "pets_attacker.truth"\n',
+    "import importlib\nimportlib.import_module(ATTACKER_MODULE)\n",
+    "__import__(BRIDGE_MODULE)\n",
+    "import runpy\nrunpy.run_module(ATTACKER_MODULE)\n",
+    "import pkgutil\n",
+    "exec('import ' + ATTACKER_MODULE)\n",
+    "eval(compile('1', 'x', 'eval'))\n",
+    "from importlib import import_module\n",
+    "def (:\n",
+], ids=["import", "from", "from_sub", "comment", "other_string", "importlib", "dunder_import", "runpy", "pkgutil",
+        "exec", "eval_compile", "from_importlib", "unparseable"])
+def test_launcher_with_any_other_route_to_the_attacker_is_a_violation(tmp_path: Path, extra):
+    _plant(tmp_path, LAUNCHER, CONSTANTS + extra)
+    assert any(h.endswith("attackers.py") for h in attacker_importers(tmp_path / "src"))
+
+
+def test_launcher_constants_in_any_other_file_are_a_violation(tmp_path: Path):
+    _plant(tmp_path, "pets_release/measure/other.py", CONSTANTS)
+    _plant(tmp_path, "pets_release/attackers.py", CONSTANTS)
+    hits = attacker_importers(tmp_path / "src")
+    assert any(h.endswith("other.py") for h in hits) and any(h.endswith("attackers.py") for h in hits)
+
+
+def test_launcher_unreadable_is_a_violation(tmp_path: Path):
+    _plant(tmp_path, LAUNCHER, b"\xff\xfe\x00\x80 not utf8")
+    assert any(h.endswith("attackers.py") for h in attacker_importers(tmp_path / "src"))
+
+
 def test_kit_module_is_exempt_from_the_truth_scan_only(tmp_path: Path):
     """pets_release/kit.py names `truth` to forbid it; the exemption is that one file, truth text only."""
     lit = 'FORBIDDEN = frozenset({"truth"})\n'

@@ -1,7 +1,7 @@
 """Manifest narrative sections built from the policy, the final plan and the suppression report.
 
 Schema names, rung IDs, policy reasons and aggregate counts only; never a row value. ``measured.*`` is the
-schema's ``not_measured`` value until the measurer is wired (ticket 22).
+schema's ``not_measured`` value here; the measured run (``pets_release.measure.wire``) fills them.
 """
 from __future__ import annotations
 
@@ -81,7 +81,8 @@ def build_narrative(*, policy, plan, scenario_ids, suppression: dict, k: int, pu
                    "rung": e["rung"], "floor": e["floor"], "reason": e["reason"][:500], "source": e["source"]})
     if search is not None:
         fj = list(search["justifications"])
-    pending = "not measured yet: the measurer is wired in the story-kit ticket"
+    pending = ("not measured in this run: measured values come from the measured run "
+               "(python -m pets_release.measure.wire)")
     measured = {"utility": not_measured(pending), "privacy": not_measured(pending),
                 "search": (dict(search["summary"]) if search is not None
                            else not_measured("hand-picked plan; no search run")),

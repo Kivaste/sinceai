@@ -12,6 +12,7 @@ the stale "wired in the story-kit ticket" reason.
 Rows (trigger -> result):
   measured run, kit has attack specs + adversary + identity files -> linkage-broker-<adv> and linkage-insider
       measured, value in [0, 1], denominator n = attacker targets (3 adversary rows; insider: released visits)
+  plain `pets-release run` (no measurer) -> linkage-attackers not_measured, reason names the measured run
   measured run, the kit's attack specs file is absent (attacker refuses) -> released; linkage-attackers is
       not_measured with a reason naming the failed attacker run; no linkage entry is measured
 """
@@ -21,7 +22,7 @@ import json
 
 import pandas as pd
 import pytest
-from run_helpers import TEST_KEY, build_kit, coarse_qis, run_args
+from run_helpers import TEST_KEY, build_kit, cli, coarse_qis, run_args
 
 from pets_release.manifest import MANIFEST_FILENAME, loads_strict
 from pets_release.measure import wire
@@ -90,6 +91,17 @@ def test_measured_run_records_both_persona_linkage_rates_with_denominators(attac
     assert insider["status"] == "measured" and 0.0 <= insider["value"] <= 1.0
     assert insider["denominator"] == {"unit": "rows", "n": released_visits}
     assert not any(STALE in r["rate"].get("reason", "") for r in risks.values())
+
+
+def test_plain_run_names_the_measured_run_instead_of_a_closed_ticket(attack_kit):
+    """Seam: the real ``pets-release run`` CLI (subprocess). The plain run measures nothing; its reason says where
+    the measured values come from, never the stale ticket reference."""
+    kit, out = attack_kit
+    p = cli(*run_args(kit, out))
+    assert p.returncode == 0, p.stderr[-500:]
+    risks = _risks(out)
+    assert not any(STALE in r["rate"].get("reason", "") for r in risks.values())
+    assert "measure.wire" in risks["linkage-attackers"]["rate"]["reason"]
 
 
 def test_attacker_that_cannot_run_is_recorded_as_not_measured_with_a_current_reason(attack_kit):
