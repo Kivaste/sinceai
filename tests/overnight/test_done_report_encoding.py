@@ -6,10 +6,10 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
-
 
 ROOT = Path(__file__).resolve().parents[2]
 POWERSHELL = shutil.which("powershell.exe")
@@ -24,6 +24,8 @@ def close_gate(tmp_path):
     script = repo / "scripts" / "overnight" / "check-done-report.ps1"
     script.parent.mkdir(parents=True)
     shutil.copyfile(ROOT / "scripts" / "overnight" / script.name, script)
+    helper = ROOT / "scripts" / "overnight" / "check-release-evidence.py"
+    shutil.copyfile(helper, script.with_name(helper.name))
     env = os.environ.copy()
     env.update(GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_GLOBAL=os.devnull)
 
@@ -51,7 +53,7 @@ def close_gate(tmp_path):
     body_file = tmp_path / "report.md"
     json_file = tmp_path / "issue.json"
     env.update(
-        PATH=str(bin_dir) + os.pathsep + env["PATH"],
+        PATH=os.pathsep.join((str(bin_dir), str(Path(sys.executable).parent), env["PATH"])),
         CLOSE_GATE=str(script), DONE_REPORT_BODY=str(body_file), DONE_REPORT_JSON=str(json_file),
     )
     report = f"""## Done-report
@@ -67,7 +69,7 @@ def close_gate(tmp_path):
 ### Real-run evidence
 - Revision: {head}
 - Artefacts: {repo}
-- Outcome: synthetic fixture only
+- Outcome: N/A: test-only encoding fixture
 ### Reviews
 - Standards: xai/grok-4.7 APPROVE @ {head}
 - Spec: claude-agent/sonnet APPROVE @ {head}
@@ -96,7 +98,7 @@ exit $code
 """
         return subprocess.run(
             [POWERSHELL, "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", command],
-            cwd=repo, env=env, capture_output=True, text=True, encoding="utf-8",
+            check=False, cwd=repo, env=env, capture_output=True, text=True, encoding="utf-8",
             errors="replace", timeout=60,
         )
 

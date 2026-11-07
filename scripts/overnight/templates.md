@@ -97,6 +97,18 @@ Write the full backticked command on every Red/Green line; repeat the command, n
 - none      (or list every skipped / errored / not-run required check — these block the close)
 ```
 
+Release claims in **Outcome** require records under **Artefacts**, not just a path or a green sentence:
+one immediate release directory with `privacy_manifest.json` (`bindings.toolRevision` = full Head), its
+paired `<release-directory>.scoring/gate_report.json`, and revision-bound verify exit records for every
+claimed tier. Gate check names/versions and records must agree with the manifest; missing, malformed,
+failed, errored or not-run records block closing. Output lists pass/not_applicable/fail/error counts and
+names every not_applicable check (not counted as a pass). Logs follow the release identity: `release`
+uses `run.log`; `release-health-s1` uses `health-s1.log`. The log has one `revision=<Head>` line and one
+`verify exit=0` / `verify-full exit=0` line per claimed tier. Python 3.10+ is required by the close gate.
+Docs/test-only outcomes may say `N/A: <why>` (legacy `Gate/verify: N/A, <why>` also works), but must not
+also claim gate/verify outcomes. Tooling runs without release claims retain revision/path checks.
+Keep historical reds, mutation reds, and `No red observed: <why>` distinct; never relabel one as another.
+
 ## 5. Merger (merge train, D28/D30)
 
 ```
