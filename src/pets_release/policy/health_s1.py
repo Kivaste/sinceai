@@ -84,6 +84,10 @@ POLICY = ScenarioPolicy(
     residual_notes=(
         {"id": "free-text-recall", "status": "not_applicable",
          "note": "scenario text-recall target (PERSON, PHONE, ADDRESS, NATIONAL_ID >= 0.95) is vacuous: no free text is released"},
+        {"id": "sex-withheld", "status": "open",
+         "note": "sex is a QI withheld in the hand plan because no purpose check needs it; if a later plan releases it, it counts in per-person k like any released QI"},
+        {"id": "renamed-age-band-scorecard-blind-spot", "status": "open",
+         "note": "D22: age_band is released as a renamed derived column, which the kit scorecard does not recognise as a QI; our per-person k over every released QI is authoritative"},
     ),
     suppression={
         "method": "local_suppression", "unit": "persons", "k": 5, "max_share": 0.10,
@@ -94,7 +98,8 @@ POLICY = ScenarioPolicy(
     direct_identifiers=DIRECT,
     qi=(
         {"table": "ed_visits", "column": "date_of_birth", "derived": "age_band"},
-        {"table": "ed_visits", "column": "sex", "derived": "sex"},
+        {"table": "ed_visits", "column": "sex", "derived": "sex",
+         "note": "conditional QI: withheld in the hand plan (no check needs it); counted if a plan releases it"},
         {"table": "ed_visits", "column": "municipality", "derived": "municipality"},
         {"table": "ed_visits", "column": "arrival_ts", "derived": "arrival_ts"},
         {"table": "ed_visits", "column": "arrival_mode", "derived": "arrival_mode",
@@ -126,6 +131,7 @@ POLICY = ScenarioPolicy(
     ),
     linked=((("ed_visits", "visit_id"), ("lab_results", "visit_id")),),
     alt_floors={("ed_visits", "patient_hetu"): "id.pseudonym"},
+    alt_floor_conditions={("ed_visits", "patient_hetu"): {"check": "H-U6", "outcome": "fail_without"}},
     param_minimums={("ed_visits", "municipality"): {"rung": "geo.topn", "param": "n", "min": 8}},
 )
 

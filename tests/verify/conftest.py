@@ -75,6 +75,19 @@ def rebind(release: Path, kit: Path, key_text: str = TEST_KEY, extra_checks=()) 
             rec["version"] = chk.version
             rec["scope"] = chk.scope
             rec["denominator"]["unit"] = chk.unit
+    # Attest the status the re-run will produce (verify fails on a mismatch): a release-scope check that is
+    # inapplicable to this fixture contract (e.g. text.* with no free-text columns) is recorded not_applicable.
+    from pets_release.checks import run_checks
+
+    rerun = {r.check: r for r in run_checks(release, m["contract"], {"phase": "verify"},
+                                            checks=tuple(c for c in registered.values()
+                                                         if c.scope == "release")).records}
+    for rec in kept:
+        r = rerun.get(rec["check"])
+        if r is not None and r.status == "not_applicable":
+            rec["status"] = "not_applicable"
+            rec["denominator"]["n"] = 0
+            rec["hits"] = 0
     kept.sort(key=lambda r: r["check"])
     m["gate"]["checks"] = kept
     by = {r["check"]: r for r in kept}

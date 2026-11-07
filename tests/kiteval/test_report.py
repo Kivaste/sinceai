@@ -553,3 +553,67 @@ def test_expected_attack_given_as_empty_dict_is_a_fail():
     _ed(report)["linkage"]["public_directory"] = {}
     _rejected(report, {"linkage": {"attacks": ["news_clips_health", "public_directory"]}}, "structure")
 
+
+
+# ---- follow-up #48: no-targets proof, l-diversity, synthetic records -----------
+
+NO_COLS = {"evaluated": True, "qis_used": [], "reidentification_rate": 0.0, "n_targets_in_data": None,
+           "note": "every attacker column this attack needs was removed from the release"}
+
+
+def test_no_targets_linkage_needs_proof_the_attack_columns_are_absent():
+    report = _passing_report()
+    _ed(report)["linkage"]["news_clips_health"] = dict(NO_COLS)
+    _rejected(report, {"linkage": {"attacks": ["news_clips_health"]}}, "structure")
+    _rejected(report, {"linkage": {"attacks": ["news_clips_health"], "no_attack_columns": []}}, "structure")
+    _rejected(report, {"linkage": {"attacks": ["news_clips_health"], "no_attack_columns": ["other"]}}, "structure")
+    _expecting(report, {"linkage": {"attacks": ["news_clips_health"], "no_attack_columns": ["news_clips_health"]}})
+
+
+def test_no_targets_with_qis_used_is_a_fail_even_with_proof():
+    report = _passing_report()
+    _ed(report)["linkage"]["news_clips_health"] = dict(NO_COLS, qis_used=[{"kind": "x"}])
+    _rejected(report, {"linkage": {"attacks": ["news_clips_health"], "no_attack_columns": ["news_clips_health"]}},
+              "structure")
+
+
+L_DIV = {"evaluated": True, "sensitive": "s", "qis": ["q"], "n_classes": 3, "min_distinct_l": 1}
+DCR = {"evaluated": True, "columns": ["q"], "n_synthetic": 3}
+MIA = {"evaluated": True, "columns": ["q"], "n_each": 3, "auc": 0.5}
+
+
+def _extra(report, section, record):
+    _ed(report)[section] = record
+    return report
+
+
+EXTRA_SLOTS = [("l_diversity", None, L_DIV, "n_classes"), ("synthetic", "dcr", DCR, "n_synthetic"),
+               ("synthetic", "membership_inference", MIA, "n_each")]
+
+
+def _slot(section, part, record):
+    return {part: record} if part else record
+
+
+@pytest.mark.parametrize(("section", "part", "good", "field"), EXTRA_SLOTS)
+def test_l_diversity_and_synthetic_records_pass_when_complete(section, part, good, field):
+    _expecting(_extra(_passing_report(), section, _slot(section, part, good)), {})
+
+
+@pytest.mark.parametrize(("section", "part", "good", "field"), EXTRA_SLOTS)
+@pytest.mark.parametrize("bad", [{}, {"evaluated": "yes"}, {"evaluated": None}])
+def test_l_diversity_and_synthetic_need_explicit_evaluated(section, part, good, field, bad):
+    _rejected(_extra(_passing_report(), section, _slot(section, part, bad)), {}, "structure")
+
+
+@pytest.mark.parametrize(("section", "part", "good", "field"), EXTRA_SLOTS)
+@pytest.mark.parametrize("value", [0, None, float("nan"), -1])
+def test_l_diversity_and_synthetic_need_a_positive_denominator(section, part, good, field, value):
+    record = {k: v for k, v in good.items() if k != field}
+    if value is not None:
+        record[field] = value
+    _rejected(_extra(_passing_report(), section, _slot(section, part, record)), {}, "zero_denominator")
+
+
+def test_synthetic_section_must_be_an_object():
+    _rejected(_extra(_passing_report(), "synthetic", [1]), {}, "structure")
