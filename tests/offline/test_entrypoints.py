@@ -36,6 +36,7 @@ MODULES = [
     "pets_attacker",
     "pets_attacker.bridge",
     "pets_release.measure.wire",
+    "pets_release.ui",
 ]
 # `<module>.main(argv)` called directly (e.g. from Python, or by the dispatcher).
 MAINS = [
@@ -50,8 +51,17 @@ MAINS = [
     "pets_release.detect.cli",
     "pets_release.verify.cli",
     "pets_release.run.cli",
+    "pets_release.submission.cli",
     "pets_release.measure.wire",
+    "pets_release.llm.cli",  # guarded: offline unless --allow-network (tests/offline/test_llm_exemption.py)
 ]
+
+# The only entry point allowed to open a socket. It is not guarded; it is gated: it is spawned solely by
+# `pets_release.llm.transport.subprocess_transport`, which only the `draft-policy` CLI calls, only under
+# `--allow-network` (ADR 0002). tests/offline/test_llm_exemption.py fails if that gate is removed.
+EXEMPT = {
+    "pets_release.llm.sender": "sends the one LLM request; spawned only by the CLI under --allow-network",
+}
 
 _AFTER = (
     "import subprocess, sys\n"
@@ -113,10 +123,11 @@ def _entry_points(src: Path = SRC) -> tuple[set[str], set[str]]:
 
 def test_every_entry_point_in_src_is_covered_by_a_case_above():
     mains, modules = _entry_points()
-    assert mains == set(MAINS)
-    assert modules == set(MODULES) | {"pets_release.cli", "pets_release.checks.__main__",
-                                      "pets_release.manifest.__main__", "pets_release.contract.__main__",
-                                      "pets_release.redaction_eval.__main__"}
+    assert mains == set(MAINS) | set(EXEMPT)
+    assert modules == set(MODULES) | set(EXEMPT) | {"pets_release.cli", "pets_release.checks.__main__",
+                                                    "pets_release.manifest.__main__",
+                                                    "pets_release.contract.__main__",
+                                                    "pets_release.redaction_eval.__main__"}
 
 
 def test_completeness_scan_sees_planted_entry_points(tmp_path):
