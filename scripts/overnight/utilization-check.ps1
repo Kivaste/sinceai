@@ -177,11 +177,20 @@ try {
 
   # ---------- issues ----------
   Need 'issues'
-  $issuesOut = Must (Invoke-Exe $GhExe @('issue', 'list', '-R', $Repo, '--state', 'open', '--limit', '300', '--json', 'number,title,labels') 40) 'gh issue list'
+  # One call returns labels AND native blockers (blockedBy.nodes[].state), instead of one REST call per issue:
+  # fewer GitHub requests (connection resets were frequent under load) and one failure point instead of ~30.
+  $issuesOut = $null
+  foreach ($attempt in 1..3) {
+    $r = Invoke-Exe $GhExe @('issue', 'list', '-R', $Repo, '--state', 'open', '--limit', '300', '--json', 'number,title,labels,blockedBy') 40
+    if ($r.code -eq 0) { $issuesOut = $r.out; break }
+    Start-Sleep -Seconds (3 * $attempt)
+  }
+  if ($null -eq $issuesOut) { Write-Log 'action=skip reason="gh issue list failed 3x (GitHub unreachable or throttled); not judging idle work this cycle"'; exit 0 }
   $openIssues = @{}
   foreach ($i in (JsonList $issuesOut)) {
     $labels = @($i.labels | ForEach-Object { $_.name })
-    $openIssues[[int]$i.number] = [pscustomobject]@{ number = [int]$i.number; title = [string]$i.title; agent = ($labels -contains $TicketLabel); parked = ($labels -contains $ParkLabel) }
+    $openB = @(foreach ($b in @($i.blockedBy.nodes)) { if ($b -and [string]$b.state -ne 'CLOSED') { [int]$b.number } })
+    $openIssues[[int]$i.number] = [pscustomobject]@{ number = [int]$i.number; title = [string]$i.title; agent = ($labels -contains $TicketLabel); parked = ($labels -contains $ParkLabel); openBlockers = $openB }
   }
   function Eligible([int]$n) { $x = $openIssues[$n]; return ($null -ne $x) -and $x.agent -and -not $x.parked -and ($ExcludeIssues -notcontains $n) }
 
@@ -210,10 +219,7 @@ try {
   # ---------- ready issues with no open blockers ----------
   foreach ($n in @($openIssues.Keys | Sort-Object)) {
     if (-not (Eligible $n) -or $refIssues.ContainsKey($n) -or $branchByIssue.ContainsKey($n)) { continue }
-    Need "blockers #$n"
-    $bOut = Must (Invoke-Exe $GhExe @('api', "repos/$Repo/issues/$n/dependencies/blocked_by") 20) "gh blocked_by #$n"
-    $openB = @(JsonList $bOut | Where-Object { $_.state -eq 'open' } | ForEach-Object { [int]$_.number })
-    if ($openB.Count -gt 0) { continue }
+    if (@($openIssues[$n].openBlockers).Count -gt 0) { continue }
     [void]$idle.Add([pscustomobject]@{ kind = 'issue'; issue = $n; text = ('#{0} {1}: ready-for-agent, no open blockers, no live session, no branch ahead of integration -> dispatch implementer' -f $n, $openIssues[$n].title) })
   }
 
