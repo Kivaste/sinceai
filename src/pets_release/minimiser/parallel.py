@@ -59,7 +59,10 @@ def _free_ram() -> int | None:
 
 def effective_workers(requested: int) -> int:
     """``requested`` capped at min(cores, free RAM / 2 GiB), at least 1. Never recorded in any artefact."""
-    n = min(int(requested), os.cpu_count() or 1)
+    cores = os.cpu_count()
+    if cores is None:  # unknown core count: no pool (fail safe, never a guessed number)
+        return 1
+    n = min(int(requested), cores)
     ram = _free_ram()
     if ram is not None:
         n = min(n, ram // RAM_PER_WORKER)
