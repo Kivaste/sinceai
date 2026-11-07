@@ -581,3 +581,15 @@ CS-S1 chain done-report + 4 reviews (23 + #53/#54/#56/#92) -> merge -> #63 -> 25
   4. #32 delta Spec (Sonnet): CHANGES REQUIRED on AC3 ("a drafted HEALTH-S1 policy run through the search passes gate and verify"). The draft is review-only and `run` cannot consume it. The earlier "AC3 pipeline part deferred to 14:00" was an orchestrator deferral, not an amendment. Not decided by the orchestrator: asked the human to choose between (a) amending AC3 on #32 (the draft stays a reviewed artefact, with the consumer as future work) and (b) building a minimal approved-draft consumer on `run` before 16:00. #32 does not merge until this is answered and D39's condition holds.
 - **Why:** Close on evidence (D31). An acceptance criterion is changed only by the human.
 - **Evidence:** review sessions ses_e49e82a9 (#116 Spec), ses_e49e7bf8 (#124 Spec), ses_e49e7f95 (#32 Spec); C:\Users\kivas\AI\sinceai-out\smoke\810594cc0d51fb60d1e0fc2e60eff480b5a388cd\smoke.json.
+
+### Sat 15:15 - merge train 19 (#103 prep); review rounds dispatched
+
+- **When:** Sat 15:05-15:15 EET (machine clock)
+- **Decision:**
+  1. #103 prep: Grok Standards and Sonnet Spec both APPROVE at 860829e. Docs-only train 19 merged it at 871ff07 (tests/docs + tests/story_kit: exit 0, 39 passed, 6 named skips). #103 stays open for finalisation. The prep worktree and branch are removed.
+  2. #116: Grok r2 APPROVE. Its non-blocking gap (the CS expectation test is vacuous with respect to the CLI outcome) was added to the round-3 fixer ses_e49e7225.
+  3. #125+#126: Grok APPROVE and Sonnet CHANGES REQUIRED (the heartbeat running-id parser collapsed the live scan to unknown). Round 2 is with Sol (ses_e49e4418): parse every known shape, isolate unparsable entries, re-run the live dry run, and add the process-identity and bounded-retry tests. The orchestrator's heartbeat now lists plain issue numbers.
+  4. #124: Grok and Sonnet both CHANGES REQUIRED. There are two highs: release selection by file presence (it rejects #120's genuine three-release folder, yet accepts one planted manifest), and validation skipped when the Outcome omits "gate"/"verify". Round 2 is with Sol (ses_e49e3870).
+  5. #32: Grok delta APPROVE. Sonnet Spec CHANGES REQUIRED on AC3, which awaits a human decision (15:00 entry).
+- **Why:** Close and merge only on evidence (D31); one combined fix round per ticket.
+- **Evidence:** merger ses_e49e4d31; review sessions ses_e49e776e, ses_e49e75de, ses_e49e84b0, ses_e49e7a78, ses_e49e791c, ses_e49e7da5, ses_e49e7bf8, ses_e49e80f0, ses_e49e7f95.
