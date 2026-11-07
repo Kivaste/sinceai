@@ -619,3 +619,11 @@ CS-S1 chain done-report + 4 reviews (23 + #53/#54/#56/#92) -> merge -> #63 -> 25
      - The remaining CS items are deferred (above).
 - **Why:** D46 (human, 15:05): a demoable HEALTH-S1 web-app cut pinned on the #117 merge by about 17:00.
 - **Evidence:** interrupt responses {"interrupted":true} x3; issue comments; sessions ses_e49de3e3 (#132), ses_e49de156 (#80), ses_e49dde65 (#128), ses_e49ddc6a / ses_e49dda89 (#30 reviews).
+
+### Sat 15:16 - D47: #32 GO via the Mistral API; dispatched
+
+- **When:** Sat 15:16 EET (heartbeat clock)
+- **Decision:** A Sol session (ses_e49db522) merges integration 436e81c into ticket/31-llm, resolving the cli.py conflicts with search, then does the real Mistral `draft-policy` run once the human's key file exists. The key goes into the env var only and is never printed. Evidence: closed-schema pass, request digest, a no-credentials scan, no values in the request, the offline guard on every other subcommand, and a HEALTH-S1 real-kit run (the D47 condition). Delta reviews follow: Grok Standards + Sonnet Spec. #32 merges before the pin only if that doesn't delay #117; otherwise after the pin.
+- **Open:** AC3 of #32 (a drafted policy run through the search) is not amended by D47. The orchestrator asked the human at 15:00 and has no answer yet, so #32 doesn't close until AC3 is amended or met. No draft consumer is being built meanwhile.
+- **Why:** D47 (human, 15:12).
+- **Evidence:** D47 on main; session ses_e49db522.
