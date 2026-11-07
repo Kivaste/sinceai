@@ -266,6 +266,7 @@ def _cued_value_counts(s: str, pos: int, *, alpha_without_copula: bool,
         if low in _cues.HEDGES:
             if ends:
                 break
+            armed = armed or arms_after  # "password probably: x"
             continue
         if low in _cues.FUNCTION_WORDS:
             armed = arms_after  # "is a pain", "is not working": a description, not a value

@@ -452,6 +452,7 @@ def _cue_end(kind, lo, hi, text, pos):
         if low in _cues.HEDGES:
             if ends:
                 return None
+            armed = armed or arms_after  # "password probably: x"
             continue
         if low in _SKIP_WORDS:
             armed = arms_after  # "is a pain", "is not working": a description, not a value
@@ -496,10 +497,10 @@ def _value_ok(kind, lo, hi, value, single, copula=True, plain=None):
     value = value.rstrip(":")  # "label:" after a cue is prose, not a symbol
     if not copula:  # no copula/colon: only a credential-shaped token counts ("password reset?" is prose)
         value = value.rstrip(_TAIL_PUNCT)
+    if _cues.DATE_OR_TIME.fullmatch(value.rstrip(_TAIL_PUNCT)):
+        return plain  # a date counts only right after a copula, as in the cell rescan (any length)
     if not lo <= len(value) <= hi:
         return False
-    if _cues.DATE_OR_TIME.fullmatch(value.rstrip(_TAIL_PUNCT)):
-        return plain  # a date counts only right after a copula, as in the cell rescan
     if _secret_like(value) or single:
         return True
     # cue + copula/colon + a word that is not everyday prose ("salasana on kissakala")
