@@ -60,8 +60,11 @@ def payment_cards(s):
 
 # --- IBAN (mod-97, country length) -----------------------------------------------------------
 _IBAN = re.compile(_NB + r"([A-Z]{2}\d{2}(?:[ ]?[A-Z0-9]){11,30})" + _NA)
-_IBAN_LEN = {"FI": 18, "SE": 24, "NO": 15, "DK": 18, "DE": 22, "EE": 20, "GB": 22, "FR": 27, "NL": 18, "ES": 24,
-             "IT": 27, "BE": 16, "AT": 20, "CH": 21, "PL": 28, "LT": 20, "LV": 21, "IE": 22, "PT": 29, "IS": 26}
+# ISO 13616 registry lengths (European/SEPA subset). Countries not listed: any length 15..34 with valid mod-97.
+_IBAN_LEN = {"AD": 24, "AT": 20, "BE": 16, "BG": 22, "CH": 21, "CY": 28, "CZ": 24, "DE": 22, "DK": 18, "EE": 20,
+             "ES": 24, "FI": 18, "FO": 18, "FR": 27, "GB": 22, "GI": 23, "GL": 18, "GR": 27, "HR": 21, "HU": 28,
+             "IE": 22, "IS": 26, "IT": 27, "LI": 21, "LT": 20, "LU": 20, "LV": 21, "MC": 27, "MT": 31, "NL": 18,
+             "NO": 15, "PL": 28, "PT": 25, "RO": 24, "SE": 24, "SI": 19, "SK": 24, "SM": 27}
 
 
 def _iban_ok(raw: str) -> bool:
@@ -174,7 +177,7 @@ _HANDLE = re.compile(r"(?<![\w.@])@([A-Za-z0-9_]{3,30})(?![\w@.]*\.[A-Za-z]{2,})
 
 
 def usernames(s):
-    n = sum(1 for m in _USER.finditer(s) if any(ch.isdigit() or ch in "._" for ch in m.group(1)))
+    n = sum(1 for _ in _USER.finditer(s))  # the cue is required; the value may be purely alphabetic
     n += len(_HANDLE.findall(s))
     return n, 0
 
@@ -207,7 +210,7 @@ _SECRET_CUE = re.compile(
 
 def secrets(s):
     n = len(_KEYSHAPES.findall(s))
-    n += sum(1 for m in _SECRET_CUE.finditer(s) if any(ch.isdigit() for ch in m.group(1)))
+    n += sum(1 for _ in _SECRET_CUE.finditer(s))  # the cue is required; the value may be purely alphabetic
     return n, 0
 
 
@@ -239,14 +242,15 @@ def urls_with_tokens(s):
 
 
 # --- raw timestamps (minute or second precision) ------------------------------------------------
-_ISO_TS = re.compile(r"(?<!\d)\d{4}-\d{2}-\d{2}[T ](\d{2}):(\d{2})(?::(\d{2})(?:[.,]\d+)?)?")
+_ISO_TS = re.compile(r"(?<!\d)\d{4}-\d{2}-\d{2}[T ](\d{2}):(\d{2})(?::(\d{2})(?:[.,](\d+))?)?")
 _FI_TS = re.compile(r"(?<![\d.])\d{1,2}\.\d{1,2}\.\d{4}\s*(?:klo|kl\.?|at|,)?\s*(\d{1,2})[:.](\d{2})(?![\d])")
 
 
 def raw_timestamps(s):
     n = 0
     for m in _ISO_TS.finditer(s):
-        if m.group(2) != "00" or (m.group(3) and m.group(3) != "00"):
+        frac = m.group(4) or ""
+        if m.group(2) != "00" or (m.group(3) and m.group(3) != "00") or frac.strip("0"):
             n += 1
     for m in _FI_TS.finditer(s):
         if m.group(2) != "00":

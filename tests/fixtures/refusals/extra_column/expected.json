@@ -1,6 +1,6 @@
 {
   "failing": {
-    "contractColumns": [
+    "contract.columns": [
       {
         "column": "postcode",
         "count": 1,

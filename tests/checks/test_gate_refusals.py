@@ -57,17 +57,17 @@ def test_row_map_file_in_release_is_refused(tmp_path):
     # planted at test time: rowmap_*.csv files are never committed
     (out / "rowmap_visits.csv").write_text("protected_row,original_record_id\n0,x\n", encoding="utf-8")
     recs = _by_name(run_checks(out, CONTRACT, GATE))
-    assert recs["rowMaps"].status == "fail"
-    labels = sorted((v.label, v.column or "") for v in recs["rowMaps"].violations)
+    assert recs["release.row-maps"].status == "fail"
+    labels = sorted((v.label, v.column or "") for v in recs["release.row-maps"].violations)
     assert labels == [("rowMapColumn", "original_record_id"), ("rowMapColumn", "protected_row"), ("rowMapFile", "")]
-    assert recs["contractFiles"].status == "fail"
+    assert recs["contract.files"].status == "fail"
 
 
 def test_valid_token_in_token_column_passes_but_same_hex_elsewhere_fails(tmp_path):
     out = _copy("valid", tmp_path)
     recs = _by_name(run_checks(out, CONTRACT, GATE))
-    assert recs["tokenHex64"].status == "pass"
-    assert recs["tokenHex64"].denominator["n"] > 0
+    assert recs["release.token-hex64"].status == "pass"
+    assert recs["release.token-hex64"].denominator["n"] > 0
 
 
 def test_forged_pass_file_does_not_skip_any_check(tmp_path):
@@ -80,8 +80,8 @@ def test_forged_pass_file_does_not_skip_any_check(tmp_path):
     recs = _by_name(res)
     assert res.refused
     assert set(recs) == {c.name for c in all_checks()}
-    assert recs["paymentCards"].status == "fail"
-    assert recs["contractFiles"].status == "fail"  # the planted file inside <out>/ itself
+    assert recs["rescan.payment-cards"].status == "fail"
+    assert recs["contract.files"].status == "fail"  # the planted file inside <out>/ itself
 
 
 def test_missing_release_folder_is_never_clean(tmp_path):

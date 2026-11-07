@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from pets_release.checks.cells.validators import HEX64_TOKEN
+from pets_release.checks.cells._validators import HEX64_TOKEN
 from pets_release.checks.records import Violation, locations
 
 

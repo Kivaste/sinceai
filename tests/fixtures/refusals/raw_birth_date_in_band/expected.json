@@ -1,6 +1,6 @@
 {
   "failing": {
-    "contractForms": [
+    "contract.forms": [
       {
         "column": "age_band",
         "count": 1,

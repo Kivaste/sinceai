@@ -1,6 +1,6 @@
 {
   "failing": {
-    "contractColumns": [
+    "contract.columns": [
       {
         "column": "visit_id",
         "count": 1,
