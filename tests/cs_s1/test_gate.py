@@ -15,6 +15,7 @@ from pets_release.contract import generate
 from pets_release.cs_s1 import TURN_ID_CHECK
 from pets_release.policy import get_policy
 
+TEST_KEY = "test-only-master-key-0123456789abcdef"  # same synthetic key as conftest
 LUHN_CARD = "4111 1111 1111 1111"  # the standard public test card number
 
 
@@ -30,7 +31,8 @@ def _write(folder, tables):
 
 def _gate(folder, prepared):
     contract = generate(get_policy("CS-S1"), prepared.plan)
-    return run_checks(folder, contract, {"phase": "gate", **prepared.gate_context})
+    # key material comes from the run (ticket 21); here the synthetic test key
+    return run_checks(folder, contract, {"phase": "gate", "keys": [TEST_KEY], **prepared.gate_context})
 
 
 def _rec(res, name):
