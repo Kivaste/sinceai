@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import dataclasses
 import importlib
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
+from . import cross_turn
 from .labels import LABELS
 from .normalise import value_key
 from .passes import Candidate, ConversationView, Pass, Turn
@@ -59,12 +61,20 @@ def _resolve(cands: list[Candidate], texts: Sequence[str]) -> list[Candidate]:
     order = sorted(cands, key=lambda c: (-c.priority, -(c.end - c.start), c.turn_index, c.start, c.source, c.label))
     taken: dict[int, list[tuple[int, int]]] = {}
     keep: list[Candidate] = []
+    lost: list[Candidate] = []
     for c in order:
         occupied = taken.setdefault(c.turn_index, [])
         if any(c.start < e and s < c.end for s, e in occupied):
+            lost.append(c)
             continue
         occupied.append((c.start, c.end))
         keep.append(c)
+    for c in lost:  # same order: a lost candidate's cores are claimed where nothing else holds them
+        occupied = taken[c.turn_index]
+        for s, e in c.cores:
+            if c.start <= s < e <= c.end and not any(s < oe and os < e for os, oe in occupied):
+                occupied.append((s, e))
+                keep.append(dataclasses.replace(c, start=s, end=e, cores=()))
     return sorted(keep, key=lambda c: (c.turn_index, c.start))
 
 
@@ -82,6 +92,12 @@ def redact_conversation(
     turns = tuple(turns)
     if passes is None:
         passes = default_passes()
+    # then gate-consistent across turns: forced candidates for the gate text checks' hits (#92)
+    return cross_turn.redact_until_clean(_redact_once, conversation_id, turns, tuple(passes), normalise)
+
+
+def _redact_once(conversation_id: str, turns: tuple[Turn, ...], passes: Sequence[Pass],
+                 normalise: Callable[[str, str], str]) -> Redaction:
     view = ConversationView(conversation_id, turns)
     texts = [t.text for t in turns]
     cands: list[Candidate] = []

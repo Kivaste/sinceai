@@ -244,6 +244,31 @@ def test_value_copied_into_manifest_text_refuses(tmp_path):
     assert value.encode() not in _all_bytes(scoring_dir(out))
 
 
+def _with_unit(cand, value):
+    t = cand.tables[1]  # lab_results
+    frame = t.frame.copy()
+    frame.loc[0, "unit"] = value
+    return make_candidate(tables=(cand.tables[0], type(t)(t.name, frame, t.final, t.suppressed)),
+                          narrative=cand.narrative)
+
+
+def test_copied_value_containing_a_schema_name_still_refuses(tmp_path):
+    """Masking schema names must not hide a released value that merely contains one (review finding, ticket 23)."""
+    value = "xxtriage"  # synthetic cell value (fits the unit form) containing the column name triage
+    cand = make_candidate()
+    nar = dict(cand.narrative)
+    nar["fitFor"] = [{"scenario": "HEALTH-S1", "reason": f"built for {value}"}]
+    out, res = _released(tmp_path, _with_unit(make_candidate(narrative=nar), value))
+    assert res.status == "refused" and "selfscan:manifest-value" in res.reasons, res.reasons
+    assert not out.exists()
+
+
+def test_value_inside_a_schema_name_only_is_not_a_hit(tmp_path):
+    """A released value occurring only inside schema-name text (value "readmit", column "readmit_30d") is permitted."""
+    out, res = _released(tmp_path, _with_unit(make_candidate(), "readmit"))
+    assert res.status == "released", res.reasons
+
+
 @pytest.mark.parametrize("existing", ["rel", "rel.scoring"])
 def test_existing_output_is_never_overwritten(tmp_path, existing):
     (tmp_path / "o" / existing).mkdir(parents=True)

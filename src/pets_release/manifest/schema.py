@@ -177,12 +177,15 @@ _FIELD_JUSTIFICATION = {
 
 _RESIDUAL_RISK = _obj({
     "risk": _ref("id"),
-    "kind": {"enum": ["attribute_inference", "linkage", "note", "scorecard_defect", "tamper_limitation",
-                      "text_recall"]},
+    "kind": {"enum": ["attribute_inference", "gate_low_severity", "linkage", "note", "scorecard_defect",
+                      "tamper_limitation", "text_recall"]},
     "label": {"oneOf": [{"enum": list(SPAN_LABELS)}, {"type": "null"}]},
     "rate": {"oneOf": [
         _ref("notMeasured"), _ref("notApplicable"),
         _obj({"status": _status("measured"), "value": {"type": "number", "minimum": 0, "maximum": 1},
+              "denominator": _ref("denominator"), "source": _ref("text")}),
+        # gate_low_severity: low-severity hits a gate check counted (released; never an assertion)
+        _obj({"status": _status("counted"), "count": {"type": "integer", "minimum": 1},
               "denominator": _ref("denominator"), "source": _ref("text")}),
     ]},
     "description": _ref("text"),
@@ -204,13 +207,23 @@ def _assertion_maps(names) -> dict:
     }
 
 
+def _policy_k(scenario: str) -> int:
+    from pets_release.policy import get_policy, k_target
+
+    k = k_target(get_policy(scenario))
+    if k is None:
+        raise ImportError("scenario carries quasiIdentifiersBelowK but its policy has no k target")
+    return k
+
+
 def _scenario_rule(scenario: str) -> dict:
     then = {"properties": _assertion_maps(required_assertions(scenario))}
     if scenario == "CS-S1":  # healthInText is checked against the lexicon version bound in the manifest
         then["properties"]["bindings"] = {"properties": {"lexiconDigests": {"minProperties": 1}}}
     # contract.k (k-anonymity target) exactly when the scenario carries quasiIdentifiersBelowK
     if "quasiIdentifiersBelowK" in required_assertions(scenario):
-        then["properties"]["contract"] = {"required": ["k"]}
+        # the target is the pinned policy's, never the manifest's own (#62); the cross-field rule pins equality
+        then["properties"]["contract"] = {"required": ["k"], "properties": {"k": {"minimum": _policy_k(scenario)}}}
     else:
         then["properties"]["contract"] = {"not": {"required": ["k"]}}
     return {
@@ -258,6 +271,7 @@ MANIFEST_SCHEMA: dict = {
         "fieldJustifications": _arr(_FIELD_JUSTIFICATION, 1),
         "contract": _obj({
             "k": {"type": "integer", "minimum": 2},  # k-anonymity target; required/forbidden per scenario
+            "healthInTextRequired": {"type": "boolean"},  # text.health severity; absent = required (#56)
             "files": _map("fileName", _obj({
                 "required": _arr(_ref("name")),
                 "columns": _map("name", _obj({"form": {"type": "string", "minLength": 1, "maxLength": 300},
@@ -273,7 +287,20 @@ MANIFEST_SCHEMA: dict = {
         "sacrifices": _arr(_obj({
             "check": _ref("id"), "floor": {"type": "number"}, "before": _SCORE, "after": _SCORE,
             "reason": _ref("text"),
-        })),
+            # #89: an adopted enumerated rung sacrifice (e.g. arrival_ts month+hour -> hour of day), with the
+            # measured k result at `from` that triggered it; present exactly when the plan holds that rung
+            "rungStep": _obj({
+                "table": _ref("name"), "column": _ref("name"), "from": _ref("id"), "to": _ref("id"),
+                "privacyTarget": _ref("id"), "k": {"type": "integer", "minimum": 2},
+                "atFrom": _obj({
+                    "unitsBefore": {"type": "integer", "minimum": 1},
+                    "unitsSuppressed": {"type": "integer", "minimum": 0},
+                    "share": {"type": "number", "minimum": 0, "maximum": 1},
+                    "maxShare": {"type": "number", "minimum": 0, "maximum": 1},
+                    "withinBound": {"const": False},
+                }),
+            }),
+        }, required=["after", "before", "check", "floor", "reason"])),
         "residualRisks": _arr(_RESIDUAL_RISK, 1),
         "fitFor": _arr(_ref("fit"), 1),
         "notFitFor": _arr(_ref("fit")),

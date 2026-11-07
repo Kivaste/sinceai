@@ -1,48 +1,20 @@
-"""CS-S1 measurements for the manifest: purpose checks before/after (CS-U5 twice when turn_id is a
-pseudonym) and exact-match redaction scores on the template-held-out split (ticket 14's harness pieces).
-Aggregates only; nothing here returns a row value."""
+"""CS-S1 redaction measurement for the manifest: exact-match scores on the template-held-out split (ticket 14's
+harness pieces). Purpose checks are ``run.purpose`` (#60). Aggregates only; nothing here returns a row value."""
 from __future__ import annotations
 
 import math
 from pathlib import Path
 
-from pets_release.cs_s1.lineage import restore_turn_ids
 from pets_release.manifest import not_measured
 
 GOLD = Path("metadata") / "pii_spans" / "customer_service__turns__text.jsonl"
 RESIDUAL_LABELS = ("PERSON", "ADDRESS", "LOCATION", "ORG", "DATE", "AGE")
-ADAPTED = "CS-U5.lineage-adapted"
-UTILITY_SOURCE = "pets-eval utility tasks in-process via the kiteval adapter (original vs original = before)"
 
 
 def _num(v):
     if v is None or (isinstance(v, float) and math.isnan(v)):
         return None
     return float(v)
-
-
-def utility(scenario_id, source, protected, rowmap_turns, *, root) -> tuple[dict, dict]:
-    """(measured.utility block, {task: {before, after, status}}). ``rowmap_turns``: row map of the
-    released turns when turn_id is a pseudonym (adds the separately labelled lineage-adapted CS-U5)."""
-    from pets_release.kiteval import purpose_check, purpose_checks
-
-    orig = {k: source[k] for k in ("conversations", "turns")}
-    before = {r["id"]: r for r in purpose_checks(scenario_id, orig, orig, root=root)}
-    after = {r["id"]: r for r in purpose_checks(scenario_id, orig, protected, root=root)}
-    tasks = []
-    for tid in sorted(after):
-        a, b = after[tid], before.get(tid, {})
-        status = a["status"] if a["status"] in ("ok", "not_answerable") else "error"
-        tasks.append({"task": tid, "status": status, "before": _num(b.get("score")), "after": _num(a.get("score"))})
-    if rowmap_turns is not None:
-        adapted_prot = dict(protected, turns=restore_turn_ids(protected["turns"], rowmap_turns))
-        a = purpose_check("CS-U5", orig, adapted_prot)
-        status = a["status"] if a["status"] in ("ok", "not_answerable") else "error"
-        tasks.append({"task": ADAPTED, "status": status, "before": _num(before.get("CS-U5", {}).get("score")),
-                      "after": _num(a.get("score"))})
-    tasks.sort(key=lambda t: t["task"])
-    block = {"status": "measured", "source": UTILITY_SOURCE, "tasks": tasks}
-    return block, {t["task"]: {k: t[k] for k in ("status", "before", "after")} for t in tasks}
 
 
 def _pred(spans) -> dict:
@@ -106,6 +78,7 @@ def redaction(kit_root, spans) -> dict:
             risks.append(_risk(lab, {"status": "measured", "value": e["recall"],
                                      "denominator": {"unit": "turns", "n": len(held)},
                                      "source": "exact-match recall on template-held-out train turns"}))
+    risks += _target_risks(by, sc, len(held))
     report = _clean({"status": "measured", "split": split.summary(), "held_out": sc, "full_train": full})
     return {"measured": measured, "risks": risks, "frame": frame, "pred": pred, "held": held, "report": report}
 
@@ -127,6 +100,41 @@ def _clean(v):
     if math.isnan(f) or math.isinf(f):
         return None
     return int(f) if float(f).is_integer() and not isinstance(v, float) else f
+
+
+TARGET_LABELS = ("IBAN", "NATIONAL_ID", "PAYMENT_CARD", "SECRET")  # spec #1 CS-S1: recall >= 0.98 each
+TARGET_RECALL = 0.98
+_HOLDOUT = ("exact-match on the template-held-out split at turn level (skeleton hash, 20%; the accepted "
+            "ticket 14 deviation from conversation level)")
+
+
+def _target_risks(by: dict, sc: dict, n_held: int) -> list[dict]:
+    """Per-label held-out recall of every CS-S1 target label against the spec floor, and SECRET precision; each
+    stated on its own, never only as the combined figure (Sol r1 Spec)."""
+    den = {"unit": "turns", "n": n_held}
+    out = []
+    for lab in TARGET_LABELS:
+        e = by.get(lab)
+        rid = f"target-recall-{lab.lower().replace('_', '-')}"
+        if not e or not e["support"] or e["recall"] is None:
+            rate = not_measured("no held-out gold spans for this label")
+            verdict = f"not measured against the spec floor {TARGET_RECALL}"
+        else:
+            rate = {"status": "measured", "value": e["recall"], "denominator": den,
+                    "source": "redactor spans vs kit gold, " + _HOLDOUT}
+            verdict = (f"{e['tp']}/{e['support']} held-out spans, "
+                       + ("meets" if e["recall"] >= TARGET_RECALL else "BELOW") + f" the spec floor {TARGET_RECALL}")
+        out.append({"risk": rid, "kind": "note", "label": lab, "rate": rate,
+                    "description": f"{lab} recall: {verdict}; {_HOLDOUT}"})
+    sec = sc["cs_s1_target"]["per_label"].get("SECRET", {})
+    p = _num(sec.get("precision"))
+    out.append({"risk": "target-precision-secret", "kind": "note", "label": "SECRET",
+                "rate": not_measured("no held-out SECRET predictions") if p is None else
+                {"status": "measured", "value": p, "denominator": den,
+                 "source": "redactor spans vs kit gold, " + _HOLDOUT},
+                "description": "SECRET precision: over-redaction of gate-flagged cue spans (the #92 cross-turn step "
+                               "and gate-following cue rules) is the accepted privacy-safe cost; " + _HOLDOUT})
+    return out
 
 
 def _risk(label, rate) -> dict:

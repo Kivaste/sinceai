@@ -1,4 +1,4 @@
-"""Real-kit regression floor for the structured labels (marked ``kit``; skipped = not run).
+﻿"""Real-kit regression floor for the structured labels (marked ``kit``; skipped = not run).
 
 Frame: all customer_service train turns; gold-absent turns count as empty; exact match via
 ``pets_eval.text.span_scores(mode="exact")``. Asserts aggregates only and never prints values.
@@ -7,7 +7,6 @@ Frame: all customer_service train turns; gold-absent turns count as empty; exact
 from __future__ import annotations
 
 import json
-import os
 import sys
 from pathlib import Path
 
@@ -20,14 +19,19 @@ from pets_release.redactor import (
     redact_conversation,
 )
 
-KIT = os.environ.get("PETS_KIT")
-pytestmark = [pytest.mark.kit, pytest.mark.skipif(not KIT, reason="PETS_KIT not set: kit test NOT RUN")]
+pytestmark = [pytest.mark.kit]  # fails (never skips) when the kit is absent; see tests/conftest.py
 
 # REGRESSION GUARD, not the policy target. The CS-S1 privacy targets (recall 0.98 on NATIONAL_ID,
 # PAYMENT_CARD, IBAN, SECRET) are evaluated on the held-out split in ticket 23 and handled by policy.
 # Floors = value measured at the review-r2 head on the full train frame, minus a margin: 0.005 for
 # labels with >= 100 gold spans, 0.04 for smaller ones (one miss moves those by 0.016-0.037).
 # Measured (precision, recall): see the ticket 12 done-report.
+# Re-baselined (#92, orchestrator decision Sat; CS-S1 chain head): the redactor deliberately covers every span
+# the gate's own cross-turn text checks flag (redactor/cross_turn.py), so SECRET and USERNAME precision (and the
+# micro precision) drop to the values measured with that step: over-redaction, the privacy-safe direction (a
+# recorded sacrifice). Recall floors are unchanged and still met. The gate's cross-turn rule is not narrowed.
+# USERNAME also takes the gate's plain-word-after-cue rule (structured._gate_username_word; +3 spans).
+PRECISION_REBASELINED = {"SECRET": 0.6077, "USERNAME": 0.9104}  # was 0.9807, 1.0000
 MEASURED = {  # label: (precision, recall, gold support)
     "ACCOUNT_NUMBER": (0.9995, 0.9967, 3967),
     "DEVICE_ID": (0.9983, 1.0000, 572),
@@ -39,11 +43,11 @@ MEASURED = {  # label: (precision, recall, gold support)
     "PAYMENT_CARD": (0.9965, 0.9988, 856),
     "PHONE": (0.9988, 0.9825, 4217),
     "PROPERTY_ID": (1.0000, 1.0000, 103),
-    "SECRET": (0.9807, 0.9807, 466),
+    "SECRET": (PRECISION_REBASELINED["SECRET"], 0.9807, 466),
     "URL": (1.0000, 1.0000, 440),
-    "USERNAME": (1.0000, 0.9839, 62),
+    "USERNAME": (PRECISION_REBASELINED["USERNAME"], 0.9839, 62),
 }
-MICRO_MEASURED = (0.9989, 0.9950)
+MICRO_MEASURED = (0.9844, 0.9950)  # micro precision re-baselined with the cross-turn step (was 0.9989)
 MICRO_MARGIN = 0.003
 
 
@@ -51,15 +55,15 @@ def _margin(support: int) -> float:
     return 0.005 if support >= 100 else 0.04
 
 
-def _load():
+def _load(kit):
     import pandas as pd
 
-    root = Path(KIT)
+    root = Path(kit)
     sys.path.insert(0, str(root / "toolkit"))
     from pets_eval.text import span_scores
 
-    turns = pd.read_csv(root / "data/customer_service/turns.csv", dtype=str, keep_default_na=False)
-    conv = pd.read_csv(root / "data/customer_service/conversations.csv", dtype=str, keep_default_na=False)
+    turns = pd.read_csv(root / "data/customer_service/turns.csv", dtype=str, keep_default_na=False, na_filter=False)
+    conv = pd.read_csv(root / "data/customer_service/conversations.csv", dtype=str, keep_default_na=False, na_filter=False)
     train = set(conv.loc[conv["split"] == "train", "conversation_id"])
     tt = turns[turns["conversation_id"].isin(train)].copy()
     tt["_seq"] = tt["seq"].astype(int)
@@ -74,8 +78,8 @@ def _load():
     return tt, frame, gold, span_scores
 
 
-def test_structured_labels_exact_match_floor():
-    tt, frame, gold, span_scores = _load()
+def test_structured_labels_exact_match_floor(kit_root):
+    tt, frame, gold, span_scores = _load(kit_root)
     pred = {k: [] for k in frame}
     sp = StructuredPass()
     for cid, g in tt.groupby("conversation_id", sort=True):

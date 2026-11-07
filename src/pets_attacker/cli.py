@@ -1,4 +1,4 @@
-"""Run both personas on a HEALTH-S1 release folder and print aggregate rates.
+﻿"""Run both personas on a HEALTH-S1 release folder and print aggregate rates.
 
 python -m pets_attacker --kit <kit root> --release <folder with ed_visits.csv + rowmap_ed_visits.csv> --label b2k --out out.json
 """
@@ -12,6 +12,9 @@ from pathlib import Path
 
 import pandas as pd
 
+from pets_release.manifest.canonical import loads_strict
+from pets_release.offline import entry_point
+
 from .linkage import RungError, qis_from_spec
 from .personas import broker_attack, insider_attack
 from .truth import load_adversary_truth, load_identity, load_rowmap
@@ -20,7 +23,7 @@ DOMAIN, TABLE, RECORD_KEY = "health", "ed_visits", "visit_id"
 
 
 def _csv(path: Path) -> pd.DataFrame:
-    return pd.read_csv(path, dtype=str, keep_default_na=False)
+    return pd.read_csv(path, dtype=str, keep_default_na=False, na_filter=False)
 
 
 def _rowmap_path(release: Path, scoring_dir: Path | None, rowmaps: dict) -> Path:
@@ -34,7 +37,8 @@ def run(kit: Path, release: Path, label: str, scoring_dir: Path | None = None, r
         rungs_path: Path | None = None) -> dict:
     if rungs_path is None:
         raise RungError("--rungs is required: rungs are never inferred from cell shape")
-    rungs = json.loads(Path(rungs_path).read_text(encoding="utf-8-sig")).get(TABLE)
+    # #114: strict (duplicate keys, NaN/Infinity refuse); the rung record is never partially parsed
+    rungs = loads_strict(Path(rungs_path).read_text(encoding="utf-8-sig")).get(TABLE)
     if not isinstance(rungs, dict):
         raise RungError("rung metadata has no entry for the table")
     rowmap_path = _rowmap_path(release, scoring_dir, rowmaps or {})
@@ -59,6 +63,7 @@ def run(kit: Path, release: Path, label: str, scoring_dir: Path | None = None, r
     return {"label": label, "broker": broker, "insider": insider}
 
 
+@entry_point
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="pets_attacker")
     ap.add_argument("--kit", required=True, type=Path)

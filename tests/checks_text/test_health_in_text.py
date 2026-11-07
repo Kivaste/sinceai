@@ -44,13 +44,14 @@ def test_health_placeholder_is_not_a_hit(gate, release, contract):
     assert rec["status"] == "pass" and rec["hits"] == 0
 
 
-def test_contract_without_requirement_does_not_refuse(gate, release, contract):
+def test_contract_without_requirement_refuses(gate, release, contract):
+    """#56: an absent healthInTextRequired is treated as required (fail closed)."""
     folder = release([[(CUSTOMER, "because of my diabetes")]])
     c = contract()
     del c["healthInTextRequired"]
     rec = gate("text.health", folder, c)
-    assert rec["status"] == "pass" and rec["hits"] == 1
-    assert rec["violations"][0]["severity"] == "low"
+    assert rec["status"] == "fail" and rec["hits"] == 1
+    assert rec["violations"][0]["severity"] == "high"
 
 
 def test_malformed_requirement_in_contract_is_an_error(gate, release, contract):

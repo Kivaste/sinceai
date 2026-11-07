@@ -51,10 +51,27 @@ def test_hetu_spoken_with_spoken_separator_and_letter_name():
     assert found(r) == [("t0", start, len(t), "NATIONAL_ID")]
 
 
+def pass_only(*turns):
+    """Spans the structured pass alone proposes (no pipeline cross-turn step)."""
+    from pets_release.redactor import ConversationView
+
+    ts = [Turn(turn_id=f"c1-t{i}", text=t[1] if isinstance(t, tuple) else t,
+               speaker=t[0] if isinstance(t, tuple) else "customer", seq=str(i)) for i, t in enumerate(turns)]
+    return sorted((c.turn_index, c.start, c.end, c.label) for c in StructuredPass().run(ConversationView("c1", tuple(ts))))
+
+
+def gate_forced(r):
+    """Turns that hold a span after the full pipeline (passes plus the gate-consistent cross-turn step, #92)."""
+    return sorted({s["record_id"].split("-")[-1] for s in r.spans})
+
+
 def test_split_value_does_not_join_across_non_continuation_turn():
-    # same speaker says something else in between: flushed, the halves never form one phone number
-    r = conv("numero on 040 123", "odota hetki etsin sitä nyt tästä laukusta", "4567")
-    assert found(r) == []
+    # same speaker says something else in between: the structured pass flushes, the halves never form
+    # one phone number there; the gate's (k, k+2) window still joins them, so the pipeline's cross-turn
+    # step (#92) redacts both fragments and leaves the middle turn alone
+    turns = ("numero on 040 123", "odota hetki etsin sitä nyt tästä laukusta", "4567")
+    assert pass_only(*turns) == []
+    assert gate_forced(conv(*turns)) == ["t0", "t2"]
     joined = conv("numero on 040 123", ("agent", "mm"), "4567")
     assert [x[3] for x in found(joined)] == ["PHONE", "PHONE"]
 
@@ -118,8 +135,10 @@ def test_typed_groups_split_by_comma_do_not_merge():
 
 def test_luhn_does_not_join_short_fragments_across_turns():
     # '4111 1111 1111 111' + '1' passes Luhn when joined; a 1-digit fragment is not a continuation
-    r = conv("maksan 4111 1111 1111 111", ("agent", "mm"), "1 kpl")
-    assert [x[3] for x in found(r)] == []
+    # (in the pass; the gate's window does join them, so the pipeline's cross-turn step redacts, #92)
+    turns = ("maksan 4111 1111 1111 111", ("agent", "mm"), "1 kpl")
+    assert pass_only(*turns) == []
+    assert gate_forced(conv(*turns)) == ["t0", "t2"]
 
 
 def test_hetu_ending_in_check_letter_e_is_not_mistaken_for_an_amount():
@@ -321,7 +340,9 @@ def test_unrelated_other_speaker_turn_flushes_the_join():
     a = "numero on nolla neljä nolla, yksi kaksi kolme"
     b = "neljä viisi kuusi seitsemän"
     r = conv(a, ("agent", "Kerrotteko vielä mikä teidän osoitteenne on"), b)
-    assert found(r) == []
+    # the structured pass flushes the join here, but the gate's skip-middle window (a digit-free middle turn)
+    # reads a comma-separated phone across a and b (#56), so the cross-turn step (#92) redacts both parts
+    assert [(x[0], x[3]) for x in found(r)] == [("t0", "PHONE"), ("t2", "PHONE")]
     ok = conv(a, ("agent", "joo, jatkakaa"), b)
     assert [x[3] for x in found(ok)] == ["PHONE", "PHONE"]
 
@@ -354,8 +375,10 @@ def test_spelled_email_across_two_turns():
 
 
 def test_spelled_email_does_not_join_across_unrelated_turn():
-    r = conv("osoite on maija piste m", ("agent", "mikä on teidän postinumeronne"), "at posti piste example")
-    assert [x[0] for x in found(r)] == []
+    # (in the pass; the gate's (k, k+2) window does join them, so the pipeline's cross-turn step redacts, #92)
+    turns = ("osoite on maija piste m", ("agent", "mikä on teidän postinumeronne"), "at posti piste example")
+    assert pass_only(*turns) == []
+    assert gate_forced(conv(*turns)) == ["t0", "t2"]
 
 
 def test_credential_after_intervening_words():

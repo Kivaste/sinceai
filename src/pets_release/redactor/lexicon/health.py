@@ -3,8 +3,11 @@
 
 from __future__ import annotations
 
+import dataclasses
 import re
+from collections.abc import Iterable
 
+from ..passes import Candidate, ConversationView
 from .base import LexiconPass
 from .loader import Rules
 from .textutil import tokens
@@ -29,6 +32,19 @@ class HealthPass(LexiconPass):
         self.stop = frozenset(e.term.lower() for e in rows if e.match == "stopword")
         self.left = rules.int_of("@health_left", "HEALTH", 3)
         self.right = rules.int_of("@health_right", "HEALTH", 0)
+
+    def run(self, view: ConversationView) -> Iterable[Candidate]:
+        """Phrase spans whose cores are the health-term words inside them: overlap resolution is all-or-nothing,
+        so a phrase that loses to a name in its left context would otherwise leave the health term in the text."""
+        for c in super().run(view):
+            text = view.turns[c.turn_index].text
+            toks = tokens(text)
+            cores = []
+            for m in self.term_re.finditer(text, c.start, c.end):
+                t = next((t for t in toks if t.start <= m.start() < t.end), None)
+                if t is not None and c.start <= t.start and t.end <= c.end and (t.start, t.end) not in cores:
+                    cores.append((t.start, t.end))
+            yield dataclasses.replace(c, cores=tuple(cores))
 
     def find(self, text: str) -> list[tuple[int, int]]:
         toks = tokens(text)

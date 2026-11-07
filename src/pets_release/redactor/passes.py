@@ -55,6 +55,9 @@ class Candidate:
     priority: int = PRIORITY_LEXICON
     key: str | None = None
     source: str = ""
+    # sub-spans that must stay redacted if this candidate loses an overlap (a HEALTH phrase whose left
+    # context holds a name keeps its health term); each is taken alone, only where it is still free
+    cores: tuple[tuple[int, int], ...] = ()
 
 
 @dataclass(frozen=True)

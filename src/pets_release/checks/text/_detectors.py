@@ -10,6 +10,8 @@ import ipaddress
 import re
 from urllib.parse import parse_qsl, urlsplit
 
+import pets_release.checks._cues as _cues
+
 from ._normalise import SPOKEN_AT, SPOKEN_DOT
 
 # ---------------------------------------------------------------- checksums
@@ -114,8 +116,9 @@ def payment_cards(text):
 
 # ---------------------------------------------------------------- PHONE
 
+# separators between digit groups: spaces/tabs, one dash, and one comma or line break (#56: spoken phones)
 _PHONE_RE = re.compile(
-    r"(?<![\w+.,/])(\+[ \t]*)?\(?\d+\)?(?:[ \t]*-?[ \t]*\(?\d+\)?)*(?![\w/])"
+    r"(?<![\w+.,/])(\+[ \t]*)?\(?\d+\)?(?:[ \t]*(?:[,\n][ \t\n]*)?-?[ \t]*\(?\d+\)?)*(?![\w/])"
 )
 _DATE_LIKE = re.compile(r"^\d{1,2}[-./ ]\d{1,2}[-./ ]\d{2,4}$")
 
@@ -351,17 +354,23 @@ _CUE_TABLE = [
      r"tekstiviestikoodi\w*|engångs(?:kod|lösenord)\w*|verifieringskod\w*|bekräftelsekod\w*")),
     ("secret", 4, 128,
      (r"password|passwd|pwd|passcode|passphrase|salasana\w*|tunnussana\w*|lösenord\w*|"
-     r"api[ _-]?(?:key|avain\w*|nyckel\w*)|token|secret\s+key")),
+     r"api[ _-]?(?:key|avain\w*|nyckel\w*)|token|secret\s+key|"
+     # network keys, as in the cell rescan (Grok r1: the two walkers agree)
+     r"wi-?fi(?:-?avain\w*|-?salasana\w*|\s?key|\s?password)?|wlan(?:-?avain\w*)?|wpa\d?")),
 ]
+# a bare network cue (no key/password suffix): a plain word mid-clause after it is prose (cell rescan rule)
+_BARE_NETWORK_CUE = re.compile(r"(?i)wi-?fi|wlan")
 _CUES = [(kind, lo, hi, re.compile(r"(?i)\b(?<!-)(?:" + rx + r")(?![\w])")) for kind, lo, hi, rx in _CUE_TABLE]
 _FILLERS = {
     "is", "was", "on", "oli", "är", "var", "it's", "its", "my", "minun", "min", "mitt", "the",
     "your", "now", "nyt", "nu", "code", "koodi", "kod", "number", "numero", "nummer", ":", "=",
     "#", "-",
 }
-_PLACEHOLDER = re.compile(r"\[[A-Z][A-Z_]*_\d+\]")
-_COPULAS = {"is", "was", "on", "oli", "är", "var", "it's", "its", ":", "="}
-_VTOK = re.compile(r"[ \t]*([^\s\u00a6,;]+)")
+_SKIP_WORDS = _FILLERS | _cues.FUNCTION_WORDS
+# The digit view masks exact redactor placeholders as "\u00a6" (``_normalise.MASK``): one token here.
+_MASKED = "\u00a6"
+_VTOK = re.compile(r"[ \t]*(\u00a6|[,;]|[^\s\u00a6,;]+)")
+_SENTENCE_END = ".!?;"
 _TRAIL = ".)\"'"  # "!" and "?" stay on the value: they can be password symbols
 _TAIL_PUNCT = "!?"
 _SECRET_PATTERNS = re.compile(
@@ -378,26 +387,10 @@ def _secret_like(tok: str) -> bool:
     return has_digit or mixed or symbol
 
 
-def _cue_value(text, pos):
-    """(collapsed value, end offset, token count, all single chars) after a cue, or None."""
-    fillers = 0
-    copula = False  # a copula/colon between cue and value (the redactor's shape, ticket 12)
-    while True:
-        m = _VTOK.match(text, pos)
-        if not m:
-            return None
-        raw = m.group(1).rstrip(_TRAIL)
-        tok = raw.lstrip(":=#")
-        if _PLACEHOLDER.match(raw):
-            return None  # an already-redacted value ("[SECRET_1]") is not a leak
-        if raw[:1] in ":=" or raw.lower() in _COPULAS:
-            copula = True
-        if (not tok or tok.lower() in _FILLERS) and fillers < 4:
-            pos, fillers = m.end(), fillers + 1
-            continue
-        break
-    if not tok:
-        return None
+def _collapse(text, m):
+    """(collapsed value, end offset, all single chars) from the value token ``m`` plus any following
+    digit groups or single characters."""
+    tok = m.group(1).rstrip(_TRAIL).lstrip(":=#")
     parts = [tok]
     end = m.start(1) + len(m.group(1).rstrip(_TRAIL))
     pos = m.end()
@@ -415,10 +408,108 @@ def _cue_value(text, pos):
         if n.group(1) != core:  # trailing punctuation ends the value
             break
     single = len(parts) >= 2 and all(len(x) == 1 for x in parts)
-    return "".join(parts), end, single, copula
+    return "".join(parts), end, single
 
 
-def _value_ok(kind, lo, hi, value, single, copula=True):
+# the cue scan crosses line breaks (as the cell rescan does); value collapsing does not
+_CTOK = re.compile(r"\s*(" + _MASKED + r"|[,;]|[^\s" + _MASKED + r",;]+)")
+
+
+def _cue_end(kind, lo, hi, text, pos, network=False):
+    """End offset of the value after a cue ending at ``pos``, or None. Same rule as the cell rescans
+    (``cells._validators._cued_value_counts``), over up to ``_cues.WINDOW`` tokens, never past a
+    sentence end: a value-shaped token counts anywhere; a copula (also a trailing ":") arms, and while
+    armed the first word that is not a hedge is the value unless it is prose; any later copula re-arms;
+    other function words and non-value words disarm; separator runs are skipped; a masked placeholder
+    is the redacted value (skipped, disarms) unless a value is glued to it."""
+    armed = False
+    words = 0
+    cue_end = pos
+    for _ in range(_cues.WINDOW):
+        m = _CTOK.match(text, pos)
+        if not m:
+            return None
+        pos = m.end()
+        raw = m.group(1)
+        rest = raw.rstrip(_TRAIL)[1:]
+        if (m.start(1) == cue_end and raw[:1] == "-" and rest[:1].isalpha() and not _secret_like(rest)
+                and raw.rstrip(_TRAIL)[-1:] not in (":", "=")):
+            # the cue joined by "-" to a plain word is a compound ("wifi-yhteys"): an ordinary word, as in
+            # the cell rescan, not a symbol-bearing value; a copula later in the clause still arms
+            words += 1
+            if raw[-1:] in _SENTENCE_END:
+                return None
+            continue
+        if raw == _MASKED or _cues.is_placeholder(raw.rstrip(_TRAIL)):
+            # ``_normalise.MASK`` is " <mask> ": exactly one space and then a value character means the
+            # source glued a value to the placeholder ("[SECRET_1]hunterxyz")
+            glued = raw == _MASKED and text[pos:pos + 1] == " " and text[pos + 1:pos + 2].isalnum()
+            if not glued:
+                armed = False
+            continue
+        k = _cues.glued_hedge_len(raw)
+        if k:  # a hedge glued to its value ("probably:<value>"): the delimiter arms, the remainder is next
+            words += 1
+            armed = True
+            pos = m.start(1) + k
+            continue
+        if raw[:1] in ":=":
+            armed = True
+        tok = raw.rstrip(_TRAIL).lstrip(":=#")
+        last = raw.rstrip("\"')]")[-1:]
+        ends = bool(last) and last in _SENTENCE_END
+        low = tok.rstrip(_TAIL_PUNCT + ":=").lower()
+        arms_after = tok.rstrip(_TAIL_PUNCT)[-1:] in (":", "=") and not ends  # "router: x"
+        if _cues.is_punct(low):
+            if ends:
+                return None
+            armed = armed or arms_after
+            continue
+        first_word = words == 0
+        words += 1
+        if low in _cues.COPULAS:
+            armed = True
+            continue
+        if low in _cues.HEDGES:
+            if ends:
+                return None
+            armed = armed or arms_after  # "password probably: x"
+            continue
+        if low in _SKIP_WORDS:
+            armed = arms_after  # "is a pain", "is not working": a description, not a value
+            if ends:
+                return None
+            continue
+        value, end, single = _collapse(text, m)
+        nxt = _CTOK.match(text, end)
+        nxt = nxt.group(1) if nxt else ""
+        # a plain word directly before a placeholder is not the value: the placeholder is
+        before_ph = nxt == _MASKED or _cues.is_placeholder(nxt.rstrip(_TRAIL))
+        # after a bare wifi/wlan cue a plain word counts only at the clause end ("wifi: x")
+        mid_clause = network and not ends and bool(nxt) and not _cues.is_punct(nxt)
+        plain = (armed or (kind == "username" and first_word)) and not before_ph and not mid_clause
+        if _value_ok(kind, lo, hi, value, single, armed, plain):
+            return end
+        pos = max(pos, end)  # a rejected collapsed value ("4321 0000 0000 99") is not re-read in parts
+        if ends:
+            return None
+        armed = arms_after  # not the value; a later copula re-arms
+    return None
+
+
+_USERNAME_VALUE = re.compile(r"[A-Za-z0-9._@-]+")
+
+
+def _value_ok(kind, lo, hi, value, single, copula=True, plain=None):
+    """``copula``: armed by a copula; ``plain``: a plain word may be the value (default: ``copula``)."""
+    plain = copula if plain is None else plain
+    if kind == "username":
+        v = value.strip("[]()<>\"'").rstrip(_TAIL_PUNCT + ":")
+        if not (lo <= len(v) <= hi and _USERNAME_VALUE.fullmatch(v)):
+            return False
+        if _secret_like(v.strip("._-")):  # digit, inner symbol or mixed case: a handle
+            return True
+        return plain and v.lower().strip("._-") not in _cues.PROSE_WORDS | _USER_STOP
     if kind != "secret":
         value = value.rstrip(_TAIL_PUNCT)
     if kind == "digits":
@@ -429,7 +520,17 @@ def _value_ok(kind, lo, hi, value, single, copula=True):
     value = value.rstrip(":")  # "label:" after a cue is prose, not a symbol
     if not copula:  # no copula/colon: only a credential-shaped token counts ("password reset?" is prose)
         value = value.rstrip(_TAIL_PUNCT)
-    return len(value) >= lo and len(value) <= hi and (_secret_like(value) or single)
+    if _cues.DATE_OR_TIME.fullmatch(value.rstrip(_TAIL_PUNCT)):
+        # a date counts only right after a copula, as in the cell rescan (any length, also directly
+        # before a placeholder: the plain-word exclusion does not apply to it)
+        return copula
+    if not lo <= len(value) <= hi:
+        return False
+    if _secret_like(value) or single:
+        return True
+    # cue + copula/colon + a word that is not everyday prose ("salasana on kissakala")
+    word = value.rstrip(_TAIL_PUNCT).lower()
+    return plain and any(c.isalpha() for c in word) and word not in _cues.PROSE_WORDS
 
 
 def secrets(text):
@@ -439,11 +540,9 @@ def secrets(text):
         for m in cue.finditer(text):
             if _overlaps_any(m.span(), urls):
                 continue
-            got = _cue_value(text, m.end())
-            if got is None:
-                continue
-            value, end, single, copula = got
-            if _value_ok(kind, lo, hi, value, single, copula):
+            end = _cue_end(kind, lo, hi, text, m.end(),
+                           network=bool(_BARE_NETWORK_CUE.fullmatch(m.group(0))))
+            if end is not None:
                 hits.append((m.start(), end))  # cue + value: a next-turn value touches the cue turn
     return hits
 
@@ -469,9 +568,13 @@ def urls_with_tokens(text):
             hits.append(m.span())
             continue
         keys = {k.lower() for k, _ in parse_qsl(parts.query, keep_blank_values=True)}
+        # the fragment too (#56): "#token=...", "#/cb?code=...", "#/reset/<token>"
+        frag_path, _, frag_query = parts.fragment.partition("?")
+        for q in (frag_query, frag_path if "=" in frag_path else ""):
+            keys |= {k.lower().lstrip("/") for k, _ in parse_qsl(q, keep_blank_values=True)}
         seg_hit = any(
             _RANDOM_SEG.fullmatch(seg) and any(c.isdigit() for c in seg) and any(c.isalpha() for c in seg)
-            for seg in parts.path.split("/")
+            for seg in parts.path.split("/") + re.split(r"[/=&]", parts.fragment)
         )
         if keys & _TOKEN_KEYS or seg_hit:
             hits.append((m.start(), m.start() + len(url)))
@@ -482,7 +585,7 @@ def urls_with_tokens(text):
 
 _USER_CUE = re.compile(
     r"(?i)\b(?:username|user\s*name|user\s*id|login|käyttäjätunnu\w*|käyttäjänim\w*|"
-    r"användarnamn\w*|användar-id)\b(?:[ \t]*(?:[:=]|is|was|on|oli|är|var))*[ \t]*([A-Za-z0-9._-]{3,})"
+    r"användarnamn\w*|användar-id)\b"
 )
 _HANDLE_RE = re.compile(r"(?<![\w.@])@[A-Za-z][A-Za-z0-9_.]{2,29}")
 _USER_STOP = {"the", "same", "your", "my", "not", "and", "that", "this", "is", "was", "please",
@@ -492,8 +595,11 @@ _USER_STOP = {"the", "same", "your", "my", "not", "and", "that", "this", "is", "
 def usernames(text):
     hits = [(m.start(), m.end()) for m in _HANDLE_RE.finditer(text)]
     for m in _USER_CUE.finditer(text):
-        if m.group(1).lower().strip("._-") not in _USER_STOP:
-            hits.append(m.span())
+        # the shared cue rule (``_cue_end``): a handle-shaped token anywhere in the clause, or a plain
+        # word right after the cue or after a copula, unless it is prose
+        end = _cue_end("username", 3, 64, text, m.end())
+        if end is not None:
+            hits.append((m.start(), end))
     return hits
 
 

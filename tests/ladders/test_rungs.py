@@ -88,7 +88,7 @@ def test_month_hour_keeps_hour_of_day_distribution():
 
 
 def test_month_hour_parses_in_pets_eval_with_same_hours():
-    pe = pytest.importorskip("pets_eval.parse")
+    import pets_eval.parse as pe  # required (kit toolkit on the venv path): missing must fail, not skip
     vals = ["2025-03-14 14:37:05", "2025-07-02 03:01:00", "2025-07-30 23:59:59"]
     out = _one("ts.month_hour", vals)["x"]
     assert list(pe.to_hour(out)) == [14, 3, 23]
@@ -216,7 +216,7 @@ def test_numeric_bin_matches_form_and_parses_in_pets_eval():
     out = _one("num.bin", ["12", "19.9", "-3", "20", "x"], {"width": 10})["x"]
     assert list(out) == ["[10,20)", "[10,20)", "[-10,0)", "[20,30)", ""]
     assert all(_matches("num.bin", v) for v in out if v)
-    pe = pytest.importorskip("pets_eval.parse")
+    import pets_eval.parse as pe  # required (kit toolkit on the venv path): missing must fail, not skip
     parsed = pe.parse_numeric(out.iloc[:4])
     assert parsed.notna().all() and abs(parsed.iloc[0] - 15) < 1e-6
 
@@ -287,14 +287,18 @@ def test_contract_form_unknown_rung_raises():
         contract_form("withheld")
 
 
-# ---- ts.hour_of_day (07b): date-free `HH:00`, coarser than ts.month_hour
-def test_hour_of_day_is_on_timestamp_ladder_between_month_hour_and_day():
-    from pets_release.ladders.rungs import coarseness
+# ---- ts.hour_of_day (07b, #89): date-free `HH:00`, coarser than ts.month on the privacy order
+def test_hour_of_day_is_coarser_than_month_on_the_timestamp_ladder():
+    from pets_release.ladders.rungs import SACRIFICE_ONLY_RUNGS, at_least_as_coarse
 
     lad = LADDERS["timestamp"]
-    assert lad.index("ts.month_hour") < lad.index("ts.hour_of_day")
-    assert coarseness("ts.hour_of_day") > coarseness("ts.month_hour")
-    assert coarseness("ts.hour_of_day")[0] == "timestamp"
+    assert lad == ("ts.exact", "ts.hour", "ts.month_hour", "ts.day", "ts.week", "ts.month", "ts.hour_of_day",
+                   "withheld")
+    for finer in ("ts.exact", "ts.hour", "ts.month_hour", "ts.day", "ts.week", "ts.month"):
+        assert at_least_as_coarse("ts.hour_of_day", finer)
+        assert not at_least_as_coarse(finer, "ts.hour_of_day")
+    assert at_least_as_coarse("withheld", "ts.hour_of_day")
+    assert "ts.hour_of_day" in SACRIFICE_ONLY_RUNGS
 
 
 def test_hour_of_day_form_values_and_nullable():
@@ -313,7 +317,7 @@ def test_hour_of_day_drops_the_date_entirely():
 
 
 def test_hour_of_day_distribution_identical_via_pets_eval():
-    pe = pytest.importorskip("pets_eval.parse")
+    import pets_eval.parse as pe  # required (kit toolkit on the venv path): missing must fail, not skip
     vals = [f"2025-{m:02d}-{d:02d} {h:02d}:{(m * d) % 60:02d}:11" for m in (1, 5, 9) for d in (3, 17) for h in range(24)]
     out = _one("ts.hour_of_day", vals + ["", "junk"])["x"]
     got = pe.to_hour(out).dropna().astype(int).value_counts().sort_index()
@@ -327,5 +331,15 @@ def test_hour_of_day_finer_than_floor_refused():
     plan[0]["floor"] = "ts.month_hour"
     apply(plan, {"t": pd.DataFrame({"x": TS}, dtype=str)}, FakeKeys())  # coarser than floor is fine
     plan[0].update(rung="ts.hour", floor="ts.hour_of_day")
+    with pytest.raises(LadderError):
+        apply(plan, {"t": pd.DataFrame({"x": TS}, dtype=str)}, FakeKeys())
+
+
+# ---- follow-up #89: fail closed on unknown and cross-kind rungs
+@pytest.mark.parametrize("rung,floor", [("ts.month", "ts.hour_of_day"), ("ts.day", "ts.hour_of_day"),
+                                       ("ts.hour_of_day", "age.band5"), ("ts.nope", "ts.exact")])
+def test_apply_refuses_rung_finer_than_floor_or_unknown(rung, floor):
+    plan = _plan([("t", "x", rung, None)])
+    plan[0]["floor"] = floor
     with pytest.raises(LadderError):
         apply(plan, {"t": pd.DataFrame({"x": TS}, dtype=str)}, FakeKeys())

@@ -1,4 +1,4 @@
-"""Real-kit check on visit keys. Aggregate counts only; no values are printed.
+﻿"""Real-kit check on visit keys. Aggregate counts only; no values are printed.
 
 Skipped when the kit is absent (PETS_KIT, else the conventions path).
 """
@@ -30,8 +30,7 @@ TABLES = ("ed_visits", "lab_results")
 @pytest.mark.kit
 def test_visit_keys_tokenise_one_to_one_and_keep_the_join(record_property):
     files = {t: KIT / "data" / "health" / f"{t}.csv" for t in TABLES}
-    if not all(p.is_file() for p in files.values()):
-        pytest.skip("challenge kit not available")
+    assert all(p.is_file() for p in files.values()), "kit required but not found"
     digests = {t: hashlib.sha256(p.read_bytes()).hexdigest() for t, p in files.items()}
     rsid = release_scope_id(
         scenario="HEALTH-S1",
@@ -43,7 +42,7 @@ def test_visit_keys_tokenise_one_to_one_and_keep_the_join(record_property):
     scope = Scope.release(rsid)
     raw, tok = {}, {}
     for t, path in files.items():
-        col = pd.read_csv(path, dtype=str, usecols=["visit_id"], keep_default_na=False)
+        col = pd.read_csv(path, dtype=str, usecols=["visit_id"], keep_default_na=False, na_filter=False)
         raw[t] = set(col["visit_id"])
         assert "" not in raw[t]
         tok[t] = {p.token(v, label=RECORD_KEY, scope=scope) for v in raw[t]}

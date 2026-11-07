@@ -12,6 +12,7 @@ The block is carried by the environment (PETS_OFFLINE and PYTHONPATH). A child s
 
 from __future__ import annotations
 
+import functools
 import os
 import sys
 from pathlib import Path
@@ -27,6 +28,19 @@ def child_env(base: dict[str, str] | None = None) -> dict[str, str]:
     if str(HOOK_DIR) not in parts:
         env["PYTHONPATH"] = os.pathsep.join([str(HOOK_DIR), *parts])
     return env
+
+
+def entry_point(main):
+    """Decorate every CLI / module `main()`: the guard is installed before any argument is parsed, on
+    every route in (`python -m`, the dispatcher, or a direct Python call). tests/offline enumerates the
+    entry points under src/ and fails on one that is not covered."""
+
+    @functools.wraps(main)
+    def guarded(*args, **kwargs):
+        install()
+        return main(*args, **kwargs)
+
+    return guarded
 
 
 def install() -> None:

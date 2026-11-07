@@ -10,6 +10,7 @@ free-text field (``params.rung == "text.redacted"``) without both (#63).
 from __future__ import annotations
 
 import json
+import re
 import weakref
 
 from . import _normalise as normalise
@@ -26,6 +27,85 @@ UNDECLARED_TEXT_CELLS = 3
 
 class TextCheckError(Exception):
     """The text checks cannot run on this release/contract; the runner records `error`."""
+
+
+# Short multi-token phrases; a regex form accepting any of them can carry free text in short cells.
+_FREE_TEXT_PROBES = ("ab cd", "ab 12", "a1 b2 c3", "call me on")
+# every whitespace code point (all lie below U+3001)
+_WS = tuple(c for c in range(0x3001) if chr(c).isspace())
+_NO_WS_CATEGORIES = frozenset({"CATEGORY_DIGIT", "CATEGORY_WORD", "CATEGORY_NOT_SPACE", "CATEGORY_UNI_DIGIT",
+                               "CATEGORY_UNI_WORD", "CATEGORY_UNI_NOT_SPACE"})
+_NO_CONSUME = frozenset({"AT", "ASSERT", "ASSERT_NOT", "FAILURE"})
+
+
+def _class_item_ws(op, av) -> bool:
+    """One item of a character class may match whitespace (unknown items: yes)."""
+    if op == "LITERAL":
+        return chr(av).isspace()
+    if op == "RANGE":
+        return any(av[0] <= c <= av[1] for c in _WS)
+    if op == "CATEGORY":
+        return str(av) not in _NO_WS_CATEGORIES
+    return True  # NEGATE and anything unknown: fail closed
+
+
+def _shape(items) -> tuple[bool, bool]:
+    """(may match whitespace, has a variable element) over a parsed pattern; unknown nodes: (True, True)."""
+    ws = var = False
+    for op, av in items:
+        name = str(op)
+        if name in _NO_CONSUME:
+            continue
+        if name == "LITERAL":
+            ws = ws or chr(av).isspace()
+            continue
+        if name in ("NOT_LITERAL", "ANY"):
+            ws = var = True
+            continue
+        if name == "IN":
+            var = True
+            ws = ws or any(_class_item_ws(str(o), a) for o, a in av)
+            continue
+        if name == "CATEGORY":
+            var = True
+            ws = ws or str(av) not in _NO_WS_CATEGORIES
+            continue
+        if name in ("MAX_REPEAT", "MIN_REPEAT", "POSSESSIVE_REPEAT"):
+            # a part that may repeat (+, *, {n,}, {n,m} with m > 1) builds an open language even from literal
+            # alternatives ("^(?:(A)|(B)|( ))+$"): variable. Only a finite literal language is exempt.
+            var = var or av[1] > 1
+            subs = [av[2]]
+        elif name == "SUBPATTERN":
+            subs = [av[3]]
+        elif name == "ATOMIC_GROUP":
+            subs = [av]
+        elif name == "BRANCH":
+            subs = list(av[1])
+        elif name == "GROUPREF_EXISTS":
+            subs = [p for p in av[1:] if p is not None]
+        else:
+            return True, True  # GROUPREF and anything unknown: fail closed
+        for sub in subs:
+            w, v = _shape(sub)
+            ws, var = ws or w, var or v
+    return ws, var
+
+
+def _free_text_form(form) -> bool:
+    """True for an anchored regex form (not a validator ID) that can carry free words in a short cell: it may
+    accept whitespace and has a variable part (a class, a category, ".", or any repetition). Only a form that
+    cannot accept whitespace, or accepts a closed finite set of literal phrases, is not text. Unreadable or an
+    unknown parse node: text (fail closed)."""
+    if not isinstance(form, str) or not form.startswith("^"):
+        return False
+    try:
+        rx = re.compile(form)
+        from re import _parser  # the stdlib's own parse of the same pattern
+
+        ws, var = _shape(_parser.parse(form, rx.flags))
+    except Exception:  # noqa: BLE001 - unreadable form or parser unavailable: fail closed
+        return True
+    return (ws and var) or any(rx.fullmatch(p) for p in _FREE_TEXT_PROBES)
 
 
 def text_fields(contract):
@@ -116,10 +196,14 @@ def load(release, contract):
         if fname not in release.csv_files:
             raise TextCheckError("contract file missing from release")
         table = release.table(fname)
+        cols_spec = (files[fname] or {}).get("columns", {})
         for col in table.header:
             if (fname, col) in declared:
                 continue
             vals = [v for v in _column(table, col) if v.strip()]
+            if vals and _free_text_form((cols_spec.get(col) or {}).get("form")):
+                # short cells too (#56): text split across rows under a permissive form is still free text
+                raise TextCheckError("undeclared free-text column in release")
             if vals:
                 wordy = sum(1 for v in vals if len(v.split()) >= UNDECLARED_TEXT_TOKENS)
                 if wordy / len(vals) >= UNDECLARED_TEXT_SHARE or wordy >= UNDECLARED_TEXT_CELLS:
@@ -192,29 +276,47 @@ def _add(found, parts):
     found.append(parts)
 
 
-def detect(field: TextField, detector, view: str):
-    """Run one detector over single turns, then over 2- and 3-turn windows.
+def conversation(texts):
+    """A Conversation of the given source turns, in order (rows = turn positions)."""
+    c = Conversation()
+    for r_i, text in enumerate(texts):
+        c.rows.append(r_i)
+        c.src.append(text)
+        c.views["digit"].append(normalise.view(text, "digit"))
+        c.views["email"].append(normalise.view(text, "email"))
+    return c
 
-    Windows are normalised from the joined source turns. Returns a list of hits, each a
-    sorted tuple of row indices the hit touches. A window hit counts only if it spans the
-    first and last turn of the window; overlapping hits are merged (see ``_add``).
+
+def conversation_hits(conv: Conversation, detector, view: str):
+    """One detector over single turns, then over 2- and 3-turn windows, of one conversation.
+
+    Windows are normalised from the joined source turns. Returns the hits, each a list of
+    (turn position, start, end) source parts. A window hit counts only if it spans the first and
+    last turn of the window; overlapping hits are merged (see ``_add``). The redactor's cross-turn
+    step (``pets_release.redactor.cross_turn``) calls this same function.
     """
+    found: list = []
+    for t, text in enumerate(conv.views[view]):
+        src = conv.src[t]
+        for s, e in detector(text):
+            parts = _source_parts(src, view, s, e, [(0, len(src), t)])
+            if parts:
+                _add(found, parts)
+    if len(conv.src) > 1:
+        for idx, joined_src, joined_view, bounds in conv.windows(view):
+            for s, e in detector(joined_view):
+                parts = _source_parts(joined_src, view, s, e, bounds)
+                touched = {p[0] for p in parts}
+                if idx[0] in touched and idx[-1] in touched:
+                    _add(found, parts)
+    return found
+
+
+def detect(field: TextField, detector, view: str):
+    """Hits of one detector over every conversation of the field (see ``conversation_hits``),
+    each a sorted tuple of the row indices the hit touches."""
     hits = []
     for conv in field.conversations:
-        found: list = []
-        for t, text in enumerate(conv.views[view]):
-            src = conv.src[t]
-            for s, e in detector(text):
-                parts = _source_parts(src, view, s, e, [(0, len(src), t)])
-                if parts:
-                    _add(found, parts)
-        if len(conv.src) > 1:
-            for idx, joined_src, joined_view, bounds in conv.windows(view):
-                for s, e in detector(joined_view):
-                    parts = _source_parts(joined_src, view, s, e, bounds)
-                    touched = {p[0] for p in parts}
-                    if idx[0] in touched and idx[-1] in touched:
-                        _add(found, parts)
-        for parts in found:
+        for parts in conversation_hits(conv, detector, view):
             hits.append(tuple(sorted({conv.rows[t] for t, _s, _e in parts})))
     return hits

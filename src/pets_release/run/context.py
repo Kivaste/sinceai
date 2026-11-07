@@ -22,7 +22,16 @@ from pathlib import Path
 import pandas as pd
 
 from pets_release.ladders import PseudonymKeys
-from pets_release.pseudonym import RECORD_KEY, MasterKey, Scope, manifest_signing_key, normalise, pseudonymiser_for
+from pets_release.policy import k_target
+from pets_release.pseudonym import (
+    RECORD_KEY,
+    MasterKey,
+    Scope,
+    manifest_signing_key,
+    normalise,
+    pseudonymiser_for,
+    recipient_key,
+)
 
 DEFAULT_RECIPIENT = "default"  # manifest recipient when no --recipient is given (pseudonyms keyed by the master)
 
@@ -47,6 +56,9 @@ SCENARIO_SPEC = {
         "record_keys": {"conversations": "conversation_id", "turns": "turn_id", "customers": "customer_id"},
         "joins": [],
         "technical_identifiers": [],
+        # purpose checks score these record keys restored through the producer row map when released as
+        # pseudonyms (CS-U5 matches by turn_id; run.purpose.evaluate)
+        "purpose_lineage": {"turns": "turn_id"},
     },
 }
 
@@ -107,11 +119,16 @@ def producer_context(*, scenario_id: str, policy, source: Mapping[str, pd.DataFr
         "person": {**spec["person"], "normalise": person_normaliser(spec["person"].get("label", RECORD_KEY))},
         "joins": [dict(j) for j in spec["joins"]],
         "identifiers": [{"table": t, "column": c} for t, c in idents if t in source and c in source[t].columns],
-        # master and manifest-signing key material (bytes; scanned in every encoding by producer.key-material)
-        "keys": [master._k, manifest_signing_key(master)._k],
+        # every key the release could leak, as opaque key objects (producer.key-material scans their forms):
+        # master, manifest-signing and, for a non-default recipient, the derived recipient key (#84)
+        "keys": [master, manifest_signing_key(master),
+                 *([recipient_key(master, recipient)] if recipient != DEFAULT_RECIPIENT else [])],
     }
-    if "k" in contract:
-        ctx["k"] = contract["k"]
+    # the k target is the pinned policy's, never copied from the (self-declared) contract (#62); person-k
+    # errors if the contract's k differs
+    k = k_target(policy)
+    if k is not None:
+        ctx["k"] = k
     if released is not None:
         keys = token_keys(master, scope_id, recipient)
         rowmaps = {}

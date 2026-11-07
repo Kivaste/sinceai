@@ -24,6 +24,7 @@ from pets_release.manifest import (
     validate_manifest,
     validate_manifest_file,
 )
+from pets_release.policy import contract_policy_problems
 from pets_release.pseudonym import manifest_signing_key
 from pets_release.writer.assemble import (
     NARRATIVE_KEYS,
@@ -180,20 +181,32 @@ def _self_scan(build: Path, c: Candidate, manifest: dict, context: dict) -> list
     reasons += _gate_reasons(verify, "selfscan")
     reasons += [r.replace("gate:", "selfscan:") for r in _registry_reasons(verify.records)]
     text = "\x00".join(_strings({k: v for k, v in manifest.items() if k != "contract"}, []))
-    # schema names (the dataset's table and column names) are permitted manifest content: mask them, so a
-    # released value that is also part of a schema name (CS-S1 speaker "customer" vs table "customers") is not
-    # a hit; any other occurrence of the value still is (ticket 23)
+    # schema names (the dataset's table and column names) are permitted manifest content: an occurrence of a
+    # released value lying wholly inside a schema-name occurrence (CS-S1 speaker "customer" in table "customers")
+    # is not a hit; every other occurrence is, including a value that merely contains a schema name (ticket 23)
     names = {str(e.get(k, "")) for e in manifest.get("inventory", []) for k in ("dataset", "table", "column")}
     names |= {f[:-4] for f in c.contract.get("files", {})}
     names |= {col for f in c.contract.get("files", {}).values() for col in f.get("columns", {})}
-    for n in sorted((n for n in names if n), key=len, reverse=True):
-        text = text.replace(n, "\x00")
     values = set()
     for t in c.tables:
         values.update(v for v in pd.unique(t.frame.to_numpy(dtype=object).ravel()) if len(v) >= SCAN_MIN_LEN)
-    if any(v in text for v in values):
+    if any(_outside_names(text, v, names) for v in values if v in text):
         reasons.append("selfscan:manifest-value")
     return reasons
+
+
+def _spans(text: str, needle: str) -> list[tuple[int, int]]:
+    out, i = [], text.find(needle)
+    while i >= 0:
+        out.append((i, i + len(needle)))
+        i = text.find(needle, i + 1)
+    return out
+
+
+def _outside_names(text: str, value: str, names: set) -> bool:
+    """True when some occurrence of ``value`` in ``text`` is not wholly inside an occurrence of a schema name."""
+    covers = [s for n in names if n and value in n for s in _spans(text, n)]
+    return any(not any(a <= i and j <= b for a, b in covers) for i, j in _spans(text, value))
 
 
 def _publish_scoring(staging: Path, scoring: Path) -> None:
@@ -229,8 +242,11 @@ def write_release(candidate: Candidate, out, master_key, kit: Kit, *, context: M
     build = Path(tempfile.mkdtemp(prefix=f".{out.name}.build-", dir=out.parent))
     try:
         digests, lineage = _write_tables(build, candidate)
+        # the pinned scenario policy, not the candidate, fixes the k target and the QI set (#62)
+        reasons = [f"policy:{p}" for p in contract_policy_problems(candidate.scenario, candidate.contract,
+                                                                         candidate.narrative.get("fieldJustifications"))]
         gate = run_checks(build, candidate.contract, {**context, "phase": "gate"})
-        reasons = _gate_reasons(gate, "gate") + _registry_reasons(gate.records)
+        reasons += _gate_reasons(gate, "gate") + _registry_reasons(gate.records)
         reasons += evidence_for(gate.records, candidate.scenario)[2]
         reasons += justification_reasons(candidate.contract, list(candidate.narrative["fieldJustifications"]))
         manifest = None

@@ -4,7 +4,9 @@ Rows (trigger -> result):
   hand plan                          -> exit 0, release + scoring folder, gate pass/not_applicable only
   same release, verify / verify --full -> "VERIFIED (limited)" / "VERIFIED (full)"
   generated minikit turn_id          -> release-scope pseudonym; justification names turn-id-synthetic
-  manifest measured.utility          -> CS-U1, CS-U3, CS-U4, CS-U5 before/after + CS-U5.lineage-adapted
+  manifest measured.utility          -> CS-U1, CS-U3, CS-U4, CS-U5 (turn_id restored through the row map)
+                                        before/after + ungated CS-U5.unmodified (kit score without it)
+  producer.person-k / row-k          -> not_applicable (no k target), never not_run
   manifest measured.redaction        -> exact-match, held-out; residual text_recall risks for 6 labels
   export assertions                  -> healthInText present, quasiIdentifiersBelowK absent (no k)
   local spot-check sheet             -> <out>.scoring/spot_check.csv (outside the repo)
@@ -49,13 +51,14 @@ def test_gate_passes_with_turn_id_record(cs_run):
     recs = {r["check"]: r for r in _gate(out)["records"]}
     assert recs["turn-id-synthetic"]["status"] == "pass" and recs["turn-id-synthetic"]["hits"] == 0
     assert recs["producer.person-k"]["status"] == "not_applicable"
+    assert recs["producer.row-k"]["status"] == "not_applicable"
 
 
 def test_measurement_reports_in_scoring_folder(cs_run):
     _, out, _ = cs_run
     sc = out.parent / f"{out.name}.scoring"
     util = json.loads((sc / "utility_report.json").read_text(encoding="utf-8"))
-    assert {"CS-U1", "CS-U3", "CS-U4", "CS-U5", "CS-U5.lineage-adapted"} <= set(util)
+    assert {"CS-U1", "CS-U3", "CS-U4", "CS-U5", "CS-U5.unmodified"} <= set(util)
     red = json.loads((sc / "redaction_report.json").read_text(encoding="utf-8"))
     assert red["status"] == "measured" and red["split"]["held_out_turns"] > 0
     tid = json.loads((sc / "turn_id_assessment.json").read_text(encoding="utf-8"))
@@ -88,18 +91,30 @@ def test_manifest_turn_id_measurements_and_risks(cs_run):
     assert j["rung"] == "id.pseudonym" and "turn-id-synthetic" in j["reason"]
     assert any(g["check"] == "turn-id-synthetic" and g["status"] == "pass" for g in m["gate"]["checks"])
     tasks = {t["task"]: t for t in m["measured"]["utility"]["tasks"]}
-    assert {"CS-U1", "CS-U3", "CS-U4", "CS-U5", "CS-U5.lineage-adapted"} <= set(tasks)
+    assert {"CS-U1", "CS-U3", "CS-U4", "CS-U5", "CS-U5.unmodified"} <= set(tasks)
     assert all(tasks[t]["before"] is not None for t in tasks)
-    assert tasks["CS-U5"]["after"] == 0.0 < tasks["CS-U5.lineage-adapted"]["after"]  # unmodified vs adapted
+    assert tasks["CS-U5.unmodified"]["after"] == 0.0  # kit score without the row map
+    assert tasks["CS-U5"]["after"] >= 0.8  # gated score through the row map, at or above the floor
+    sac = {s["check"]: s for s in m["sacrifices"]}
+    assert sac["CS-U5"]["floor"] == 0.8 and sac["CS-U5"]["after"] == tasks["CS-U5"]["after"]
     assert m["measured"]["redaction"]["status"] == "measured" and m["measured"]["redaction"]["mode"] == "exact"
     risks = {r["label"]: r for r in m["residualRisks"] if r["kind"] == "text_recall"}
     assert set(risks) == {"PERSON", "ADDRESS", "LOCATION", "ORG", "DATE", "AGE"}
     assert risks["PERSON"]["rate"]["status"] == "measured"
+    # Sol r1 Spec (2,3,5): per-label recall of every CS-S1 target label, SECRET precision, and the hold-out mode
+    # are stated, never only a combined figure
+    by_id = {r["risk"]: r for r in m["residualRisks"]}
+    for lab in ("NATIONAL_ID", "PAYMENT_CARD", "IBAN", "SECRET"):
+        r = by_id[f"target-recall-{lab.lower().replace('_', '-')}"]
+        assert r["kind"] == "note" and r["label"] == lab and "0.98" in r["description"]
+        assert "template-held-out" in r["description"] and "turn level" in r["description"]
+    p = by_id["target-precision-secret"]
+    assert p["kind"] == "note" and p["label"] == "SECRET" and "precision" in p["description"]
     assert "healthInText" in m["exportAssertions"] and "quasiIdentifiersBelowK" not in m["exportAssertions"]
     import pandas as pd
 
-    conv = pd.read_csv(out / "conversations.csv", dtype=str, keep_default_na=False)
-    turns = pd.read_csv(out / "turns.csv", dtype=str, keep_default_na=False)
+    conv = pd.read_csv(out / "conversations.csv", dtype=str, keep_default_na=False, na_filter=False)
+    turns = pd.read_csv(out / "turns.csv", dtype=str, keep_default_na=False, na_filter=False)
     assert conv.conversation_id.map(lambda v: bool(HEX64.match(v))).all()
     assert set(turns.conversation_id) == set(conv.conversation_id)
 

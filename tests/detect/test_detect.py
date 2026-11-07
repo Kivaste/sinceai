@@ -138,11 +138,10 @@ def test_unseen_serialiser_header_and_rows():
     assert [r[0] for r in rows[1:]] == [f"c{i:02d}" for i in range(1, 13)]
 
 
-def test_headers_match_the_kit_scorer_source():
+@pytest.mark.kit
+def test_headers_match_the_kit_scorer_source(kit_root):
     """Copied-from-kit check: the scorer's docstring names the prediction columns."""
-    kit = os.environ.get("PETS_KIT")
-    if not kit:
-        pytest.skip("PETS_KIT not set (kit test not run)")
+    kit = kit_root
     src = (Path(kit) / "toolkit" / "pets_eval" / "detect.py").read_text(encoding="utf-8")
     assert "dataset, table, column, privacy_role [, subtype]" in src
     assert ",".join(KIT_HEADER) == serialise.KIT_HEADER_LINE
@@ -203,16 +202,113 @@ def test_cli_unseen_format_on_multi_table_dataset_exits_2(tmp_path, cli, make_ki
     assert p.returncode == 2
 
 
-def test_cli_never_reads_catalog_or_truth(tmp_path, cli, make_kit):
+# Runs the real CLI (`python -m pets_release ...`) under an audit hook that records every open/listdir/scandir
+# touching a `truth` path segment or `field_catalog*` under the kit. The hook's report goes to a side file.
+_AUDIT_RUNNER = r"""
+import os, runpy, sys
+kit = os.path.normcase(os.path.realpath(sys.argv[1]))
+report = sys.argv[2]
+hits = []
+def bad(p):
+    try:
+        p = os.path.normcase(os.path.realpath(os.fsdecode(p)))
+    except Exception:
+        return False
+    if not (p == kit or p.startswith(kit + os.sep)):
+        return False
+    parts = p[len(kit):].split(os.sep)
+    return any(s == "truth" or s.startswith("field_catalog") for s in parts)
+def hook(event, args):
+    if event in ("open", "os.listdir", "os.scandir", "os.rename", "os.remove") and args \
+            and isinstance(args[0], (str, bytes, os.PathLike)) and bad(args[0]):
+        hits.append(event)
+sys.addaudithook(hook)
+sys.argv = ["pets_release"] + sys.argv[3:]
+code = 0
+try:
+    runpy.run_module("pets_release", run_name="__main__", alter_sys=True)
+except SystemExit as e:
+    code = e.code if isinstance(e.code, int) else (0 if e.code is None else 1)
+with open(report, "w", encoding="utf-8") as f:
+    f.write(str(len(hits)))
+sys.exit(code)
+"""
+
+
+def _audited_cli(tmp_path: Path, kit: Path, *args: str):
+    import subprocess
+    import importlib.util
+
+    ROOT = Path(__file__).resolve().parents[2]
+    spec = importlib.util.spec_from_file_location("_tests_conftest", ROOT / "tests" / "conftest.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    cli_env = mod.cli_env
+
+    runner = tmp_path / "audit_runner.py"
+    runner.write_text(_AUDIT_RUNNER, encoding="utf-8")
+    report = tmp_path / "audit_report.txt"
+    p = subprocess.run([sys.executable, str(runner), str(kit), str(report), *args], cwd=ROOT, env=cli_env(),
+                       capture_output=True, text=True, encoding="utf-8", check=False)
+    assert report.exists(), "audit runner did not complete: " + p.stderr
+    return p, int(report.read_text(encoding="utf-8"))
+
+
+def _poisoned_kit(make_kit) -> Path:
     kit = make_kit()
     (kit / "metadata" / "field_catalog.csv").write_text("dataset,table,column,privacy_role\n", encoding="utf-8")
-    p = cli("detect", "health", "--kit", str(kit), "--out", str(tmp_path / "o.csv"))
+    (kit / "truth").mkdir()
+    (kit / "truth" / "labels.csv").write_text("column,privacy_role\n", encoding="utf-8")
+    return kit
+
+
+def test_cli_never_reads_catalog_or_truth(tmp_path, make_kit):
+    kit = _poisoned_kit(make_kit)
+    p, hits = _audited_cli(tmp_path, kit, "detect", "health", "--kit", str(kit), "--out", str(tmp_path / "o.csv"))
     assert p.returncode == 0, p.stderr
-    import pets_release.detect as pkg
-    for f in Path(pkg.__file__).parent.glob("*.py"):
-        text = f.read_text(encoding="utf-8")
-        assert "field_catalog" not in text.replace("field_catalog is never read", ""), f.name
-        assert "truth" not in text.replace("truth/", ""), f.name
+    assert (tmp_path / "o.csv").exists()
+    assert hits == 0, "detect opened a truth/ or field_catalog path"
+
+
+def test_audit_hook_would_catch_a_catalog_read(tmp_path):
+    """Self-check of the audit harness: a script that opens the catalog and truth/ must be counted."""
+    import subprocess
+
+    kit = _poisoned_kit_plain(tmp_path)
+    script = tmp_path / "evil.py"
+    script.write_text(
+        "import sys, pathlib\n"
+        f"pathlib.Path({str(kit / 'metadata' / 'field_catalog.csv')!r}).read_text()\n"
+        f"pathlib.Path({str(kit / 'truth' / 'labels.csv')!r}).read_text()\n", encoding="utf-8")
+    # run the evil script through the same hook by pointing runpy at it via a tiny package-free shim
+    shim = _AUDIT_RUNNER.replace('runpy.run_module("pets_release", run_name="__main__", alter_sys=True)',
+                                 f'runpy.run_path({str(script)!r}, run_name="__main__")')
+    runner = tmp_path / "shim.py"
+    runner.write_text(shim, encoding="utf-8")
+    report = tmp_path / "rep.txt"
+    subprocess.run([sys.executable, str(runner), str(kit), str(report)], check=True, capture_output=True)
+    assert int(report.read_text(encoding="utf-8")) == 2
+
+
+def _poisoned_kit_plain(tmp_path: Path) -> Path:
+    kit = tmp_path / "kit2"
+    (kit / "metadata").mkdir(parents=True)
+    (kit / "truth").mkdir()
+    (kit / "metadata" / "field_catalog.csv").write_text("x\n", encoding="utf-8")
+    (kit / "truth" / "labels.csv").write_text("x\n", encoding="utf-8")
+    return kit
+
+
+def test_detect_source_has_no_truth_reference():
+    from pets_attacker.boundary import truth_references
+    import pets_release
+
+    # scan the real package tree (root = src/), then restrict to the detect package
+    src = Path(pets_release.__file__).parent.parent
+    detect_dir = Path(pets_release.__file__).parent / "detect"
+    offenders = [f for f in truth_references(src) if Path(f).resolve().is_relative_to(detect_dir.resolve())]
+    assert offenders == []
+    assert not any("field_catalog" in f.read_text(encoding="utf-8") for f in detect_dir.glob("*.py"))
 
 
 # --- follow-up #45 ---------------------------------------------------------
@@ -236,3 +332,75 @@ def test_unknown_role_raises_instead_of_asserting(monkeypatch):
     monkeypatch.setattr(inventory, "_classify", lambda profile, link: ("bogus", "", ""))
     with pytest.raises(ValueError, match="unknown role"):
         inventory.detect_table(_frame(n=5), "csv", "t")
+
+
+# --- follow-up #79: error paths and headers are content-free ------------------------------------------
+# Rule: a foreign exception (pandas parse/decode/value error) prints its class name only; a CSV header
+# cell that is not a schema identifier refuses the run (exit 2, nothing written). Rows: headerless CSV ->
+# first row read as header -> header refused -> no value on console or in --out.
+PLANTED = "ZZPLANTED_SECRET_4711"
+
+
+def test_cli_headerless_csv_never_emits_first_row_values(tmp_path, cli):
+    src = tmp_path / "export.csv"
+    src.write_text(f"{PLANTED},Maija Planted,x@example.fi\nEMP1,Other Name,y@example.fi\n", encoding="utf-8")
+    out = tmp_path / "labels.csv"
+    p = cli("detect", str(src), "--out", str(out))
+    assert p.returncode == 2
+    assert not out.exists()
+    for text in (p.stdout, p.stderr):
+        assert PLANTED not in text and "Maija" not in text and "example.fi" not in text
+    assert "header" in p.stderr
+
+
+def test_cli_headerless_csv_to_stdout_never_emits_values(tmp_path, cli):
+    src = tmp_path / "export.csv"
+    src.write_text(f"{PLANTED},Maija Planted\nEMP1,Other Name\n", encoding="utf-8")
+    p = cli("detect", str(src))
+    assert p.returncode == 2
+    assert PLANTED not in p.stdout + p.stderr and "Maija" not in p.stdout + p.stderr
+
+
+def test_cli_malformed_csv_prints_class_name_only(tmp_path, cli):
+    src = tmp_path / "export.csv"
+    src.write_bytes(f"a,b\n{PLANTED},x\n{PLANTED},y,z\n".encode("utf-8"))
+    p = cli("detect", str(src), "--out", str(tmp_path / "o.csv"))
+    assert p.returncode == 2
+    assert PLANTED not in p.stdout + p.stderr
+    assert "ParserError" in p.stderr
+
+
+@pytest.mark.parametrize("exc", [
+    pd.errors.ParserError(f"Error tokenizing data near '{PLANTED}'"),
+    UnicodeDecodeError("utf-8", PLANTED.encode(), 0, 1, f"bad byte in {PLANTED}"),
+    ValueError(f"could not convert {PLANTED}"),
+    OSError(f"cannot read {PLANTED}"),
+])
+def test_foreign_exception_text_is_never_printed(tmp_path, monkeypatch, capsys, exc):
+    from pets_release.detect import cli as detect_cli
+
+    src = tmp_path / "export.csv"
+    src.write_text("a,b\n1,2\n", encoding="utf-8")
+
+    def boom(*a, **k):
+        raise exc
+
+    monkeypatch.setattr(detect_cli.pd, "read_csv", boom)
+    assert detect_cli.main([str(src)]) == 2
+    err = capsys.readouterr()
+    assert PLANTED not in err.out + err.err
+    assert type(exc).__name__ in err.err
+
+
+@pytest.mark.parametrize("header", ["Maija Planted", "x@example.fi", "010190-123A", "+358401234567",
+                                    "EMP100123", "", "a.1", "1abc"])
+def test_header_cell_validator_rejects_value_shapes(header):
+    from pets_release.detect.cli import bad_header_cells
+
+    assert bad_header_cells(["ok_col", header]) == 1
+
+
+def test_header_cell_validator_accepts_schema_identifiers():
+    from pets_release.detect.cli import bad_header_cells
+
+    assert bad_header_cells(["visit_id", "icd10_primary", "floor_area_m2", "c01", "Region", "_x"]) == 0

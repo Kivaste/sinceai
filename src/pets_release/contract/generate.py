@@ -15,7 +15,8 @@ Everything comes from the canonical sources, with no fallbacks:
 Contract shape (what 02's schema stores and 04's contract checks read)::
 
     {"files": {"<table>.csv": {"columns": {name: {"form", "params"}}, "required": [...]}},
-     "qi": [{"table", "column", "derived_from"}], "tokens": [{"table", "column", "scope"}]}
+     "qi": [{"table", "column", "derived_from"}], "tokens": [{"table", "column", "scope"}],
+     "healthInTextRequired": bool, "k": int (only with a k target)}
 
 Every released column is required (the ladders' ``apply`` emits all of them) and nullable
 (source columns may contain empty cells). ``params`` also carries ``rung`` and, for a derived or
@@ -37,7 +38,7 @@ from pets_release.ladders import (
     contract_entry,
     output_column,
 )
-from pets_release.ladders.rungs import coarseness
+from pets_release.ladders.rungs import at_least_as_coarse
 from pets_release.manifest import canonical_digest
 
 _NAME = re.compile(r"^[A-Za-z0-9_]{1,64}$")
@@ -45,6 +46,7 @@ _FILE = re.compile(r"^[A-Za-z0-9_]{1,64}\.csv$")
 _SCOPES = frozenset({"conversation", "recipient", "release"})
 _PLAN_KEYS = frozenset({"column", "floor", "params", "reason", "rung", "source", "table"})
 _CONTRACT_KEYS = frozenset({"files", "qi", "tokens"})
+HEALTH_REQUIRED_KEY = "healthInTextRequired"  # read by checks.text (text.health severity)
 _FILE_KEYS = frozenset({"columns", "required"})
 _COL_KEYS = frozenset({"form", "params"})
 _QI_KEYS = frozenset({"column", "derived_from", "table"})
@@ -146,6 +148,8 @@ def generate(policy: Any, plan: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     k = _k_target(policy)
     if k is not None:
         contract["k"] = k
+    # stated explicitly (#56): text.health treats a missing key as required (fail closed)
+    contract[HEALTH_REQUIRED_KEY] = any(t.get("kind") == "health_in_text" for t in policy.privacy_targets)
     _validate_contract(contract)
     return contract
 
@@ -226,15 +230,10 @@ def _check_floor(table: str, column: str, entry: Mapping[str, Any], floor: str, 
         raise ContractError(f"{table}.{column}: plan floor differs from policy floor")
     if rung == _WITHHELD:
         return
-    if floor == _WITHHELD:
+    if floor == _WITHHELD or not at_least_as_coarse(rung, floor):
         finer = True
     else:
-        try:
-            (rung_kind, rung_pos), (floor_kind, floor_pos) = coarseness(rung), coarseness(floor)
-        except LadderError:
-            finer = True
-        else:
-            finer = rung_kind != floor_kind or rung_pos < floor_pos
+        finer = False
     if finer:
         raise ContractError(f"{table}.{column}: rung finer than floor")
 
@@ -285,9 +284,11 @@ def _parse_plan(plan: Sequence[Mapping[str, Any]]) -> dict[tuple[str, str], dict
 def _validate_contract(contract: Mapping[str, Any]) -> None:
     if not isinstance(contract, Mapping):
         raise ContractError("contract: not an object")
-    _exact(contract, _CONTRACT_KEYS, "contract", optional=frozenset({"k"}))
+    _exact(contract, _CONTRACT_KEYS, "contract", optional=frozenset({"k", HEALTH_REQUIRED_KEY}))
     if "k" in contract and not _valid_k(contract["k"]):
         raise ContractError("contract: k invalid")
+    if HEALTH_REQUIRED_KEY in contract and not isinstance(contract[HEALTH_REQUIRED_KEY], bool):
+        raise ContractError(f"contract: {HEALTH_REQUIRED_KEY} invalid")
     files = contract["files"]
     if not isinstance(files, Mapping) or not files:
         raise ContractError("no released files")

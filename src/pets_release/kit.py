@@ -13,7 +13,7 @@ from pathlib import Path
 import pandas as pd
 
 _NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
-FORBIDDEN_DATASETS = frozenset({"truth"})
+FORBIDDEN_DATASETS = frozenset({"truth", "pii_spans"})  # gold span labels are scorer-side data, never pipeline input
 FORBIDDEN_TABLES = frozenset({"field_catalog"})
 
 
