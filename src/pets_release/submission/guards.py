@@ -5,6 +5,9 @@ Every guard fails closed: a git answer that cannot be obtained is a refusal, nev
 from __future__ import annotations
 
 import base64
+import csv
+import io
+import json
 import os
 import re
 import subprocess
@@ -71,28 +74,27 @@ def public_repo(checkout: Path | None = None) -> tuple[list[Path], str]:
     return sorted(roots), _normalise_url(origin.stdout)
 
 
-def _enclosing_repo(path: Path) -> Path | None:
+def _enclosing_repos(path: Path) -> list[Path]:
+    """Every directory from ``path`` (or its nearest existing ancestor) up to the filesystem root that holds a
+    ``.git`` entry: a nested repository must not hide an outer public clone."""
     p = path
     while not p.exists():
         if p.parent == p:
-            return None
+            return []
         p = p.parent
-    for d in (p, *p.parents):
-        if (d / ".git").exists():
-            return d
-    return None
+    return [d for d in (p, *p.parents) if (d / ".git").exists()]
 
 
 def refuse_inside_public_repo(out: Path, checkout: Path | None = None) -> None:
-    """Refuse ``out`` inside any work tree of the public repo, or inside any repository whose remote is the
-    public repo's origin (a clone elsewhere). Nothing is created."""
+    """Refuse ``out`` inside any work tree of the public repo, or inside any repository (at any nesting level)
+    whose remote is the public repo's origin (a clone elsewhere). Nothing is created."""
     roots, origin = public_repo(checkout)
     real = Path(out).resolve()
     if any(real == r or r in real.parents for r in roots):
         raise SubmissionRefused("out_in_public_repo")
-    enclosing = _enclosing_repo(real)
-    if enclosing is not None and origin in _remote_urls(enclosing):
-        raise SubmissionRefused("out_in_public_repo")
+    for repo in _enclosing_repos(real):
+        if origin in _remote_urls(repo):
+            raise SubmissionRefused("out_in_public_repo")
 
 
 def refuse_forbidden_source(path: Path) -> Path:
@@ -150,11 +152,64 @@ def key_needles(master: MasterKey) -> list[bytes]:
     return sorted(set(out))
 
 
+def _squash(s: str) -> str:
+    return re.sub(r"[^0-9A-Za-z]", "", s)
+
+
+def _strings(obj):
+    if isinstance(obj, str):
+        yield obj
+    elif isinstance(obj, dict):
+        for k, v in obj.items():
+            yield from _strings(k)
+            yield from _strings(v)
+    elif isinstance(obj, list):
+        for v in obj:
+            yield from _strings(v)
+
+
+def _decoded_strings(p: Path, data: bytes):
+    """Every string a reader of the file would recover: CSV cells, JSON(L) strings, or text lines."""
+    try:
+        text = data.decode("utf-8")
+    except UnicodeDecodeError:
+        text = data.decode("latin-1")
+    suffix = p.suffix.lower()
+    if suffix == ".csv":
+        csv.field_size_limit(1 << 30)
+        for row in csv.reader(io.StringIO(text, newline="")):
+            yield from row
+    elif suffix in (".json", ".jsonl"):
+        for line in ([text] if suffix == ".json" else text.splitlines()):
+            if not line.strip():
+                continue
+            try:
+                yield from _strings(json.loads(line))
+            except ValueError:
+                yield line
+    else:
+        yield from text.splitlines()
+
+
 def scan_key_material(root: Path, master: MasterKey) -> None:
-    """No packaged file may contain the master or manifest-signing key (raw, hex or base64)."""
+    """No file under ``root`` may contain the master or manifest-signing key, in any encoding: raw bytes, hex or
+    base64, and also in the decoded cells/strings (CSV and JSON escaping cannot hide it) with separators and
+    quotes ignored."""
     needles = key_needles(master)
+    texts = []
+    for n in needles:
+        try:
+            texts.append(n.decode("ascii"))
+        except UnicodeDecodeError:
+            continue
+    squashed = sorted({q for q in (_squash(t) for t in texts) if len(q) >= 16})
+    shortest = min((len(q) for q in squashed), default=0)
     for p in sorted(Path(root).rglob("*")):
-        if p.is_file():
-            data = p.read_bytes()
-            if any(n in data for n in needles):
+        if not p.is_file():
+            continue
+        data = p.read_bytes()
+        if any(n in data for n in needles):
+            raise SubmissionRefused("key_material")
+        for s in _decoded_strings(p, data):
+            if len(s) >= shortest and any(q in _squash(s) for q in squashed):
                 raise SubmissionRefused("key_material")

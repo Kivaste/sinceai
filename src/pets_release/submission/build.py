@@ -20,6 +20,7 @@ from pets_release.kit import Kit, KitError
 from pets_release.kiteval import RowMapRejected, ScorecardRejected, validate_row_map
 from pets_release.manifest import MANIFEST_FILENAME, canonical_bytes, loads_strict, required_assertions
 from pets_release.pseudonym import MasterKey
+from pets_release.run.context import SCENARIO_SPEC
 from pets_release.submission import guards
 from pets_release.submission.cs_eval import cs_eval_outputs
 from pets_release.submission.errors import SubmissionRefused
@@ -108,13 +109,16 @@ def _read_release(kit: Kit, master: MasterKey, src: Path) -> _Release:
         raise SubmissionRefused("rowmap_invalid")
     derived = ctx.get("rowmaps", {})
     for stem in sorted(stems):
-        _check_row_map(sc / f"rowmap_{stem}.csv", src / f"{stem}.csv", lineage[stem], derived.get(stem))
+        _check_row_map(sc / f"rowmap_{stem}.csv", src / f"{stem}.csv", lineage[stem], derived.get(stem),
+                       recompute_expected=stem in SCENARIO_SPEC.get(scenario, {}).get("record_keys", {}))
     return _Release(dataset, scenario, src, sc, manifest, tables, lineage)
 
 
-def _check_row_map(path: Path, table: Path, lineage, derived) -> None:
+def _check_row_map(path: Path, table: Path, lineage, derived, *, recompute_expected: bool) -> None:
     """The row map must pass the adapter's validation against the writer's lineage, and, where the producer
     context can recompute it from kit + key, equal that recomputation exactly."""
+    if derived is None and recompute_expected:
+        raise SubmissionRefused("rowmap_unverifiable")  # the producer context must recompute it; never trust lineage alone
     rows = len(pd.read_csv(table, dtype=str, keep_default_na=False, na_filter=False, encoding="utf-8"))
     try:
         validate_row_map(path, protected_rows=rows, source_keys=set(lineage.final) | set(lineage.suppressed),
@@ -174,6 +178,8 @@ def build_submission(*, kit: Kit, releases: Sequence, out, master: MasterKey,
                                "scorecard": s} for r, s in zip(parsed, summaries, strict=True)],
                  "customerServiceEval": cs_counts, "unseen": unseen_counts}
         (sbuild / INDEX_FILE).write_bytes(canonical_bytes(index))
+        guards.scan_key_material(sbuild, master)  # scorecard output and index hold no key either
+        guards.scan_key_material(sbuild, master)  # scorecard output and index: scoring files hold no key either
         os.rename(sbuild, scoring)
         try:
             os.rename(build, out)

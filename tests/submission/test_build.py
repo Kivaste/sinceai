@@ -268,3 +268,101 @@ def test_refuses_when_the_scorecard_crashes(world, tmp_path):
             raise FileNotFoundError("boom")
 
     assert _refused(world, tmp_path / "s", scorecard=Crash()) == "scorecard_error"
+
+
+# ---------- review round 1 ----------
+
+def test_refuses_out_in_a_nested_repo_inside_the_public_clone(world, tmp_path):
+    clone = tmp_path / "clone"
+    clone.mkdir()
+    git("init", "-q", cwd=clone)
+    public = git("config", "--get", "remote.origin.url", cwd=REPO).stdout.strip()
+    git("remote", "add", "origin", public, cwd=clone)
+    nested = clone / "nested-private"
+    nested.mkdir()
+    git("init", "-q", cwd=nested)
+    git("remote", "add", "origin", "https://github.com/Suhtetark-Kool/trusted-since-ai.git", cwd=nested)
+    assert _refused(world, nested / "pets_submission") == "out_in_public_repo"
+
+
+@pytest.mark.parametrize("variant", ["quote", "comma", "plain"])
+def test_refuses_key_material_hidden_by_csv_escaping(world, tmp_path, variant):
+    import csv
+    import io
+
+    kit, rel = world
+    k2 = tmp_path / "kit2"
+    shutil.copytree(kit, k2)
+    key = TEST_KEY
+    tid = {"quote": key[:9] + '"' + key[9:], "comma": key[:9] + "," + key[9:], "plain": key}[variant]
+    p = k2 / "data" / "customer_service" / "turns.csv"
+    rows = list(csv.reader(io.StringIO(p.read_text("utf-8"), newline="")))
+    rows[1][0] = tid
+    buf = io.StringIO(newline="")
+    csv.writer(buf, lineterminator="\n").writerows(rows)
+    p.write_text(buf.getvalue(), encoding="utf-8", newline="")
+    assert _refused((k2, rel), tmp_path / "s") == "key_material"
+
+
+def test_refuses_key_material_hidden_by_json_escaping(tmp_path):
+    import json
+
+    from pets_release.submission import SubmissionRefused as R
+    from pets_release.submission.guards import scan_key_material
+    root = tmp_path / "t"
+    root.mkdir()
+    (root / "a.jsonl").write_text(json.dumps({"record_id": TEST_KEY[:9] + '"' + TEST_KEY[9:]}) + "\n", encoding="utf-8")
+    with pytest.raises(R):
+        scan_key_material(root, MASTER)
+
+
+def test_refuses_key_material_in_the_scoring_folder(world, tmp_path):
+    class Leaky(FakeScorecard):
+        def __call__(self, *a, **k):
+            r = super().__call__(*a, **k)
+            (Path(k["out_dir"]) / "evaluator.log").write_text(TEST_KEY, encoding="utf-8")
+            return r
+
+    assert _refused(world, tmp_path / "s", scorecard=Leaky()) == "key_material"
+
+
+def test_refuses_an_export_assertion_set_that_is_not_exactly_required(world, tmp_path, monkeypatch):
+    import pets_release.submission.build as b
+
+    real = b.required_assertions
+    monkeypatch.setattr(b, "required_assertions", lambda s: (*real(s), "extraAssertion"))
+    assert _refused(world, tmp_path / "s") == "release_not_verified"
+
+
+def test_refuses_an_export_assertion_that_is_not_the_literal_false(world, tmp_path, monkeypatch):
+    import pets_release.submission.build as b
+
+    real = b.loads_strict
+
+    def forged(raw):
+        m = real(raw)
+        if "exportAssertions" in m:
+            k = min(m["exportAssertions"])
+            m["exportAssertions"][k] = 0  # falsy but not the literal False
+        return m
+
+    monkeypatch.setattr(b, "loads_strict", forged)
+    assert _refused(world, tmp_path / "s") == "release_not_verified"
+
+
+def test_refuses_when_an_expected_recomputed_row_map_is_missing(world, tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    import pets_release.run.context as rc
+    import pets_release.submission.build as b
+
+    real = rc.verify_context
+
+    def without(kit, master, rel):
+        ctx = real(kit, master, rel)
+        ctx["rowmaps"].pop("ed_visits")
+        return ctx
+
+    monkeypatch.setattr(rc, "verify_context", without)
+    monkeypatch.setattr(b, "verify_release", lambda *a, **k: SimpleNamespace(ok=True))
+    assert _refused(world, tmp_path / "s") == "rowmap_unverifiable"
