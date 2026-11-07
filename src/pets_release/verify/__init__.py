@@ -16,8 +16,9 @@ M = producer-scope checks the manifest claims and recipient mode cannot re-prove
 
 ``--full`` additionally re-runs every registered check (both scopes) with producer context (kit root,
 source tables, master key, scenario), requires every claimed check (both scopes) to be registered, checks
-the HMAC-SHA256 signature with ticket 06's ``manifest_signing_key`` (alg, keyId and value), every bound
-input digest against the kit, and the bound tool revision against this checkout's git HEAD. Any check
+the HMAC-SHA256 signature with ticket 06's ``manifest_signing_key`` (alg, keyId and value), that
+``bindings.inputs`` covers exactly the tables of the scenario's kit dataset (``kit.input_digests(dataset)``,
+withheld tables included; missing or extra fails) with every digest matching, and the bound tool revision against this checkout's git HEAD. Any check
 with status fail, error, not_run (or unregistered) fails.
 
 Verify reads nothing but the release folder, the kit and the key: no pass file, no prior result. The

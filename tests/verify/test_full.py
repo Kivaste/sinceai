@@ -201,3 +201,39 @@ def test_unlisted_planted_file_name_is_not_echoed(bed, verify_cli):
     assert r.returncode == 1
     assert "4111111111111111" not in r.stdout + r.stderr
     assert "unlisted-file#" in r.stdout
+
+
+# --- input bindings must equal the kit dataset's table set exactly (orchestrator decision, review r1) ------
+
+def _rebind_inputs(tb, bed, fn):
+    from pets_release.manifest import release_scope_id
+
+    m = tb.load(bed)
+    fn(m["bindings"]["inputs"])
+    rel = m["release"]
+    rel["releaseScopeId"] = release_scope_id(scenario=rel["scenario"], recipient=rel["recipient"],
+                                             inputs=m["bindings"]["inputs"],
+                                             tool_revision=m["bindings"]["toolRevision"])
+    tb.sign(m)
+    tb.save(bed, m)
+
+
+def test_full_missing_input_binding_fails(bed, kit, tb):
+    _rebind_inputs(tb, bed, lambda inputs: inputs.pop("lab_results"))
+    rep = _full(tb, bed, kit, checks=(*all_checks(), *_stubs(tb, bed)))
+    assert not rep.ok
+    assert any("inputs" in x and "lab_results" in x and "not bound" in x for x in rep.lines), rep.lines
+
+
+def test_full_extra_input_binding_fails(bed, kit, tb):
+    _rebind_inputs(tb, bed, lambda inputs: inputs.__setitem__("ghost_table", "a" * 64))
+    rep = _full(tb, bed, kit, checks=(*all_checks(), *_stubs(tb, bed)))
+    assert not rep.ok
+    assert any("inputs" in x and "ghost_table" in x and "missing from kit" in x for x in rep.lines), rep.lines
+
+
+def test_full_kit_table_added_after_release_fails(bed, kit, tb):
+    (kit / "data" / "health" / "late_table.csv").write_bytes(b"c\n1\n")
+    rep = _full(tb, bed, kit, checks=(*all_checks(), *_stubs(tb, bed)))
+    assert not rep.ok
+    assert any("late_table" in x and "not bound" in x for x in rep.lines), rep.lines
