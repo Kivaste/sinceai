@@ -9,14 +9,13 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Optional
 
 import numpy as np
 import pandas as pd
 
 REF = pd.Timestamp("2025-12-31")
 _SEP = re.compile(r"[\s\-\.\(\)/_:]+")
-_MASKED = re.compile(r"^[\*x#?\-_]*$", re.I)
+_MASKED = re.compile(r"^[\*x#?\-_]*$", re.IGNORECASE)
 _SEX = {"m": "M", "male": "M", "mies": "M", "man": "M", "f": "F", "female": "F", "nainen": "F",
         "woman": "F", "kvinna": "F", "n": "F", "k": "F"}
 
@@ -26,8 +25,8 @@ class QI:
     kind: str  # exact | name | postcode | age | sex | time
     adv: tuple
     prot: tuple
-    window: Optional[tuple] = None  # time: (hours before, hours after) adversary time
-    tol: Optional[float] = None  # age: years
+    window: tuple | None = None  # time: (hours before, hours after) adversary time
+    tol: float | None = None  # age: years
 
 
 def qis_from_spec(spec: list, columns) -> list:
@@ -179,7 +178,7 @@ class Matcher:
                         index.setdefault(t, []).append(r)
                 self.d[i] = (index, has, {})
 
-    def _name_mask(self, i: int, text) -> Optional[np.ndarray]:
+    def _name_mask(self, i: int, text) -> np.ndarray | None:
         at = _tokens(text)
         if not at:
             return None

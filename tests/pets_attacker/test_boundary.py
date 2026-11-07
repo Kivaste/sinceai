@@ -9,7 +9,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from pets_attacker.boundary import attacker_importers, attacker_reads_truth, truth_references
+from pets_attacker.boundary import (
+    attacker_importers,
+    attacker_reads_truth,
+    truth_references,
+)
 
 SRC = Path(__file__).resolve().parents[2] / "src"
 
