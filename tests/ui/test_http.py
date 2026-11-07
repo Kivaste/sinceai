@@ -1,6 +1,7 @@
 """Approved seam: real loopback HTTP server and real CLI, synthetic mini-kit only."""
 from __future__ import annotations
 
+import io
 import json
 import os
 import subprocess
@@ -10,7 +11,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from urllib.error import HTTPError
 from urllib.parse import parse_qs, urlsplit
-from urllib.request import Request, urlopen
+from urllib.request import Request
 
 import pytest
 
@@ -31,6 +32,40 @@ def server_env():
                PYTHONUTF8="1", TZ="UTC")
     env.pop("PETS_OFFLINE", None)
     return env
+
+
+def urlopen(request, *, timeout):
+    """Synthetic browser boundary: a clean client, even if this pytest worker is guarded.
+
+    Never restore worker sockets or alter the production server/child guard. Only
+    this test-only loopback client starts without the inherited offline hook.
+    """
+    if isinstance(request, str):
+        request = Request(request)
+    assert urlsplit(request.full_url).hostname == "127.0.0.1"
+    node = {"url": request.full_url, "method": request.get_method(), "headers": dict(request.headers),
+            "data": None if request.data is None else request.data.decode("utf-8"), "timeout": timeout}
+    code = '''
+import json, sys
+from urllib.error import HTTPError
+from urllib.request import Request, urlopen
+node = json.load(sys.stdin)
+request = Request(node["url"], method=node["method"], headers=node["headers"],
+                  data=None if node["data"] is None else node["data"].encode("utf-8"))
+try:
+    response = urlopen(request, timeout=node["timeout"])
+except HTTPError as exc:
+    response = exc
+with response:
+    sys.stdout.buffer.write(str(response.status).encode() + b"\\n" + response.read())
+'''
+    proc = subprocess.run([sys.executable, "-c", code], input=json.dumps(node).encode(),
+                          env=server_env(), capture_output=True, timeout=timeout + 5, check=False)
+    assert proc.returncode == 0, "synthetic HTTP client failed"
+    status, body = proc.stdout.split(b"\n", 1)
+    response = io.BytesIO(body)
+    response.status = int(status)
+    return response
 
 
 @contextmanager
@@ -237,6 +272,18 @@ def test_server_and_children_are_offline_while_loopback_http_works(tmp_path):
             time.sleep(0.05)
         assert json.loads(output.read_text()) == [True, True]
         assert request(url, "/api/scenarios")[0] == 200
+
+
+def test_http_client_survives_guarded_pytest_worker():
+    """HTTP seam: prior in-process CLI calls cannot disable the synthetic browser client."""
+    code = (
+        "from pets_release.offline import install; install(); import pytest; "
+        "raise SystemExit(pytest.main(['-q', '-p', 'no:cacheprovider', "
+        "'tests/ui/test_http.py::test_server_and_children_are_offline_while_loopback_http_works']))"
+    )
+    proc = subprocess.run([sys.executable, "-c", code], env=server_env(), cwd=ROOT,
+                          capture_output=True, text=True, timeout=60, check=False)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
 
 
 def test_only_aggregate_routes_and_scanned_dashboard_are_served(tmp_path):
