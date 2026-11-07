@@ -14,8 +14,7 @@ trigger -> result:
   bindings.inputs                       -> digest of every kit table of the scenario's dataset (withheld too)
 (assertion status matrix: test_assemble.py)
 
-Producer checks (ticket 11) are not merged yet: conftest registers test-only stand-ins for the unregistered
-producer assertion checks only, restored after each test; they pass only when producer context is supplied.
+Producer checks (ticket 11) run for real on a synthetic source context (writer_helpers.producer_context).
 """
 from __future__ import annotations
 
@@ -260,8 +259,7 @@ CRASH = r"""
 import os, sys
 from pathlib import Path
 import pets_release.writer.core as core
-from writer_helpers import MASTER, install_producer_standins, make_candidate, make_kit, producer_context
-install_producer_standins(lambda d, k, v: d.__setitem__(k, v))
+from writer_helpers import MASTER, make_candidate, make_kit, producer_context
 stage = sys.argv[2]
 def boom(*a, **k):
     os._exit(9)

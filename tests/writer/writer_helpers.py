@@ -17,11 +17,7 @@ sys.path.insert(0, str(ROOT / "tests" / "fixtures" / "manifest"))
 
 import build_fixture as fx
 
-from pets_release.checks import Outcome, all_checks
-from pets_release.checks import registry as _registry
-from pets_release.checks.registry import Check
 from pets_release.kit import Kit
-from pets_release.manifest import ASSERTION_EVIDENCE
 from pets_release.pseudonym import MasterKey
 from pets_release.writer import Candidate, ProtectedTable
 from pets_release.writer.assemble import NARRATIVE_KEYS
@@ -108,23 +104,3 @@ def producer_context(cand) -> dict:
                         {"table": "ed_visits", "column": "patient_name"}],
         "keys": [fx.FIXTURE_MASTER_KEY],
     }
-
-
-def _standin(name: str) -> Check:
-    ev = {e["check"]: e for e in ASSERTION_EVIDENCE.values()}[name]
-
-    def run(release, contract, context):
-        return Outcome(n=10) if context.get("source") else Outcome.not_run()
-
-    return Check(name=name, version="0.0.0", scope=ev["scope"], unit=ev["unit"], run=run)
-
-
-def install_producer_standins(setitem) -> list[str]:
-    """Until ticket 11 merges, register test-only stand-ins for the producer assertion checks that are NOT
-    registered (never replacing a registered check). ``setitem`` is ``monkeypatch.setitem`` so the registry
-    is restored after the test. Stand-ins pass only when producer context is supplied, like 11's checks."""
-    registered = {c.name for c in all_checks()}
-    missing = sorted({e["check"] for e in ASSERTION_EVIDENCE.values() if e["scope"] == "producer"} - registered)
-    for name in missing:
-        setitem(_registry._CHECKS, name, _standin(name))
-    return missing
