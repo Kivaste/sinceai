@@ -1,0 +1,1679 @@
+<!doctype html>
+<!-- PROTOTYPE (throwaway). Question: what should the pets-release demo page look like?
+     Three structurally different variants, switchable via ?variant=A|B|C and the floating bottom bar.
+     Data: aggregates extracted from the pin-5b260ec privacy manifests by extract_aggregates.py.
+     Rows preview uses invented SYNTHETIC rows only. Per-person k figures hidden (D33 pending). -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PROTOTYPE · Purpose-first data release</title>
+<style>
+:root{
+  --bg:#f6f7fb; --card:#fff; --ink:#0f172a; --muted:#5b6476; --line:#e3e7ef;
+  --brand:#2952cc; --brand-soft:#e8eefc;
+  --withheld:#64748b; --pseudo:#7c3aed; --coarse:#d97706; --kept:#059669;
+  --met:#047857; --met-bg:#d1fae5; --sac:#92400e; --sac-bg:#fef3c7; --fail:#b91c1c; --fail-bg:#fee2e2; --nm:#475569; --nm-bg:#e2e8f0;
+  --r:14px;
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 "Segoe UI",system-ui,-apple-system,Roboto,Arial,sans-serif}
+h1,h2,h3{line-height:1.2;margin:0 0 .4em}
+button{font:inherit;cursor:pointer}
+.muted{color:var(--muted)}
+.small{font-size:.86rem}
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:20px 22px;box-shadow:0 1px 2px rgba(15,23,42,.04)}
+.pill{display:inline-flex;align-items:center;gap:6px;padding:2px 10px;border-radius:999px;font-size:.82rem;font-weight:600;white-space:nowrap}
+.st-met{background:var(--met-bg);color:var(--met)} .st-sac{background:var(--sac-bg);color:var(--sac)}
+.st-fail{background:var(--fail-bg);color:var(--fail)} .st-nm{background:var(--nm-bg);color:var(--nm)}
+.tr{display:inline-block;padding:1px 9px;border-radius:6px;font-size:.8rem;font-weight:600;color:#fff}
+.tr-withheld{background:var(--withheld)} .tr-pseudonymised{background:var(--pseudo)} .tr-coarsened{background:var(--coarse)} .tr-kept{background:var(--kept)}
+.btn{border:0;border-radius:10px;padding:10px 18px;font-weight:600;background:var(--brand);color:#fff}
+.btn.ghost{background:transparent;color:var(--brand);border:1px solid var(--brand)}
+.btn:disabled{opacity:.45;cursor:default}
+.proto-tag{display:inline-block;background:#fde68a;color:#78350f;font-weight:700;font-size:.75rem;letter-spacing:.04em;padding:2px 8px;border-radius:6px}
+.d41{font-size:.85rem;color:var(--muted);border-left:3px solid var(--brand);padding:4px 10px;margin-top:10px;background:var(--brand-soft);border-radius:0 6px 6px 0}
+table.rows{border-collapse:collapse;width:100%;font-size:.9rem}
+table.rows th,table.rows td{padding:7px 10px;border-bottom:1px solid var(--line);text-align:left;white-space:nowrap}
+table.rows th{font-size:.78rem;text-transform:uppercase;letter-spacing:.03em;color:var(--muted);font-weight:600}
+table.rows td.mono{font-family:Consolas,monospace}
+/* bars */
+.bar-row{display:grid;grid-template-columns:minmax(170px,240px) minmax(140px,1fr) auto;gap:14px;align-items:center;margin:10px 0}
+.pb{grid-template-columns:170px minmax(200px,1fr) 235px} .pv{grid-template-columns:170px 1fr 120px}
+.scale{position:relative;height:16px;font-size:.72rem;color:var(--muted)}
+.scale span{position:absolute;transform:translateX(-50%);white-space:nowrap}
+.bar-track{position:relative;height:22px;background:#eef1f6;border-radius:6px}
+.bar-before{position:absolute;left:0;top:0;bottom:0;border-radius:6px;background:#cbd5e1}
+.bar-after{position:absolute;left:0;top:5px;bottom:5px;border-radius:4px}
+.mark{position:absolute;top:-6px;bottom:-6px;width:0;border-left:2px dashed}
+.mark.th{border-color:#0f172a}.mark.fl{border-color:#b45309}
+.mark span{position:absolute;top:-18px;left:-14px;font-size:.7rem;white-space:nowrap}
+.legend{display:flex;gap:18px;flex-wrap:wrap;font-size:.82rem;color:var(--muted)}
+.legend i{display:inline-block;width:12px;height:12px;border-radius:3px;margin-right:6px;vertical-align:-1px}
+/* run widget */
+.run{display:flex;flex-direction:column;gap:10px}
+.run-steps{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.run-step{display:flex;align-items:center;gap:8px;padding:6px 12px;border-radius:999px;background:#eef1f6;color:var(--muted);font-weight:600;font-size:.88rem}
+.run-step .dot{width:18px;height:18px;border-radius:50%;border:2px solid #94a3b8;display:inline-grid;place-items:center;font-size:.7rem}
+.run-step.active{background:var(--brand-soft);color:var(--brand)} .run-step.active .dot{border-color:var(--brand);border-top-color:transparent;animation:spin 1s linear infinite}
+.run-step.done{background:var(--met-bg);color:var(--met)} .run-step.done .dot{border-color:var(--met);background:var(--met);color:#fff}
+.run-arrow{color:#94a3b8}
+.run-now{font-size:.95rem}
+.run-now b{font-variant-numeric:tabular-nums}
+@keyframes spin{to{transform:rotate(360deg)}}
+/* switcher */
+#switcher{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);z-index:999;display:flex;align-items:center;gap:6px;background:#111;color:#fff;border-radius:999px;padding:6px 8px;box-shadow:0 8px 30px rgba(0,0,0,.35);font:600 14px/1 system-ui,sans-serif}
+#switcher button{background:#333;color:#fff;border:0;border-radius:50%;width:32px;height:32px;font-size:16px}
+#switcher span{padding:0 12px;white-space:nowrap}
+#switcher em{font-style:normal;color:#fbbf24}
+
+/* ===== Variant A: guided story ===== */
+.A-wrap{max-width:1180px;margin:0 auto;padding:22px 28px 110px}
+.A-top{display:flex;justify-content:space-between;align-items:center;gap:20px;margin-bottom:16px}
+.A-brand{font-weight:700;font-size:1.05rem}
+.A-stepper{display:flex;gap:0;margin:8px 0 22px}
+.A-stepper button{flex:1;border:0;background:none;padding:10px 6px 12px;text-align:left;border-top:4px solid var(--line);color:var(--muted);font-size:.9rem}
+.A-stepper button b{display:block;font-size:.75rem;letter-spacing:.06em;text-transform:uppercase}
+.A-stepper button.on{border-color:var(--brand);color:var(--ink)} .A-stepper button.past{border-color:#9db2ef}
+.A-head{font-size:2.3rem;font-weight:750;letter-spacing:-.01em;margin:0 0 6px}
+.A-sub{font-size:1.15rem;color:var(--muted);margin:0 0 22px;max-width:900px}
+.A-nav{display:flex;justify-content:space-between;margin-top:22px}
+.A-grid{display:grid;gap:16px}
+.A-stat{font-size:2.6rem;font-weight:750;line-height:1}
+.A-runbar{padding:12px 18px}
+
+/* ===== Variant B: narrative report ===== */
+.B-shell{display:grid;grid-template-columns:270px 1fr;min-height:100vh}
+.B-nav{position:sticky;top:0;height:100vh;padding:28px 20px;border-right:1px solid var(--line);background:#fff}
+.B-nav a{display:block;padding:9px 12px;border-radius:8px;color:var(--ink);text-decoration:none;font-weight:600;margin:2px 0}
+.B-nav a span{display:block;font-weight:400;font-size:.82rem;color:var(--muted)}
+.B-nav a.on{background:var(--brand-soft);color:var(--brand)}
+.B-main{padding:34px 48px 120px;max-width:1120px}
+.B-sec{padding:28px 0 34px;border-bottom:1px solid var(--line)}
+.B-kicker{font-size:.8rem;letter-spacing:.08em;text-transform:uppercase;color:var(--brand);font-weight:700}
+.B-take{font-size:1.6rem;font-weight:700;margin:6px 0 16px;max-width:860px}
+details.more{margin-top:14px}
+details.more summary{cursor:pointer;color:var(--brand);font-weight:600}
+details.more[open] summary{margin-bottom:10px}
+
+/* ===== Variant C: cockpit ===== */
+.C-wrap{padding:16px 22px 100px}
+.C-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;gap:16px}
+.C-kpis{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-bottom:14px}
+.C-kpi{padding:14px 16px}
+.C-kpi .lbl{font-size:.8rem;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.04em}
+.C-kpi .val{font-size:1.75rem;font-weight:750}
+.C-kpi .val small{font-size:1rem;color:var(--muted);font-weight:500}
+.C-main{display:grid;grid-template-columns:1fr 380px;gap:14px}
+.C-tables{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.C-tbl h3{font-size:.95rem;margin-bottom:8px}
+.C-tiles{display:flex;flex-wrap:wrap;gap:6px}
+.C-tile{border:0;border-radius:8px;padding:6px 10px;color:#fff;font-size:.82rem;font-weight:600}
+.C-tile.sel{outline:3px solid var(--ink);outline-offset:2px}
+.C-tabs{display:flex;gap:4px;border-bottom:1px solid var(--line);margin:16px 0 0}
+.C-tabs button{border:0;background:none;padding:10px 16px;font-weight:600;color:var(--muted);border-bottom:3px solid transparent}
+.C-tabs button.on{color:var(--brand);border-color:var(--brand)}
+.C-panel{background:#fff;border:1px solid var(--line);border-top:0;border-radius:0 0 var(--r) var(--r);padding:18px 20px}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div id="switcher" aria-label="Prototype variant switcher">
+  <button id="sw-prev" title="Previous variant (←)">←</button>
+  <span id="sw-label"></span>
+  <button id="sw-next" title="Next variant (→)">→</button>
+</div>
+<script>
+// generated by extract_aggregates.py (aggregates only)
+const DATA = {
+ "fields": [
+  {
+   "column": "author_name",
+   "decision": "withheld",
+   "outputColumn": null,
+   "pet": "withholding",
+   "reason": "search step 0: withheld at the policy floor (table withheld: no purpose check needs it)",
+   "role": "direct_identifier",
+   "rung": "withheld",
+   "subtype": "identifier",
+   "table": "clinical_notes"
+  },
+  {
+   "column": "author_staff_id",
+   "decision": "withheld",
+   "outputColumn": null,
+   "pet": "withholding",
+   "reason": "search step 0: withheld at the policy floor (table withheld: no purpose check needs it)",
+   "role": "technical_identifier",
+   "rung": "withheld",
+   "subtype": "identifier",
+   "table": "clinical_notes"
+  },
+  {
+   "column": "language",
+   "decision": "withheld",
+   "outputColumn": null,
+   "pet": "withholding",
+   "reason": "search step 0: withheld at the policy floor (table withheld: no purpose check needs it)",
+   "role": "non_sensitive",
+   "rung": "withheld",
+   "subtype": "categorical",
+   "table": "clinical_notes"
+  },
+  {
+   "column": "note_id",
+   "decision": "withheld",
+   "outputColumn": null,
+   "pet": "withholding",
+   "reason": "search step 0: withheld at the policy floor (table withheld: no purpose check needs it)",
+   "role": "record_key",
+   "rung": "withheld",
+   "subtype": "identifier",
+   "table": "clinical_notes"
+  },
+  {
+   "column": "note_text",
+   "decision": "withheld",
+   "outputColumn": null,
+   "pet": "withholding",
+   "reason": "search step 0: withheld at the policy floor (table withheld: no purpose check needs it)",
+   "role": "free_text",
+   "rung": "withheld",
+   "subtype": "text",
+   "table": "clinical_notes"
+  },
+  {
+   "column": "note_type",
+   "decision": "withheld",
+   "outputColumn": null,
+   "pet": "withholding",
+   "reason": "search step 0: withheld at the policy floor (table withheld: no purpose check needs it)",
+   "role": "non_sensitive",
+   "rung": "withheld",
+   "subtype": "categorical",
+   "table": "clinical_notes"
+  },
+  {
+   "column": "visit_id",
+   "decision": "withheld",
+   "outputColumn": null,
+   "pet": "withholding",
+   "reason": "search step 0: withheld at the policy floor (table withheld: no purpose check needs it)",
+   "role": "record_key",
+   "rung": "withheld",
+   "subtype": "identifier",
+   "table": "clinical_notes"
+  },
+  {
+   "column": "written_ts",
+   "decision": "withheld",
+   "outputColumn": null,
+   "pet": "withholding",
+   "reason": "search step 0: withheld at the policy floor (table withheld: no purpose check needs it)",
+   "role": "non_sensitive",
+   "rung": "withheld",
+   "subtype": "timestamp",
+   "table": "clinical_notes"
+  },
+  {
+   "column": "ambulance_unit",
+   "decision": "withheld",
+   "outputColumn": null,
+   "pet": "withholding",
+   "reason": "search step 1: withheld adopted (adopted)",
+   "role": "quasi_identifier",
+   "rung": "withheld",
+   "subtype": "identifier",
+   "table": "ed_visits"
+  },
+  {
+   "column": "arrival_mode",
+   "decision": "withheld",
+   "outputColumn": null,
+   "pet": "withholding",
+   "reason": "search step 2: withheld adopted (adopted)",
+   "role": "quasi_identifier",
+   "rung": "withheld",
+   "subtype": "categorical",
+   "table": "ed_visits"
+  },
+  {
+   "column": "arrival_ts",
+   "decision": "released",
+   "outputColumn": "arrival_ts",
+   "pet": "generalisation",
+   "reason": "search step 44: ts.hour_of_day adopted (adopted)",
+   "role": "quasi_identifier",
+   "rung": "ts.hour_of_day",
+   "subtype": "timestamp",
+   "table": "ed_visits"
+  },
+  {
+   "column": "attending_physician_id",
+   "decision": "withheld",
+   "outputColumn": null,
+   "pet": "withholding",
+   "reason": "search step 4: withheld adopted (adopted)",
+   "role": "technical_identifier",
+   "rung": "withheld",
+   "subtype": "identifier",
+   "table": "ed_visits"
+  },
+  {
+   "column": "attending_physician_name",
+   "decision": "withheld",
+   "outputColumn": null,
+   "pet": "withholding",
+   "reason": "search step 0: withheld at the policy floor (direct identifier)",
+   "role": "direct_identifier",
+   "rung": "withheld",
+   "subtype": "identifier",
+   "table": "ed_visits"
+  },
+  {
+   "column": "chief_complaint",
+   "decision": "withheld",
+   "outputColumn": null,
+   "pet": "withholding",
+   "reason": "search step 0: withheld at the policy floor (free text, no check needs it)",
+   "role": "free_text",
+   "rung": "withheld",
+   "subtype": "text",
+   "table": "ed_visits"
+  },
+  {
+   "column": "date_of_birth",
+   "decision": "released",
+   "outputColumn": "age_band",
+   "pet": "generalisation",
+   "reason": "search step 34: age.band10 adopted (adopted)",
+   "role": "quasi_identifier",
+   "rung": "age.band10",
+   "subtype": "age",
+   "table": "ed_visits"
+  },
+  {
+   "column": "diastolic_bp",
+   "decision": "withheld",
+   "outputColumn": null,
+   "pet": "withholding",
+   "reason": "search step 6: withheld adopted (adopted)",
+   "role": "sensitive_attribute",
+   "rung": "withheld",
+   "subtype": "numeric",
+   "table": "ed_visits"
+  },
+  {
+   "column": "discharge_ts",
+   "decision": "withheld",
+   "outputColumn": null,
+   "pet": "withholding",
+   "reason": "search step 7: withheld adopted (adopted)",
+   "role": "quasi_identifier",
+   "rung": "withheld",
+   "subtype": "timestamp",
+   "table": "ed_visits"
+  },
+  {
+   "column": "disposition",
+   "decision": "withheld",
+   "outputColumn": null,
+   "pet": "withholding",
+   "reason": "search step 8: withheld adopted (adopted)",
+   "role": "non_sensitive",
+   "rung": "withheld",
+   "subtype": "categorical",
+   "table": "ed_visits"
+  },
+  {
+   "column": "heart_rate",
+   "decision": "withheld",
+   "outputColumn": null,
+   "pet": "withholding",
+   "reason": "search step 9: withheld adopted (adopted)",
+   "role": "sensitive_attribute",
+   "rung": "withheld",
+   "subtype": "numeric",
+   "table": "ed_visits"
+  },
+  {
+   "column": "home_address",
+   "decision": "withheld",
+   "outputColumn": null,
+   "pet": "withholding",
+   "reason": "search step 0: withheld at the policy floor (direct identifier)",
+   "role": "direct_identifier",
+   "rung": "withheld",
+   "subtype": "identifier",
+   "table": "ed_visits"
+  },
+  {
+   "column": "icd10_primary",
+   "decision": "released",
+   "outputColumn": "icd10_primary",
+   "pet": "generalisation",
+   "reason": "search step 35: icd.3 adopted (adopted); search step 36: tried icd.chapter, rejected (H-U4,H-U7 below 0.9 or not ok)",
+   "role": "sensitive_attribute",
+   "rung": "icd.3",
+   "subtype": "icd10",
+   "table": "ed_visits"
+  },
+  {
+   "column": "icd10_secondary",
+   "decision": "withheld",
+   "outputColumn": null,
+   "pet": "withholding",
+   "reason": "search step 11: withheld adopted (adopted)",
+   "role": "sensitive_attribute",
+   "rung": "withheld",
+   "subtype": "icd10",
+   "table": "ed_visits"
+  },
+  {
+   "column": "los_minutes",
+   "decision": "released",
+   "outputColumn": "los_minutes",
+   "pet": "binning",
+   "reason": "search step 38: num.bin adopted (adopted)",
+   "role": "sensitive_attribute",
+   "rung": "num.bin",
+   "subtype": "numeric",
+   "table": "ed_visits"
+  },
+  {
+   "column": "municipality",
+   "decision": "released",
+   "outputColumn": "municipality",
+   "pet": "top_n_grouping",
+   "reason": "search step 39: geo.topn adopted (adopted)",
+   "role": "quasi_identifier",
+   "rung": "geo.topn",
+   "subtype": "geo",
+   "table": "ed_visits"
+  },
+  {
+   "column": "pain_nrs",
+   "decision": "withheld",
+   "outputColumn": null,
+   "pet": "withholding",
+   "reason": "search step 14: withheld adopted (adopted)",
+   "role": "sensitive_attribute",
+   "rung": "withheld",
+   "subtype": "numeric",
+   "table": "ed_visits"
+  },
+  {
+   "column": "patient_hetu",
+   "decision": "withheld",
+   "outputColumn": null,
+   "pet": "withholding",
+   "reason": "search step 0: withheld at the policy floor (linkage handle; pseudonym only if the search shows readmit_30d alone fails H-U6)",
+   "role": "direct_identifier",
+   "rung": "withheld",
+   "subtype": "identifier",
+   "table": "ed_visits"
+  },
+  {
+   "column": "patient_name",
+   "decision": "withheld",
+   "outputColumn": null,
+   "pet": "withholding",
+   "reason": "search step 0: withheld at the policy floor (direct identifier)",
+   "role": "direct_identifier",
+   "rung": "withheld",
+   "subtype": "identifier",
+   "table": "ed_visits"
+  },
+  {
+   "column": "phone",
+   "decision": "withheld",
+   "outputColumn": null,
+   "pet": "withholding",
+   "reason": "search step 0: withheld at the policy floor (direct identifier)",
+   "role": "direct_identifier",
+   "rung": "withheld",
+   "subtype": "identifier",
+   "table": "ed_visits"
+  },
+  {
+   "column": "postcode",
+   "decision": "withheld",
+   "outputColumn": null,
+   "pet": "withholding",
+   "reason": "search step 0: withheld at the policy floor (municipality suffices)",
+   "role": "non_sensitive",
+   "rung": "withheld",
+   "subtype": "geo",
+   "table": "ed_visits"
+  },
+  {
+   "column": "readmit_30d",
+   "decision": "released",
+   "outputColumn": "readmit_30d",
+   "pet": "none",
+   "reason": "search step 15: kept at floor keep; tried withheld, rejected (H-U6 below 0.9 or not ok) (H-U6)",
+   "role": "non_sensitive",
+   "rung": "keep",
+   "subtype": "categorical",
+   "table": "ed_visits"
+  },
+  {
+   "column": "resp_rate",
+   "decision": "withheld",
+   "outputColumn": null,
+   "pet": "withholding",
+   "reason": "search step 16: withheld adopted (adopted)",
+   "role": "sensitive_attribute",
+   "rung": "withheld",
+   "subtype": "numeric",
+   "table": "ed_visits"
+  },
+  {
+   "column": "sex",
+   "decision": "withheld",
+   "outputColumn": null,
+   "pet": "withholding",
+   "reason": "search step 17: withheld adopted (adopted)",
+   "role": "quasi_identifier",
+   "rung": "withheld",
+   "subtype": "categorical",
+   "table": "ed_visits"
+  },
+  {
+   "column": "spo2",
+   "decision": "withheld",
+   "outputColumn": null,
+   "pet": "withholding",
+   "reason": "search step 18: withheld adopted (adopted)",
+   "role": "sensitive_attribute",
+   "rung": "withheld",
+   "subtype": "numeric",
+   "table": "ed_visits"
+  },
+  {
+   "column": "systolic_bp",
+   "decision": "withheld",
+   "outputColumn": null,
+   "pet": "withholding",
+   "reason": "search step 19: withheld adopted (adopted)",
+   "role": "sensitive_attribute",
+   "rung": "withheld",
+   "subtype": "numeric",
+   "table": "ed_visits"
+  },
+  {
+   "column": "temp_c",
+   "decision": "released",
+   "outputColumn": "temp_c",
+   "pet": "rounding",
+   "reason": "search step 40: num.round adopted (adopted); search step 41: tried num.bin, rejected (H-U7 below 0.9 or not ok)",
+   "role": "sensitive_attribute",
+   "rung": "num.round",
+   "subtype": "numeric",
+   "table": "ed_visits"
+  },
+  {
+   "column": "triage",
+   "decision": "released",
+   "outputColumn": "triage",
+   "pet": "none",
+   "reason": "search step 21: kept at floor keep; tried withheld, rejected (H-U2 below 0.9 or not ok) (H-U2)",
+   "role": "non_sensitive",
+   "rung": "keep",
+   "subtype": "categorical",
+   "table": "ed_visits"
+  },
+  {
+   "column": "visit_id",
+   "decision": "released",
+   "outputColumn": "visit_id",
+   "pet": "keyed_pseudonym",
+   "reason": "search step 22: kept at floor id.pseudonym; tried withheld, rejected (H-U7 below 0.9 or not ok) (release-scope pseudonym, identical in lab_results (H-U7 join))",
+   "role": "record_key",
+   "rung": "id.pseudonym",
+   "subtype": "identifier",
+   "table": "ed_visits"
+  },
+  {
+   "column": "abnormal_flag",
+   "decision": "withheld",
+   "outputColumn": null,
+   "pet": "withholding",
+   "reason": "search step 23: withheld adopted (adopted)",
+   "role": "sensitive_attribute",
+   "rung": "withheld",
+   "subtype": "categorical",
+   "table": "lab_results"
+  },
+  {
+   "column": "lab_id",
+   "decision": "withheld",
+   "outputColumn": null,
+   "pet": "withholding",
+   "reason": "search step 24: withheld adopted (adopted)",
+   "role": "record_key",
+   "rung": "withheld",
+   "subtype": "identifier",
+   "table": "lab_results"
+  },
+  {
+   "column": "ref_range",
+   "decision": "withheld",
+   "outputColumn": null,
+   "pet": "withholding",
+   "reason": "search step 25: withheld adopted (adopted)",
+   "role": "sensitive_attribute",
+   "rung": "withheld",
+   "subtype": "categorical",
+   "table": "lab_results"
+  },
+  {
+   "column": "sampled_ts",
+   "decision": "withheld",
+   "outputColumn": null,
+   "pet": "withholding",
+   "reason": "search step 26: withheld adopted (adopted)",
+   "role": "quasi_identifier",
+   "rung": "withheld",
+   "subtype": "timestamp",
+   "table": "lab_results"
+  },
+  {
+   "column": "test_code",
+   "decision": "released",
+   "outputColumn": "test_code",
+   "pet": "none",
+   "reason": "search step 27: kept at floor keep; tried withheld, rejected (H-U7 below 0.9 or not ok) (H-U7 (CRP))",
+   "role": "sensitive_attribute",
+   "rung": "keep",
+   "subtype": "categorical",
+   "table": "lab_results"
+  },
+  {
+   "column": "test_name",
+   "decision": "withheld",
+   "outputColumn": null,
+   "pet": "withholding",
+   "reason": "search step 28: withheld adopted (adopted)",
+   "role": "sensitive_attribute",
+   "rung": "withheld",
+   "subtype": "categorical",
+   "table": "lab_results"
+  },
+  {
+   "column": "unit",
+   "decision": "withheld",
+   "outputColumn": null,
+   "pet": "withholding",
+   "reason": "search step 29: withheld adopted (adopted)",
+   "role": "sensitive_attribute",
+   "rung": "withheld",
+   "subtype": "categorical",
+   "table": "lab_results"
+  },
+  {
+   "column": "value",
+   "decision": "released",
+   "outputColumn": "value",
+   "pet": "none",
+   "reason": "search step 42: kept at floor num.exact; tried num.round, rejected (H-U7 below 0.9 or not ok) (H-U7 (CRP))",
+   "role": "sensitive_attribute",
+   "rung": "num.exact",
+   "subtype": "numeric",
+   "table": "lab_results"
+  },
+  {
+   "column": "visit_id",
+   "decision": "released",
+   "outputColumn": "visit_id",
+   "pet": "keyed_pseudonym",
+   "reason": "search step 22: kept at floor id.pseudonym; tried withheld, rejected (H-U7 below 0.9 or not ok) (same pseudonym as ed_visits (H-U7 join))",
+   "role": "record_key",
+   "rung": "id.pseudonym",
+   "subtype": "identifier",
+   "table": "lab_results"
+  },
+  {
+   "column": "age_band",
+   "decision": "withheld",
+   "outputColumn": null,
+   "pet": "withholding",
+   "reason": "search step 0: withheld at the policy floor (table withheld: no purpose check needs it; unsuppressed, a differencing aid)",
+   "role": "non_sensitive",
+   "rung": "withheld",
+   "subtype": "categorical",
+   "table": "published_weekly_stats"
+  },
+  {
+   "column": "diagnosis_group",
+   "decision": "withheld",
+   "outputColumn": null,
+   "pet": "withholding",
+   "reason": "search step 0: withheld at the policy floor (table withheld: no purpose check needs it; unsuppressed, a differencing aid)",
+   "role": "non_sensitive",
+   "rung": "withheld",
+   "subtype": "categorical",
+   "table": "published_weekly_stats"
+  },
+  {
+   "column": "municipality",
+   "decision": "withheld",
+   "outputColumn": null,
+   "pet": "withholding",
+   "reason": "search step 0: withheld at the policy floor (table withheld: no purpose check needs it; unsuppressed, a differencing aid)",
+   "role": "non_sensitive",
+   "rung": "withheld",
+   "subtype": "geo",
+   "table": "published_weekly_stats"
+  },
+  {
+   "column": "sex",
+   "decision": "withheld",
+   "outputColumn": null,
+   "pet": "withholding",
+   "reason": "search step 0: withheld at the policy floor (table withheld: no purpose check needs it; unsuppressed, a differencing aid)",
+   "role": "non_sensitive",
+   "rung": "withheld",
+   "subtype": "categorical",
+   "table": "published_weekly_stats"
+  },
+  {
+   "column": "stat_id",
+   "decision": "withheld",
+   "outputColumn": null,
+   "pet": "withholding",
+   "reason": "search step 0: withheld at the policy floor (table withheld: no purpose check needs it; unsuppressed, a differencing aid)",
+   "role": "record_key",
+   "rung": "withheld",
+   "subtype": "identifier",
+   "table": "published_weekly_stats"
+  },
+  {
+   "column": "visits",
+   "decision": "withheld",
+   "outputColumn": null,
+   "pet": "withholding",
+   "reason": "search step 0: withheld at the policy floor (table withheld: no purpose check needs it; unsuppressed, a differencing aid)",
+   "role": "sensitive_attribute",
+   "rung": "withheld",
+   "subtype": "numeric",
+   "table": "published_weekly_stats"
+  },
+  {
+   "column": "week",
+   "decision": "withheld",
+   "outputColumn": null,
+   "pet": "withholding",
+   "reason": "search step 0: withheld at the policy floor (table withheld: no purpose check needs it; unsuppressed, a differencing aid)",
+   "role": "non_sensitive",
+   "rung": "withheld",
+   "subtype": "categorical",
+   "table": "published_weekly_stats"
+  }
+ ],
+ "fitFor": [
+  "HEALTH-S1"
+ ],
+ "gate": {
+  "checks": [
+   {
+    "check": "contract.columns",
+    "hits": 0,
+    "status": "pass"
+   },
+   {
+    "check": "contract.files",
+    "hits": 0,
+    "status": "pass"
+   },
+   {
+    "check": "contract.forms",
+    "hits": 0,
+    "status": "pass"
+   },
+   {
+    "check": "producer.key-material",
+    "hits": 0,
+    "status": "pass"
+   },
+   {
+    "check": "producer.original-values",
+    "hits": 0,
+    "status": "pass"
+   },
+   {
+    "check": "producer.person-k",
+    "hits": 0,
+    "status": "pass"
+   },
+   {
+    "check": "producer.row-k",
+    "hits": 0,
+    "status": "pass"
+   },
+   {
+    "check": "producer.unkeyed-hashes",
+    "hits": 0,
+    "status": "pass"
+   },
+   {
+    "check": "release.empty-tables",
+    "hits": 0,
+    "status": "pass"
+   },
+   {
+    "check": "release.file-digests",
+    "hits": 0,
+    "status": "pass"
+   },
+   {
+    "check": "release.manifest-values",
+    "hits": 0,
+    "status": "pass"
+   },
+   {
+    "check": "release.row-maps",
+    "hits": 0,
+    "status": "pass"
+   },
+   {
+    "check": "release.token-hex64",
+    "hits": 0,
+    "status": "pass"
+   },
+   {
+    "check": "rescan.account-numbers",
+    "hits": 0,
+    "status": "pass"
+   },
+   {
+    "check": "rescan.device-ids",
+    "hits": 0,
+    "status": "pass"
+   },
+   {
+    "check": "rescan.emails",
+    "hits": 0,
+    "status": "pass"
+   },
+   {
+    "check": "rescan.ibans",
+    "hits": 0,
+    "status": "pass"
+   },
+   {
+    "check": "rescan.ip-addresses",
+    "hits": 0,
+    "status": "pass"
+   },
+   {
+    "check": "rescan.national-ids",
+    "hits": 0,
+    "status": "pass"
+   },
+   {
+    "check": "rescan.payment-cards",
+    "hits": 0,
+    "status": "pass"
+   },
+   {
+    "check": "rescan.phones",
+    "hits": 0,
+    "status": "pass"
+   },
+   {
+    "check": "rescan.plates",
+    "hits": 0,
+    "status": "pass"
+   },
+   {
+    "check": "rescan.property-ids",
+    "hits": 0,
+    "status": "pass"
+   },
+   {
+    "check": "rescan.raw-timestamps",
+    "hits": 0,
+    "status": "pass"
+   },
+   {
+    "check": "rescan.secrets",
+    "hits": 0,
+    "status": "pass"
+   },
+   {
+    "check": "rescan.urls-with-tokens",
+    "hits": 0,
+    "status": "pass"
+   },
+   {
+    "check": "rescan.usernames",
+    "hits": 0,
+    "status": "pass"
+   },
+   {
+    "check": "text.account-numbers",
+    "hits": 0,
+    "status": "pass"
+   },
+   {
+    "check": "text.device-ids",
+    "hits": 0,
+    "status": "pass"
+   },
+   {
+    "check": "text.emails",
+    "hits": 0,
+    "status": "pass"
+   },
+   {
+    "check": "text.health",
+    "hits": 0,
+    "status": "pass"
+   },
+   {
+    "check": "text.ibans",
+    "hits": 0,
+    "status": "pass"
+   },
+   {
+    "check": "text.ip-addresses",
+    "hits": 0,
+    "status": "pass"
+   },
+   {
+    "check": "text.national-ids",
+    "hits": 0,
+    "status": "pass"
+   },
+   {
+    "check": "text.payment-cards",
+    "hits": 0,
+    "status": "pass"
+   },
+   {
+    "check": "text.phones",
+    "hits": 0,
+    "status": "pass"
+   },
+   {
+    "check": "text.plates",
+    "hits": 0,
+    "status": "pass"
+   },
+   {
+    "check": "text.property-ids",
+    "hits": 0,
+    "status": "pass"
+   },
+   {
+    "check": "text.secrets",
+    "hits": 0,
+    "status": "pass"
+   },
+   {
+    "check": "text.urls-with-tokens",
+    "hits": 0,
+    "status": "pass"
+   },
+   {
+    "check": "text.usernames",
+    "hits": 0,
+    "status": "pass"
+   }
+  ],
+  "status": "pass"
+ },
+ "headline": {
+  "composite": {
+   "after": 0.97,
+   "before": 0.28
+  },
+  "linkage": {
+   "after": 0.0,
+   "before": 0.57
+  },
+  "privacy": {
+   "after": 1.0,
+   "before": 0.17
+  },
+  "smallGroups": {
+   "after": 0.0,
+   "before": 0.96
+  },
+  "utility": {
+   "after": 0.93,
+   "before": 1.0
+  }
+ },
+ "notFitFor": [
+  "CITY-S1",
+  "CITY-S2",
+  "CITY-S3",
+  "CS-S1",
+  "CS-S2",
+  "CS-S3",
+  "CYBER-S1",
+  "CYBER-S2",
+  "CYBER-S3",
+  "EDU-S1",
+  "EDU-S2",
+  "EDU-S3",
+  "ENERGY-S1",
+  "ENERGY-S2",
+  "ENERGY-S3",
+  "FIN-S1",
+  "FIN-S2",
+  "FIN-S3",
+  "HEALTH-S2",
+  "HEALTH-S3",
+  "MOB-S1",
+  "MOB-S2",
+  "MOB-S3",
+  "PUB-S1",
+  "PUB-S2",
+  "PUB-S3"
+ ],
+ "plainGateCount": 41,
+ "residualRisks": [
+  {
+   "description": "attribute inference from released quasi-identifiers",
+   "kind": "attribute_inference",
+   "status": "not_measured"
+  },
+  {
+   "description": "scenario text-recall target (PERSON, PHONE, ADDRESS, NATIONAL_ID >= 0.95) is vacuous: no free text is released",
+   "kind": "note",
+   "status": "not_applicable"
+  },
+  {
+   "description": "linkage rate under both attacker personas",
+   "kind": "linkage",
+   "status": "not_measured"
+  },
+  {
+   "description": "file digests detect accidental change only; only verify --full checks the HMAC signature",
+   "kind": "tamper_limitation",
+   "status": "not_applicable"
+  },
+  {
+   "description": "D22: age_band is released as a renamed derived column, which the kit scorecard does not recognise as a QI; our per-person k over every released QI is authoritative",
+   "kind": "note",
+   "status": "not_measured"
+  },
+  {
+   "description": "the kit scorecard does not count the renamed age_band column as a quasi-identifier; our per-person k over every released quasi-identifier is authoritative",
+   "kind": "scorecard_defect",
+   "status": "not_measured"
+  },
+  {
+   "description": "sex is a QI withheld in the hand plan because no purpose check needs it; if a later plan releases it, it counts in per-person k like any released QI",
+   "kind": "note",
+   "status": "not_measured"
+  }
+ ],
+ "sacrifices": [
+  {
+   "after": 0.8,
+   "before": 1.0,
+   "check": "H-U4",
+   "floor": 0.6,
+   "reason": "municipality grouping to top-N to reach k"
+  },
+  {
+   "after": 0.95,
+   "before": 1.0,
+   "check": "H-U6",
+   "floor": 0.6,
+   "reason": "coarser age band to reach k"
+  },
+  {
+   "after": 0.95,
+   "before": 1.0,
+   "check": "H-U8",
+   "floor": 0.6,
+   "reason": "coarser arrival time to reach k"
+  }
+ ],
+ "scenario": "HEALTH-S1",
+ "search": {
+  "accepted": 29,
+  "candidates": 45,
+  "points": [
+   {
+    "accepted": true,
+    "risk": 1.0,
+    "step": 0,
+    "utility": 1.0
+   },
+   {
+    "accepted": true,
+    "risk": 1.0,
+    "step": 1,
+    "utility": 1.0
+   },
+   {
+    "accepted": true,
+    "risk": 1.0,
+    "step": 2,
+    "utility": 1.0
+   },
+   {
+    "accepted": false,
+    "risk": 1.0,
+    "step": 3,
+    "utility": 0.8
+   },
+   {
+    "accepted": true,
+    "risk": 1.0,
+    "step": 4,
+    "utility": 1.0
+   },
+   {
+    "accepted": false,
+    "risk": 1.0,
+    "step": 5,
+    "utility": 0.8
+   },
+   {
+    "accepted": true,
+    "risk": 1.0,
+    "step": 6,
+    "utility": 1.0
+   },
+   {
+    "accepted": true,
+    "risk": 1.0,
+    "step": 7,
+    "utility": 1.0
+   },
+   {
+    "accepted": true,
+    "risk": 1.0,
+    "step": 8,
+    "utility": 1.0
+   },
+   {
+    "accepted": true,
+    "risk": 1.0,
+    "step": 9,
+    "utility": 1.0
+   },
+   {
+    "accepted": false,
+    "risk": 1.0,
+    "step": 10,
+    "utility": 0.7
+   },
+   {
+    "accepted": true,
+    "risk": 1.0,
+    "step": 11,
+    "utility": 1.0
+   },
+   {
+    "accepted": false,
+    "risk": 1.0,
+    "step": 12,
+    "utility": 0.8
+   },
+   {
+    "accepted": false,
+    "risk": 1.0,
+    "step": 13,
+    "utility": 0.8
+   },
+   {
+    "accepted": true,
+    "risk": 1.0,
+    "step": 14,
+    "utility": 1.0
+   },
+   {
+    "accepted": false,
+    "risk": 1.0,
+    "step": 15,
+    "utility": 0.8
+   },
+   {
+    "accepted": true,
+    "risk": 1.0,
+    "step": 16,
+    "utility": 1.0
+   },
+   {
+    "accepted": true,
+    "risk": 1.0,
+    "step": 17,
+    "utility": 1.0
+   },
+   {
+    "accepted": true,
+    "risk": 1.0,
+    "step": 18,
+    "utility": 1.0
+   },
+   {
+    "accepted": true,
+    "risk": 1.0,
+    "step": 19,
+    "utility": 1.0
+   },
+   {
+    "accepted": false,
+    "risk": 1.0,
+    "step": 20,
+    "utility": 0.8
+   },
+   {
+    "accepted": false,
+    "risk": 1.0,
+    "step": 21,
+    "utility": 0.8
+   },
+   {
+    "accepted": false,
+    "risk": 1.0,
+    "step": 22,
+    "utility": 0.8
+   },
+   {
+    "accepted": true,
+    "risk": 1.0,
+    "step": 23,
+    "utility": 1.0
+   },
+   {
+    "accepted": true,
+    "risk": 1.0,
+    "step": 24,
+    "utility": 1.0
+   },
+   {
+    "accepted": true,
+    "risk": 1.0,
+    "step": 25,
+    "utility": 1.0
+   },
+   {
+    "accepted": true,
+    "risk": 1.0,
+    "step": 26,
+    "utility": 1.0
+   },
+   {
+    "accepted": false,
+    "risk": 1.0,
+    "step": 27,
+    "utility": 0.8
+   },
+   {
+    "accepted": true,
+    "risk": 1.0,
+    "step": 28,
+    "utility": 1.0
+   },
+   {
+    "accepted": true,
+    "risk": 1.0,
+    "step": 29,
+    "utility": 1.0
+   },
+   {
+    "accepted": false,
+    "risk": 1.0,
+    "step": 30,
+    "utility": 0.8
+   },
+   {
+    "accepted": true,
+    "risk": 1.0,
+    "step": 31,
+    "utility": 1.0
+   },
+   {
+    "accepted": true,
+    "risk": 0.81,
+    "step": 32,
+    "utility": 1.0
+   },
+   {
+    "accepted": false,
+    "risk": 0.89,
+    "step": 33,
+    "utility": 0.8
+   },
+   {
+    "accepted": true,
+    "risk": 0.67,
+    "step": 34,
+    "utility": 1.0
+   },
+   {
+    "accepted": true,
+    "risk": 0.67,
+    "step": 35,
+    "utility": 1.0
+   },
+   {
+    "accepted": false,
+    "risk": 0.67,
+    "step": 36,
+    "utility": 0.77
+   },
+   {
+    "accepted": true,
+    "risk": 0.67,
+    "step": 37,
+    "utility": 1.0
+   },
+   {
+    "accepted": true,
+    "risk": 0.67,
+    "step": 38,
+    "utility": 0.99
+   },
+   {
+    "accepted": true,
+    "risk": 0.57,
+    "step": 39,
+    "utility": 0.99
+   },
+   {
+    "accepted": true,
+    "risk": 0.57,
+    "step": 40,
+    "utility": 0.99
+   },
+   {
+    "accepted": false,
+    "risk": 0.57,
+    "step": 41,
+    "utility": 0.89
+   },
+   {
+    "accepted": false,
+    "risk": 0.57,
+    "step": 42,
+    "utility": 0.94
+   },
+   {
+    "accepted": false,
+    "risk": 0.67,
+    "step": 43,
+    "utility": 0.79
+   },
+   {
+    "accepted": true,
+    "risk": 0.08,
+    "step": 44,
+    "utility": 0.99
+   }
+  ]
+ },
+ "tasks": [
+  {
+   "after": 0.97,
+   "before": 1.0,
+   "status": "ok",
+   "task": "H-U2"
+  },
+  {
+   "after": 0.8,
+   "before": 1.0,
+   "status": "ok",
+   "task": "H-U4"
+  },
+  {
+   "after": 0.95,
+   "before": 1.0,
+   "status": "ok",
+   "task": "H-U6"
+  },
+  {
+   "after": 0.98,
+   "before": 1.0,
+   "status": "ok",
+   "task": "H-U7"
+  },
+  {
+   "after": 0.95,
+   "before": 1.0,
+   "status": "ok",
+   "task": "H-U8"
+  }
+ ],
+ "toolRevision": "5b260ec"
+};
+
+</script>
+<script>
+// ---------- shared plain-language layer ----------
+const CHECKS = {
+  'H-U2': 'Length of stay by triage level',
+  'H-U4': 'Diagnosis mix by municipality',
+  'H-U6': '30-day revisit rate by age',
+  'H-U7': 'CRP vs temperature',
+  'H-U8': 'Arrivals by hour of day',
+};
+const THRESH = 0.9;
+const TABLES = {ed_visits:'ED visits', lab_results:'Lab results', clinical_notes:'Clinical notes', published_weekly_stats:'Published weekly stats'};
+const ROLES = {
+  direct_identifier:'Names & direct IDs', technical_identifier:'Staff & system IDs', quasi_identifier:'Indirect identifiers',
+  sensitive_attribute:'Sensitive health details', free_text:'Free text', record_key:'Record keys', non_sensitive:'Low-risk fields'};
+const ROLE_HINT = {
+  direct_identifier:'name someone outright', quasi_identifier:'combine to single someone out', free_text:'can hide names and numbers',
+  sensitive_attribute:'health facts about a person', technical_identifier:'link to staff systems', record_key:'join tables together', non_sensitive:'low risk alone'};
+const COL = {
+  arrival_ts:'Arrival time', date_of_birth:'Date of birth', icd10_primary:'Main diagnosis', icd10_secondary:'Secondary diagnosis',
+  los_minutes:'Length of stay', municipality:'Municipality', readmit_30d:'Revisit within 30 days', temp_c:'Temperature', triage:'Triage level',
+  visit_id:'Visit ID', test_code:'Lab test', value:'Lab value', patient_hetu:'National ID number', patient_name:'Patient name',
+  home_address:'Home address', phone:'Phone', postcode:'Postcode', sex:'Sex', chief_complaint:'Chief complaint (text)',
+  attending_physician_name:'Doctor name', attending_physician_id:'Doctor ID', ambulance_unit:'Ambulance unit', arrival_mode:'Arrival mode',
+  discharge_ts:'Discharge time', disposition:'Discharge outcome', heart_rate:'Heart rate', diastolic_bp:'Blood pressure (dia)',
+  systolic_bp:'Blood pressure (sys)', pain_nrs:'Pain score', resp_rate:'Breathing rate', spo2:'Oxygen saturation',
+  abnormal_flag:'Abnormal flag', lab_id:'Lab record ID', ref_range:'Reference range', sampled_ts:'Sample time', test_name:'Test name', unit:'Unit',
+  author_name:'Author name', author_staff_id:'Author staff ID', language:'Language', note_id:'Note ID', note_text:'Note text', note_type:'Note type',
+  written_ts:'Written time', age_band:'Age band', diagnosis_group:'Diagnosis group', stat_id:'Row ID', visits:'Visit count', week:'Week'};
+const colName = f => COL[f.column] || f.column.replace(/_/g,' ');
+function treatment(f){
+  if (f.decision !== 'released') return 'withheld';
+  if (f.pet === 'keyed_pseudonym') return 'pseudonymised';
+  if (f.pet === 'none') return 'kept';
+  return 'coarsened';
+}
+const TR_LABEL = {withheld:'Withheld', pseudonymised:'Pseudonymised', coarsened:'Coarsened', kept:'Kept as is'};
+// per-field plain explanation + which purpose check it serves (derived from the manifest reasons, rewritten for humans)
+const RELEASED_WHY = {
+  'ed_visits.arrival_ts': ['Exact time → hour of day only. Month + hour still left about 72% of visits in tiny groups.', ['H-U8']],
+  'ed_visits.date_of_birth': ['Birth date → 10-year age band (e.g. 40–49).', ['H-U6']],
+  'ed_visits.icd10_primary': ['Full code → first 3 characters. The coarser chapter level was tried and broke two research questions.', ['H-U4','H-U7']],
+  'ed_visits.los_minutes': ['Exact minutes → ranges (bins).', ['H-U2']],
+  'ed_visits.municipality': ['Small municipalities grouped into "other" so no one stands out.', ['H-U4']],
+  'ed_visits.readmit_30d': ['Kept: without it the 30-day revisit question fails.', ['H-U6']],
+  'ed_visits.temp_c': ['Rounded. Coarser ranges were tried and broke the CRP vs temperature question.', ['H-U7']],
+  'ed_visits.triage': ['Kept: without it the length-of-stay question fails.', ['H-U2']],
+  'ed_visits.visit_id': ['Replaced by a keyed pseudonym, valid only in this release, so visits still join to lab results.', ['H-U7']],
+  'lab_results.visit_id': ['Same pseudonym as in ED visits, so CRP results join to the right visit.', ['H-U7']],
+  'lab_results.test_code': ['Kept: needed to find CRP tests.', ['H-U7']],
+  'lab_results.value': ['Kept exact: rounding was tried and broke the CRP vs temperature question.', ['H-U7']],
+};
+function why(f){
+  const k = f.table+'.'+f.column;
+  if (RELEASED_WHY[k]) return {text:RELEASED_WHY[k][0], serves:RELEASED_WHY[k][1]};
+  const r = f.reason || '';
+  if (/patient_hetu/.test(f.column)) return {text:'National ID number: never released. The revisit flag answers the 30-day question without it.', serves:[]};
+  if (/table withheld/.test(r)) return {text:'Whole table left out: none of the five research questions needs it.', serves:[]};
+  if (/direct identifier/.test(r)) return {text:'Names a person directly: never released.', serves:[]};
+  if (/free text/.test(r)) return {text:'Free text can hide names and numbers, and no question needs it.', serves:[]};
+  if (/municipality suffices/.test(r)) return {text:'Municipality is enough; a postcode would narrow people down.', serves:[]};
+  return {text:'No research question needs it, so it was left out: less to leak.', serves:[]};
+}
+const F = DATA.fields.map(f => Object.assign({}, f, {tr:treatment(f), name:colName(f), why:why(f)}));
+const SAC = Object.fromEntries(DATA.sacrifices.map(s => [s.check, s]));
+function checkStatus(t){
+  if (t.after == null) return {key:'nm', label:'Not measured'};
+  if (t.after >= THRESH) return {key:'met', label:'Met'};
+  const s = SAC[t.task];
+  if (s && t.after >= s.floor) return {key:'sac', label:'Accepted sacrifice (floor '+s.floor.toFixed(1)+')'};
+  return {key:'fail', label:'Failed'};
+}
+const pct = x => x == null ? '–' : Math.round(x*100)+'%';
+const n2 = x => x == null ? '–' : x.toFixed(2);
+const H = DATA.headline;
+const released = F.filter(f => f.tr !== 'withheld');
+const GATE_GROUPS = [
+  ['contract','Output matches the agreed format'],
+  ['producer','No keys, originals or tiny groups left behind'],
+  ['release','Package is complete and untampered'],
+  ['rescan','Every released cell re-scanned for identifiers'],
+  ['text','Text patterns (emails, phones, IDs…) absent'],
+].map(([p,label]) => {const cs = DATA.gate.checks.filter(c => c.check.startsWith(p+'.')); return {p,label,total:cs.length,pass:cs.filter(c=>c.status==='pass').length,checks:cs};});
+const gatePass = DATA.gate.checks.filter(c=>c.status==='pass').length, gateTotal = DATA.gate.checks.length;
+const checkPlain = c => c.split('.')[1].replace(/-/g,' ').replace('person k','small groups (per person)').replace('row k','small groups (per row)');
+const LIMITS = [
+  ['Accepted sacrifice', 'Diagnosis mix by municipality keeps '+pct(SAC['H-U4'].after)+' of its accuracy (below the usual 90%, above the 60% floor): small municipalities had to be grouped.'],
+  ['Not measured', 'Attribute inference (guessing a hidden fact about a known person) has not been measured yet.'],
+  ['Pending', 'Per-person group-size figure (k) is pending review and not shown.'],
+  ['Still personal data', 'Pseudonymised data is still personal data under GDPR: the recipient must protect it.'],
+  ['Scope', 'Fit only for this recipient and purpose. Any other use needs a new release.'],
+];
+const RECIPIENT = 'University research group', SETTING = 'Controlled research environment', PURPOSE = 'Understand ED crowding and revisits';
+const SYN_ED = [
+  ['PSEUDO_7f3a','40-49','Town A','2','R50','[120,240)','38.4','14:00','no'],
+  ['PSEUDO_c21e','70-79','other','3','J18','[240,480)','39.1','03:00','yes'],
+  ['PSEUDO_09bd','20-29','Town B','4','S93','[0,120)','36.8','22:00','no'],
+  ['PSEUDO_e5a0','60-69','other','2','I48','[240,480)','37.2','09:00','no'],
+];
+const SYN_ED_H = ['Visit (pseudonym)','Age band','Municipality','Triage','Diagnosis (3 chars)','Stay (min)','Temp °C','Arrival hour','Revisit 30 d'];
+const SYN_LAB = [['PSEUDO_7f3a','CRP','42'],['PSEUDO_c21e','CRP','118'],['PSEUDO_c21e','other','5.1'],['PSEUDO_e5a0','CRP','<5']];
+const D41 = 'Synthetic kit data © Since AI ry, CC BY 4.0. In a real deployment only the recipient sees this view.';
+
+// ---------- shared widgets (small, reused; layouts are per-variant) ----------
+const el = (html) => {const t=document.createElement('template'); t.innerHTML=html.trim(); return t.content.firstElementChild;};
+const statusPill = s => `<span class="pill st-${s.key}">${s.label}</span>`;
+const trChip = t => `<span class="tr tr-${t}">${TR_LABEL[t]}</span>`;
+function purposeBars(){
+  const rows = DATA.tasks.map(t => {
+    const s = checkStatus(t), col = {met:'var(--met)',sac:'#d97706',fail:'var(--fail)',nm:'#94a3b8'}[s.key];
+    return `<div class="bar-row pb"><div><b>${CHECKS[t.task]}</b><div class="small muted">${t.task}</div></div>
+      <div class="bar-track"><div class="bar-before" style="width:${(t.before||0)*100}%"></div>
+        <div class="bar-after" style="width:${(t.after||0)*100}%;background:${col}"></div>
+        <div class="mark th" style="left:90%"></div>
+        ${s.key==='sac'?`<div class="mark fl" style="left:60%"></div>`:''}</div>
+      <div><b>${pct(t.after)}</b> ${statusPill(s)}</div></div>`;}).join('');
+  const scale = `<div class="bar-row pb" style="margin:0"><div></div><div class="scale"><span style="left:60%;color:#b45309">60% floor</span><span style="left:90%">90%</span></div><div></div></div>`;
+  return `<div>${scale}${rows}<div class="legend" style="margin-top:12px"><span><i style="background:#cbd5e1"></i>Original data (100%)</span><span><i style="background:var(--met)"></i>Protected release</span><span>Dashed line: target 90% · amber: agreed floor 60% for an accepted sacrifice</span></div></div>`;
+}
+function privacyBars(){
+  const items = [
+    ['Privacy score','higher is safer',H.privacy,true],
+    ['Linkage attack success','share of people an attacker re-identifies',H.linkage,false],
+    ['Records in small look-alike groups','kit scorecard; lower is safer',H.smallGroups,false],
+  ];
+  return items.map(([l,h,v,up]) => `<div class="bar-row pv"><div><b>${l}</b><div class="small muted">${h}</div></div>
+    <div><div class="bar-track" style="height:14px;margin-bottom:4px"><div class="bar-before" style="width:${v.before*100}%;background:#f87171"></div></div>
+    <div class="bar-track" style="height:14px"><div class="bar-before" style="width:${Math.max(v.after*100,0.8)}%;background:var(--met)"></div></div></div>
+    <div><span class="muted">${pct(v.before)}</span>&nbsp;→&nbsp;<b>${pct(v.after)}</b> ${(up? v.after>v.before : v.after<v.before)?'<span style="color:var(--met)">✓</span>':''}</div></div>`).join('')
+   + `<div class="legend"><span><i style="background:#f87171"></i>Before (original data)</span><span><i style="background:var(--met)"></i>After (protected release)</span></div>`;
+}
+function rowsPreview(){
+  return `<div><span class="proto-tag">SYNTHETIC PROTOTYPE ROWS</span>
+   <h3 style="margin-top:10px;font-size:1rem">ED visits <span class="muted small">(${released.filter(f=>f.table==='ed_visits').length} of ${F.filter(f=>f.table==='ed_visits').length} columns released)</span></h3>
+   <div style="overflow:auto"><table class="rows"><tr>${SYN_ED_H.map(h=>`<th>${h}</th>`).join('')}</tr>${SYN_ED.map(r=>`<tr>${r.map((c,i)=>`<td class="${i===0?'mono':''}">${c}</td>`).join('')}</tr>`).join('')}</table></div>
+   <h3 style="margin-top:14px;font-size:1rem">Lab results <span class="muted small">(${released.filter(f=>f.table==='lab_results').length} of ${F.filter(f=>f.table==='lab_results').length} columns released)</span></h3>
+   <table class="rows" style="width:auto"><tr><th>Visit (pseudonym)</th><th>Test</th><th>Value</th></tr>${SYN_LAB.map(r=>`<tr><td class="mono">${r[0]}</td><td>${r[1]}</td><td>${r[2]}</td></tr>`).join('')}</table>
+   <div class="d41">${D41}</div></div>`;
+}
+function limitsList(){
+  return `<ul style="margin:0;padding-left:18px">${LIMITS.map(([k,v])=>`<li style="margin:6px 0"><b>${k}:</b> ${v}</li>`).join('')}</ul>`;
+}
+function gateSummary(open){
+  return GATE_GROUPS.map(g => `<details ${open?'open':''} style="margin:4px 0"><summary><b>${g.pass}/${g.total}</b> ${g.label}</summary>
+     <div class="small muted" style="padding:4px 0 6px 18px">${g.checks.map(c=>(c.status==='pass'?'✓ ':'✗ ')+checkPlain(c.check)).join(' · ')}</div></details>`).join('');
+}
+function searchChart(w=520,h=230){
+  const pts = DATA.search.points, pad=34;
+  const x = u => pad + (u-0.4)/(0.6)*(w-pad-10), y = r => h-pad - (1-r)*(h-pad-10);
+  return `<svg width="${w}" height="${h}" role="img" aria-label="candidates tried">
+   <line x1="${pad}" y1="${h-pad}" x2="${w-10}" y2="${h-pad}" stroke="#94a3b8"/><line x1="${pad}" y1="10" x2="${pad}" y2="${h-pad}" stroke="#94a3b8"/>
+   <text x="${w/2}" y="${h-6}" font-size="12" fill="#5b6476" text-anchor="middle">research value kept →</text>
+   <text x="12" y="${h/2}" font-size="12" fill="#5b6476" transform="rotate(-90 12 ${h/2})" text-anchor="middle">safer ↑</text>
+   ${pts.map(p=>`<circle cx="${x(Math.max(p.utility,0.4))}" cy="${y(p.risk)}" r="5" fill="${p.accepted?'#059669':'#cbd5e1'}" opacity=".85"/>`).join('')}
+  </svg><div class="legend"><span><i style="background:#059669"></i>step kept (${DATA.search.accepted})</span><span><i style="background:#cbd5e1"></i>step rejected: broke a research question</span><span>${DATA.search.candidates} steps tried</span></div>`;
+}
+
+// run-progress mock (simulated timings)
+const RUN_STEPS = [
+  {name:'Inventory', ms:2200, now:['Reading the schema of 4 tables, 53 columns…','Sorting columns: direct IDs, indirect IDs, sensitive details…']},
+  {name:'Release (search + gate)', ms:6500, now:['Trying step 12 of 45: leave out heart rate…','Trying step 36 of 45: coarsen diagnosis to chapter… rejected, breaks diagnosis mix','Trying step 44 of 45: arrival time → hour of day… kept','Running '+gateTotal+' gate checks on every released cell…']},
+  {name:'Recipient verify', ms:2000, now:['Recipient re-checks file fingerprints against the manifest…']},
+  {name:'Full verify', ms:3200, now:['Re-running all '+gateTotal+' checks from scratch and checking the signature…']},
+];
+function runWidget(id){
+  return `<div class="run" id="${id}"><div class="run-steps">${RUN_STEPS.map((s,i)=>`${i?'<span class="run-arrow">→</span>':''}<span class="run-step done" data-i="${i}"><span class="dot">✓</span>${s.name}</span>`).join('')}</div>
+   <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap"><button class="btn" data-run>▶ Simulate run</button>
+   <div class="run-now" data-now>Last run (pin ${DATA.toolRevision}): all steps finished. <span class="muted small">Timings in this prototype are simulated.</span></div></div></div>`;
+}
+let runTimer = null;
+function wireRun(root){
+  root.querySelectorAll('[data-run]').forEach(btn => btn.onclick = () => {
+    const box = btn.closest('.run'), steps = [...box.querySelectorAll('.run-step')], now = box.querySelector('[data-now]');
+    clearInterval(runTimer); btn.disabled = true;
+    steps.forEach(s => {s.className='run-step'; s.querySelector('.dot').textContent='';});
+    const t0 = performance.now(); const total = RUN_STEPS.reduce((a,s)=>a+s.ms,0);
+    runTimer = setInterval(() => {
+      const t = performance.now()-t0; let acc=0, cur=RUN_STEPS.length;
+      for (let i=0;i<RUN_STEPS.length;i++){ if (t < acc+RUN_STEPS[i].ms){cur=i;break;} acc+=RUN_STEPS[i].ms; }
+      steps.forEach((s,i)=>{ s.className='run-step'+(i<cur?' done':i===cur?' active':''); s.querySelector('.dot').textContent = i<cur?'✓':''; });
+      const secs = (Math.min(t,total)/1000).toFixed(1);
+      if (cur >= RUN_STEPS.length){ clearInterval(runTimer); btn.disabled=false;
+        now.innerHTML = `<b>${secs}s</b> · Done. Gate ${gatePass}/${gateTotal} passed · recipient verify ✓ · full verify ✓`; return; }
+      const msgs = RUN_STEPS[cur].now, frac = (t-acc)/RUN_STEPS[cur].ms;
+      now.innerHTML = `<b>${secs}s</b> · <b style="color:var(--brand)">${RUN_STEPS[cur].name}</b>: ${msgs[Math.min(msgs.length-1, Math.floor(frac*msgs.length))]}`;
+    }, 100);
+  });
+}
+
+// ================= Variant A: guided story =================
+function VariantA(){
+  const STEPS = [
+    {t:'Risks', head:'This hospital data can identify people', sub:`Four tables, ${F.length} columns. Before protection, an attacker could link ${pct(H.linkage.before)} of patients back to a name.`,
+     body:() => {
+       const byRole = {}; F.forEach(f => (byRole[f.role] = byRole[f.role]||[]).push(f));
+       const order = ['direct_identifier','quasi_identifier','sensitive_attribute','free_text','technical_identifier','record_key','non_sensitive'];
+       return `<div class="A-grid" style="grid-template-columns:1fr 1fr 1fr 1fr">${order.filter(r=>byRole[r]).map(r=>`<div class="card"><div class="A-stat">${byRole[r].length}</div><b>${ROLES[r]}</b><div class="small muted">${ROLE_HINT[r]} · e.g. ${byRole[r].slice(0,3).map(f=>f.name).join(', ')}</div></div>`).join('')}
+         <div class="card" style="background:#fff1f2;border-color:#fecdd3"><div class="A-stat" style="color:#be123c">${pct(H.linkage.before)}</div><b>re-identified by a linkage attack</b><div class="small muted">on the original data</div></div></div>`;}},
+    {t:'Purpose', head:'We keep only what the research needs', sub:`${RECIPIENT} · ${SETTING} · Purpose: ${PURPOSE}. Five research questions decide every column.`,
+     body:() => `<div class="A-grid" style="grid-template-columns:330px 1fr"><div class="card"><h3>The 5 research questions</h3>${Object.entries(CHECKS).map(([k,v])=>`<div style="margin:8px 0"><b>${v}</b> <span class="muted small">${k}</span></div>`).join('')}
+        <hr style="border:0;border-top:1px solid var(--line)"><div class="small"><b>${released.length}</b> of ${F.length} columns released · <b>${F.length-released.length}</b> withheld</div></div>
+       <div class="card" style="max-height:470px;overflow:auto"><table class="rows"><tr><th>Column</th><th>Choice</th><th>Why</th><th>Serves</th></tr>
+        ${released.map(f=>`<tr><td><b>${f.name}</b><div class="small muted">${TABLES[f.table]}</div></td><td>${trChip(f.tr)}</td><td style="white-space:normal">${f.why.text}</td><td style="white-space:normal" class="small">${f.why.serves.map(s=>CHECKS[s]).join('<br>')}</td></tr>`).join('')}
+        <tr><td colspan="4" class="muted">+ ${F.length-released.length} columns withheld, incl. names, national ID, address, phone, free text, vital signs.</td></tr></table></div></div>`},
+    {t:'Output', head:'What the researchers actually receive', sub:'Pseudonyms instead of IDs, age bands instead of birth dates, hour instead of timestamp. Pseudonymised data is still personal data.',
+     body:() => `<div class="card">${rowsPreview()}</div>`},
+    {t:'Measured', head:'Much safer, and the research still works', sub:`Measured on the real release: privacy ${pct(H.privacy.before)} → ${pct(H.privacy.after)}, research value ${pct(H.utility.before)} → ${pct(H.utility.after)}, linkage attack ${pct(H.linkage.before)} → ${pct(H.linkage.after)}.`,
+     body:() => `<div class="A-grid" style="grid-template-columns:1fr 1.6fr"><div class="card"><h3>Privacy</h3>${privacyBars()}</div><div class="card"><h3>Research value per question</h3>${purposeBars()}</div></div>`},
+    {t:'Limits', head:'Fit for this use, and honest about the rest', sub:`Every release passes ${gateTotal} automatic safety checks before it leaves. Here is what it is and isn’t good for.`,
+     body:() => `<div class="A-grid" style="grid-template-columns:1fr 1fr 1fr"><div class="card"><h3>✅ Fit for</h3><b>${RECIPIENT}</b><div>${PURPOSE}, the 5 questions above</div><h3 style="margin-top:14px">⛔ Not fit for</h3><div class="muted">${DATA.notFitFor.length} other scenarios (e.g. city, finance, education). Different recipient or purpose → new release.</div></div>
+       <div class="card"><h3>⚠️ Limits we disclose</h3>${limitsList()}</div><div class="card"><h3>🛡️ Safety gate: ${gatePass}/${gateTotal} passed</h3>${gateSummary(false)}</div></div>`},
+  ];
+  let i = 0; const root = el(`<div class="A-wrap"></div>`);
+  const draw = () => {
+    const s = STEPS[i];
+    root.innerHTML = `<div class="A-top"><div class="A-brand">🏥 Purpose-first release <span class="muted" style="font-weight:400">· ED crowding study · ${DATA.scenario}</span></div><span class="proto-tag">PROTOTYPE A · Guided story</span></div>
+      <div class="card A-runbar">${runWidget('runA')}</div>
+      <div class="A-stepper">${STEPS.map((x,j)=>`<button data-j="${j}" class="${j===i?'on':j<i?'past':''}"><b>Step ${j+1}</b>${x.t}</button>`).join('')}</div>
+      <h1 class="A-head">${s.head}</h1><p class="A-sub">${s.sub}</p>${s.body()}
+      <div class="A-nav"><button class="btn ghost" data-back ${i===0?'disabled':''}>← Back</button>${i<STEPS.length-1?`<button class="btn" data-next>Next: ${STEPS[i+1].t} →</button>`:'<span></span>'}</div>`;
+    root.querySelectorAll('[data-j]').forEach(b=>b.onclick=()=>{i=+b.dataset.j;draw();});
+    root.querySelector('[data-back]').onclick=()=>{if(i>0){i--;draw();}};
+    const nb=root.querySelector('[data-next]'); if(nb) nb.onclick=()=>{if(i<STEPS.length-1){i++;draw();}};
+    wireRun(root);
+  };
+  const st = +new URLSearchParams(location.search).get('step'); if (st>=1 && st<=5) i = st-1;
+  draw(); return root;
+}
+
+// ================= Variant B: narrative report =================
+function VariantB(){
+  const secs = [
+    ['risk','What’s risky',`This data could re-identify ${pct(H.linkage.before)} of patients.`,
+      () => { const byRole={}; F.forEach(f=>byRole[f.role]=(byRole[f.role]||0)+1); const max=Math.max(...Object.values(byRole));
+        return Object.entries(byRole).sort((a,b)=>b[1]-a[1]).map(([r,c])=>`<div class="bar-row" style="grid-template-columns:220px 1fr 60px"><b>${ROLES[r]}</b><div class="bar-track"><div class="bar-before" style="width:${c/max*100}%;background:${r==='direct_identifier'?'#e11d48':r==='quasi_identifier'?'#f97316':'#94a3b8'}"></div></div><span>${c}</span></div>`).join(''); },
+      () => `<table class="rows"><tr><th>Table</th><th>Column</th><th>Kind</th></tr>${F.map(f=>`<tr><td>${TABLES[f.table]}</td><td>${f.name}</td><td>${ROLES[f.role]}</td></tr>`).join('')}</table>`],
+    ['purpose','What the purpose needs',`${RECIPIENT} studying ED crowding needs only ${released.length} of ${F.length} columns, and most of those are coarsened or pseudonymised.`,
+      () => { const c={}; F.forEach(f=>c[f.tr]=(c[f.tr]||0)+1); const cv=t=>`var(--${t==='pseudonymised'?'pseudo':t==='coarsened'?'coarse':t})`;
+        return `<div style="display:flex;height:46px;border-radius:10px;overflow:hidden">${['withheld','coarsened','pseudonymised','kept'].map(t=>`<div style="flex:${c[t]};background:${cv(t)};color:#fff;display:grid;place-items:center;font-weight:700;font-size:1rem">${c[t]}</div>`).join('')}</div>
+        <div class="legend" style="margin-top:8px">${['withheld','coarsened','pseudonymised','kept'].map(t=>`<span><i style="background:${cv(t)}"></i>${c[t]} ${TR_LABEL[t].toLowerCase()}</span>`).join('')}</div>
+        <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-top:16px">${Object.entries(CHECKS).map(([k,v])=>`<div class="card" style="padding:12px"><b>${v}</b><div class="small muted">needs: ${released.filter(f=>f.why.serves.includes(k)).map(f=>f.name).filter((x,i,a)=>a.indexOf(x)===i).join(', ')}</div></div>`).join('')}</div>`; },
+      () => `<table class="rows"><tr><th>Column</th><th>Choice</th><th>Why</th></tr>${F.map(f=>`<tr><td><b>${f.name}</b> <span class="muted small">${TABLES[f.table]}</span></td><td>${trChip(f.tr)}</td><td style="white-space:normal">${f.why.text}</td></tr>`).join('')}</table>`],
+    ['output','The protected output','Researchers get pseudonyms, bands and ranges, never names, IDs or exact times.',
+      () => rowsPreview(), () => `<p>Pseudonyms are keyed and valid only inside this release; the key never leaves the producer. Pseudonymised data is still personal data under GDPR.</p>`],
+    ['measured','Measured before / after',`Privacy ${pct(H.privacy.before)} → ${pct(H.privacy.after)} while research value stays at ${pct(H.utility.after)}.`,
+      () => `<div style="display:grid;grid-template-columns:1fr 1fr;gap:28px"><div>${privacyBars()}</div><div>${purposeBars()}</div></div>`,
+      () => `<p>Overall score (privacy × research value): <b>${n2(H.composite.before)} → ${n2(H.composite.after)}</b>. The release was found by trying ${DATA.search.candidates} steps and keeping only those that didn’t break a research question.</p>${searchChart()}`],
+    ['limits','Scenario & limitations',`Fit only for ${RECIPIENT.toLowerCase()}s studying ED crowding; ${gatePass}/${gateTotal} safety checks passed.`,
+      () => `<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px"><div class="card"><h3>Limits we disclose</h3>${limitsList()}</div><div class="card"><h3>Fit for / not fit for</h3><p>✅ ${RECIPIENT}, ${SETTING.toLowerCase()}: ${PURPOSE.toLowerCase()}.</p><p>⛔ ${DATA.notFitFor.length} other scenarios. A different recipient or purpose needs its own release.</p></div></div>`,
+      () => gateSummary(true)],
+  ];
+  const root = el(`<div class="B-shell"><nav class="B-nav"><div style="font-weight:750;margin-bottom:4px">🏥 ED crowding release</div><div class="small muted" style="margin-bottom:18px">${RECIPIENT}</div>
+     ${secs.map(([id,t,tk],i)=>`<a href="#${id}" data-id="${id}">${i+1}. ${t}</a>`).join('')}
+     <div style="margin-top:24px" class="proto-tag">PROTOTYPE B · Report</div></nav>
+     <main class="B-main"><div class="B-kicker">Release report · ${DATA.scenario}</div>
+     <h1 style="font-size:2.1rem;margin:6px 0 4px">Hospital ED data, released for one research purpose</h1>
+     <p class="muted" style="font-size:1.1rem;margin:0 0 18px">${RECIPIENT} · ${SETTING} · ${PURPOSE}</p>
+     <div class="card">${runWidget('runB')}</div>
+     ${secs.map(([id,t,take,chart,det],i)=>`<section class="B-sec" id="${id}"><div class="B-kicker">${i+1} · ${t}</div><div class="B-take">${take}</div>${chart()}<details class="more"><summary>Show details</summary>${det()}</details></section>`).join('')}
+     </main></div>`);
+  const links = root.querySelectorAll('.B-nav a');
+  const onScroll = () => { let cur = secs[0][0]; secs.forEach(([id])=>{const s=document.getElementById(id); if(s && s.getBoundingClientRect().top<160) cur=id;}); links.forEach(a=>a.classList.toggle('on',a.dataset.id===cur)); };
+  window.onscroll = onScroll; setTimeout(onScroll,0);
+  wireRun(root); return root;
+}
+
+// ================= Variant C: cockpit =================
+function VariantC(){
+  const root = el(`<div class="C-wrap"></div>`);
+  let sel = released.find(f=>f.column==='municipality'), tab = 'checks';
+  const kpi = (l,v,sub) => `<div class="card C-kpi"><div class="lbl">${l}</div><div class="val">${v}</div><div class="small muted">${sub}</div></div>`;
+  const tabs = {
+    checks:['Research questions', () => purposeBars()],
+    privacy:['Privacy measured', () => `<div style="display:grid;grid-template-columns:1.2fr 1fr;gap:24px"><div>${privacyBars()}<p class="small muted">Per-person group size (k): <b>pending</b>.</p></div><div><b>How the release was found</b>${searchChart(460,210)}</div></div>`],
+    output:['Output preview', () => rowsPreview()],
+    gate:['Safety gate '+gatePass+'/'+gateTotal, () => `<div style="columns:2;column-gap:28px">${gateSummary(true)}</div>`],
+    limits:['Scope & limits', () => `<div style="display:grid;grid-template-columns:1.4fr 1fr;gap:20px"><div>${limitsList()}</div><div><p>✅ <b>Fit for:</b> ${RECIPIENT}, ${PURPOSE.toLowerCase()}.</p><p>⛔ <b>Not fit for:</b> ${DATA.notFitFor.length} other scenarios.</p></div></div>`],
+  };
+  const draw = () => {
+    const byT = {}; F.forEach(f => (byT[f.table]=byT[f.table]||[]).push(f));
+    const order = {kept:0,pseudonymised:1,coarsened:2,withheld:3};
+    const t = DATA.tasks.find(x=>sel.why.serves.includes(x.task));
+    root.innerHTML = `<div class="C-head"><div><h1 style="font-size:1.5rem;margin:0">🏥 ED crowding release <span class="muted" style="font-weight:400;font-size:1rem">· ${RECIPIENT} · ${SETTING}</span></h1></div><span class="proto-tag">PROTOTYPE C · Cockpit</span></div>
+     <div class="C-kpis">${kpi('Privacy',`${pct(H.privacy.before)} → <span style="color:var(--met)">${pct(H.privacy.after)}</span>`,'higher is safer')}
+       ${kpi('Research value',`${pct(H.utility.before)} → ${pct(H.utility.after)}`,'average of 5 questions')}
+       ${kpi('Linkage attack',`${pct(H.linkage.before)} → <span style="color:var(--met)">${pct(H.linkage.after)}</span>`,'people re-identified')}
+       ${kpi('Safety gate',`${gatePass}/${gateTotal}`,'checks passed')}
+       ${kpi('Verify','✓ ✓','recipient · full (re-runs all checks)')}</div>
+     <div class="card" style="padding:12px 18px;margin-bottom:14px">${runWidget('runC')}</div>
+     <div class="C-main"><div class="card"><div style="display:flex;justify-content:space-between;align-items:baseline"><h2 style="font-size:1.1rem">Field map: every column, coloured by what we did · <span class="muted small">click a tile</span></h2>
+       <div class="legend">${['kept','pseudonymised','coarsened','withheld'].map(x=>`<span><i style="background:var(--${x==='pseudonymised'?'pseudo':x==='coarsened'?'coarse':x})"></i>${TR_LABEL[x]}</span>`).join('')}</div></div>
+       <div class="C-tables">${Object.keys(TABLES).map(tb=>`<div class="C-tbl"><h3>${TABLES[tb]} <span class="muted small">${byT[tb].filter(f=>f.tr!=='withheld').length}/${byT[tb].length} released</span></h3><div class="C-tiles">
+         ${byT[tb].slice().sort((a,b)=>order[a.tr]-order[b.tr]).map(f=>`<button class="C-tile tr-${f.tr} ${f===sel?'sel':''}" data-f="${F.indexOf(f)}">${f.name}</button>`).join('')}</div></div>`).join('')}</div></div>
+       <div class="card" style="border-color:var(--brand)"><div class="small muted">${TABLES[sel.table]} · ${ROLES[sel.role]}</div><h2 style="font-size:1.4rem;margin:4px 0 8px">${sel.name}</h2>${trChip(sel.tr)}
+         <p style="font-size:1.05rem">${sel.why.text}</p>
+         ${sel.why.serves.length?`<div class="small muted">Serves research question</div>${sel.why.serves.map(s=>{const tt=DATA.tasks.find(x=>x.task===s);const st=checkStatus(tt);return `<div style="margin:6px 0"><b>${CHECKS[s]}</b><br>${pct(tt.after)} kept ${statusPill(st)}</div>`;}).join('')}`:'<div class="small muted">Serves no research question, so it does not leave the hospital.</div>'}
+         ${sel.tr==='pseudonymised'?'<p class="small" style="color:var(--sac)">Still personal data: the recipient must protect it.</p>':''}</div></div>
+     <div class="C-tabs">${Object.entries(tabs).map(([k,[l]])=>`<button data-tab="${k}" class="${k===tab?'on':''}">${l}</button>`).join('')}</div>
+     <div class="C-panel">${tabs[tab][1]()}</div>`;
+    root.querySelectorAll('[data-f]').forEach(b=>b.onclick=()=>{sel=F[+b.dataset.f];draw();});
+    root.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>{tab=b.dataset.tab;draw();});
+    wireRun(root);
+  };
+  draw(); return root;
+}
+
+// ---------- switcher ----------
+const VARIANTS = [['A','Guided story',VariantA],['B','Narrative report',VariantB],['C','Cockpit',VariantC]];
+function render(){
+  const key = (new URLSearchParams(location.search).get('variant')||'A').toUpperCase();
+  const v = VARIANTS.find(x=>x[0]===key) || VARIANTS[0];
+  clearInterval(runTimer); window.onscroll = null;
+  const app = document.getElementById('app'); app.innerHTML=''; app.appendChild(v[2]());
+  document.getElementById('sw-label').innerHTML = `<em>${v[0]}</em> (${v[1]})`;
+  window.scrollTo(0,0); return v;
+}
+function go(d){
+  const cur = VARIANTS.findIndex(x=>x[0]===((new URLSearchParams(location.search).get('variant')||'A').toUpperCase()));
+  const nx = VARIANTS[(Math.max(cur,0)+d+VARIANTS.length)%VARIANTS.length][0];
+  const u = new URL(location.href); u.searchParams.set('variant',nx); u.searchParams.delete('step');
+  history.replaceState(null,'',u); render();
+}
+document.getElementById('sw-prev').onclick=()=>go(-1);
+document.getElementById('sw-next').onclick=()=>go(1);
+document.addEventListener('keydown',e=>{const t=e.target; if(t.closest&&t.closest('input,textarea,[contenteditable]'))return;
+  if(e.key==='ArrowLeft')go(-1); if(e.key==='ArrowRight')go(1);});
+render();
+</script>
+</body>
+</html>
