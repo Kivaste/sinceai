@@ -60,12 +60,19 @@ def compute_signature(manifest: dict, signing_key: Any) -> str:
     return digest.hex()
 
 
+def _flagged(part: str) -> bool:
+    from pets_release.checks.cells._shape import flagged
+
+    return flagged(part)
+
+
 def _fmt(path) -> str:
     out = "$"
     for part in path:
         if isinstance(part, int):
             out += f"[{part}]"
-        elif _SAFE_KEY.match(part) and not _DIGIT_RUN.search(part):
+        elif _SAFE_KEY.match(part) and not _DIGIT_RUN.search(part) and not _flagged(part):
+            # a key the identifier detectors flag is masked in every diagnostic (round-2 review, #61)
             out += "." + part
         else:
             out += ".<key>"
@@ -167,6 +174,17 @@ def _cross_field_errors(m: dict) -> list[str]:
         errs.append("$.notFitFor: overlaps-fitFor")
     if m["release"]["scenario"] not in {f["scenario"] for f in m["fitFor"]}:
         errs.append("$.fitFor: missing-release-scenario")
+
+    # the pinned scenario policy fixes the k target and the released QI set (#62)
+    from pets_release.policy import contract_policy_problems
+
+    errs += [f"$.{p}" for p in contract_policy_problems(m["release"]["scenario"], m["contract"],
+                                                                   m["fieldJustifications"])]
+
+    # identifier-shaped text anywhere outside the pinned digest/signature metadata (#61)
+    from pets_release.manifest.value_scan import identifier_shape_errors
+
+    errs += identifier_shape_errors(m, _fmt)
 
     meas = m["measured"]
     lists = {"utility": ("tasks", tk("task")), "privacy": ("components", tk("component")),

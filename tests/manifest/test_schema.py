@@ -103,7 +103,15 @@ def _as_cs(m):
     m["bindings"]["checkVersions"] = {c["check"]: c["version"] for c in m["gate"]["checks"]}
     m["bindings"]["lexiconDigests"] = {"health-lexicon": "a" * 64}
     m["release"]["releaseScopeId"] = _scope_id(m)
-    m["contract"].pop("k", None)
+    # a CS-S1 contract: its provenance must resolve in the CS-S1 policy's source schema (#62 round 3), so the
+    # HEALTH-S1 tables are replaced by one synthetic conversations column justified from its CS-S1 source.
+    m["contract"] = {"files": {"conversations.csv": {"columns": {"intent": {"form": "^[a-z_]{1,32}$", "params": {}}},
+                                                      "required": ["intent"]}},
+                     "qi": [], "tokens": []}
+    m["fieldJustifications"] = [{"table": "conversations", "column": "intent", "outputColumn": "intent",
+                                 "decision": "released", "rung": "exact", "floor": "exact", "reason": "CS-U1",
+                                 "source": "hand"}]
+    m["bindings"]["files"] = {"conversations.csv": "a" * 64}
     _rebind_contract(m)
     return m
 
@@ -145,10 +153,18 @@ def test_invalid_k_is_invalid(m, value, code):
     assert f"$.contract.k: {code}" in validate_manifest(m)
 
 
-def test_k_2_is_the_smallest_valid_target(m):
+def test_health_k_below_policy_target_is_invalid(m):
+    """#62: HEALTH-S1's schema minimum is the pinned policy's k (5), not 2."""
     m["contract"]["k"] = 2
     _rebind_contract(m)
-    assert validate_manifest(m) == []
+    assert validate_manifest(m) == ["$.contract.k: minimum"]
+
+
+def test_health_k_above_policy_target_is_invalid(m):
+    """#62: a k other than the policy's is a mismatch (the policy, not the manifest, sets the target)."""
+    m["contract"]["k"] = 6
+    _rebind_contract(m)
+    assert validate_manifest(m) == ["$.contract.k: policy-mismatch"]
 
 
 def test_changed_k_without_rebinding_digest_is_invalid(m):

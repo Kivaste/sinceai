@@ -1,4 +1,4 @@
-"""Run both personas on a HEALTH-S1 release folder and print aggregate rates.
+﻿"""Run both personas on a HEALTH-S1 release folder and print aggregate rates.
 
 python -m pets_attacker --kit <kit root> --release <folder with ed_visits.csv + rowmap_ed_visits.csv> --label b2k --out out.json
 """
@@ -22,7 +22,7 @@ DOMAIN, TABLE, RECORD_KEY = "health", "ed_visits", "visit_id"
 
 
 def _csv(path: Path) -> pd.DataFrame:
-    return pd.read_csv(path, dtype=str, keep_default_na=False)
+    return pd.read_csv(path, dtype=str, keep_default_na=False, na_filter=False)
 
 
 def _rowmap_path(release: Path, scoring_dir: Path | None, rowmaps: dict) -> Path:
