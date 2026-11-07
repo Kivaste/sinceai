@@ -46,3 +46,4 @@ Pseudonymised data is still personal data, and whoever holds the key can re-link
 ## What is next
 
 An optional LLM front end that turns a request into a needs spec, seeing only the request text and the data dictionary, never data values. More scenarios through the same gate and manifest.
+
