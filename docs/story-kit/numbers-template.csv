@@ -33,8 +33,6 @@ beat,label,manifest_key_path,unit,value
 6,Scorecard - share of ROWS in ed_visits with k below 5 (after; blind to age_band),measured.privacy.after.k_below_5_share,share_of_rows,
 6,Scorecard - linkage re-identification ed_visits (before),measured.privacy.before.linkage_reid,score_0_1,
 6,Scorecard - linkage re-identification ed_visits (after),measured.privacy.after.linkage_reid,score_0_1,
-6,Scorecard privacy summary (before),measured.privacy.before.privacy,score_0_1,
-6,Scorecard privacy summary (after),measured.privacy.after.privacy,score_0_1,
 6,Baseline B0 - scenario utility,measured.baselines.B0.utility_mean,score_0_1,
 6,Baseline B0 - privacy,measured.baselines.B0.privacy,score_0_1,
 6,Baseline B2 - scenario utility,measured.baselines.B2.utility_mean,score_0_1,
