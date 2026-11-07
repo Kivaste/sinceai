@@ -13,7 +13,36 @@ Each entry records:
 
 ## Entries
 
-### Sat 09:55 - STATUS SUMMARY (replaces the 08:20 summary; only non-append exception)
+### Sat 11:10 - STATUS (brief v3 §5; replaces the 09:55 summary; only non-append exception)
+
+- **Effective policies (changes only):** Brief v3 / D31 in force: templates.md prompts, separate Standards/Spec sub-agents, and closes only through `check-done-report.ps1`. D13e lifted at 11:03 (opencode-go back). The AGENTS.md cross-map is unchanged; Gemini Argon and GPT-6 Luna are now the fallback Spec reviewers when Sol is unavailable, replacing DeepSeek free (see the 11:05 entry). Reviews that predate D31 and combine the axes don't count toward D31. #78, #89, #49, slow-split and the #61 wave got fresh axis-separated rounds.
+- **Critical path:**
+  - The CS-S1 chain, merging in this order: #53 → #54 → #92/#56 → 23 (#24) → #63. It is the only route to a real-kit CS-S1 release, and that release blocks #96, 29 (#30), the 14:00 LLM go/no-go and `pets_submission/` at 16:00.
+  - In parallel: 25 search (#26) before the 12:00 go/no-go, and the #61/#62/#71/#84 fail-closed wave.
+- **Blocker owners (issue → session/model):**
+  - CS-S1 chain (#24, #53, #54, #56, #63, #92) → ses_e4b294f0 / claude-agent/opus (D29 single owner). Grok r4 reviews of #53 and #54 and the 23 r2 review are in flight.
+  - #26 search → ses_e4afab69 / claude-agent/opus (round-2 fixer).
+  - #61, #62, #71, #84 → ses_e4ac9999 / claude-agent/opus (round 3: provenance fail-open, detector-derived QI measured first, registered manifest scan).
+  - #89 → ses_e4ad2009 / claude-agent/opus (round 3: hour_of_day ordered coarser than month, plus an enumerated sacrifice).
+  - #32 (31 LLM) → ses_e4b3ad94 / claude-agent/opus.
+  - #97 → ses_e4ae8f04 / openai/gpt-6.1-sol.
+  - #65, #66, #69, #90 → Sol implementers (ses_e4ae4acb, ses_e4ae48fd, ses_e4ae46ff, ses_e4ae449e).
+  - #81, #83, #94 → ses_e4b3155b / claude-agent/sonnet.
+  - #85 → reviews in flight (Grok, Sol).
+  - #49 → ses_e4ad30dd / claude-agent/sonnet (evidence only).
+  - #98 → held: main `b85d1d0` already has the splat fix; to be rebased to the remainder.
+- **Latest verified revision:**
+  - Integration `4811b16`, merged result: `pytest -n 16 -m "not slow"` gave 2357 passed, 5 skipped, 0 failed. No test carried the slow marker yet, so the run covered every test.
+  - `b194d2b` adds the decision log only.
+  - Real-kit HEALTH-S1 `run` plus both verify tiers were last run on `e846512` (`sinceai-out\story-tip-e846512\`).
+- **Missing evidence:**
+  - No real-kit CS-S1 release recorded.
+  - No real-kit release or verify run on the integration tip (`b194d2b`).
+  - 0 of 57 closed tickets have complete red/green evidence (10:45 audit, `.scratch/local-review/evidence-audit.md`). The final review and fresh proof (brief §4) cover them; they are not reopened.
+  - Head-bound done-reports are still missing for #49, the #61 wave and #89.
+  - The #78 affected-tests run is in progress.
+
+### Sat 09:55 - STATUS SUMMARY (superseded by the 11:10 status above)
 
 - **Done:** 58 issues closed. Spec tickets 01-22, 24, 26, 27, 28 and 30 are merged. Since 08:20: #67, #68, #72, #73, #74, #77, #79 and #91 merged, and the story drafts are merging now. Integration head `8cec414`, full suite 2357 passed, 5 skipped. The HEALTH-S1 release at the tip (`e846512`) passes the gate (40/40), both verify tiers and pets-eval (privacy 0.1716 -> 1.0, per-person k min 5). Draft PR #95 (`integration/pets-release` -> `main`) is open (D25).
 - **In flight:** 23 CS-S1 (round-2 fixes: recipient threading, manifest self-scan); 25 search (round-1 review, Grok + Sol); 29 packager (approved; Merge after 23/25); 31 LLM (round-4 fix; the pipeline part of AC3 is deferred to the 14:00 go/no-go); follow-ups #49 (review), #78 (round 2), #81/#83/#94, #85, #89 (round 2).
@@ -218,3 +247,17 @@ Each entry records:
 - **Decision:** Applied D30 (user). (1) From now on, every prompt sets `PYTHONPYCACHEPREFIX=%LOCALAPPDATA%\sinceai-pycache` and leaves out `PYTHONDONTWRITEBYTECODE` on the top-level pytest command. (2) The merge train fails fast: the fast tier `-m "not slow"` runs on the combined batch first, and `-m slow` only if that is green. Docs-only batches run only `tests/docs` and `tests/story_kit`. (3) #97 (kit-data parse cache for tests) dispatched on `openai/gpt-6.1-sol#high`, to be reviewed by Grok + Sonnet. It merges after `ticket/slow-split` if both touch `tests/conftest.py`. The prompt states the D13g authorization explicitly, because `AGENTS.md:65` on main still says Claude-only. A merger is now merging `main` into integration and writing the D13g wording.
 - **Why:** The inner loop and the merge gate are slow under CPU saturation.
 - **Evidence:** docs/decisions.md D30; issue #97.
+
+### Sat 11:05 - D13e lifted (opencode-go back); roster conflict logged
+
+- **When:** Sat 11:03-11:05 EET
+- **Decision:** The opencode-go probe succeeded at 11:03 (`go-available.json`), so D13e is lifted. The probe message asks for Gemini 4 Argon to take back the Gemini roles: second reviewer on must-fix deltas, rule audits and one final-review seat. That conflicts with AGENTS.md › Review and brief v3 §2.5 (D31): Claude-written code gets Standards from Grok and Spec from Sol; Sol-written code gets Spec from Sonnet; the final review is Sol + Grok high. AGENTS.md wins, so the cross-map is unchanged. Gemini (`opencode-go/gemini-4-argon#medium`) and Luna (`opencode-go/gpt-6-luna#medium`) replace `opencode/deepseek-v4.1-flash-free` as the fallback Spec reviewer for Claude code when Sol is unavailable. They may also be an extra, non-counting reviewer in rule audits. They are used for reviews only, never implementation, with at most 6 concurrent opencode-go sessions. On another usage-limit error, go back to the D13e roster and log it. **Conflict for the human:** if Gemini should hold a counting review seat, AGENTS.md › Review must say so first.
+- **Why:** AGENTS.md is binding and wins over automated steering. Keeping the cross-map stable means reviews already in flight stay valid.
+- **Evidence:** `.scratch/local-overnight/go-available.json` (available_at 2026-11-07T11:03:23+02:00).
+
+### Sat 11:10 - 3 full-profile failures not reproduced; slow-split unblocked
+
+- **When:** Sat 11:10 EET
+- **Decision:** The 3 failures in slow-split's full profile (`test_verify_full_ignores_planted_rowmap`, `test_two_runs_byte_identical`, `test_unmodified_release_verifies_in_both_tiers`; `toolRevision: mismatch`) don't reproduce. They pass in the merger's full run on `4811b16` (2357 passed, 0 failed), in the slow tier of the diagnosis lane (175 passed) and in slow-split's own fast tier at `e694598` (2248 passed). Cause: the tree moved during the profile run. slow-split may merge once both axes approve: Grok Standards and Sonnet Spec both APPROVE at `e694598`.
+- **Why:** A failure that doesn't reproduce on a clean, committed tree, and that comes with a revision-binding mismatch, is a moving-tree artefact, not a defect.
+- **Evidence:** the merger session ses_e4ae9a7e report; the diagnosis session ses_e4add289; `sinceai-out\slow-split\evidence-e69459898734603ee4c5ae25a082e94df9249d0b\`.
