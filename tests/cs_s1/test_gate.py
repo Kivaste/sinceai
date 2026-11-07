@@ -68,6 +68,38 @@ def test_planted_card_in_turn_refuses(tmp_path, prepared):
     assert any(r.status == "fail" for r in res.records if "payment-cards" in r.check)
 
 
+PRIVATE_IPS = ("10.0.0.5", "192.168.001.020", "172.16.4.2", "127.0.0.1", "169.254.10.1", "fe80::1", "fd00::2")
+
+
+@pytest.fixture(scope="module")
+def private_ip_release(minikit, make_keys):
+    from pets_release.cs_s1 import prepare
+
+    src = {k: v.copy() for k, v in minikit.items()}
+    t = src["turns"]
+    col = t.columns.get_loc("text")
+    for i, ip in enumerate(PRIVATE_IPS):  # synthetic: one planted address per turn
+        t.iloc[i, col] = f"{t.iloc[i, col]} my router shows {ip}, ok"
+    return prepare(src, make_keys())
+
+
+def test_private_ips_redacted_so_ip_assertion_holds(tmp_path, private_ip_release):
+    """CS-S1 keeps the ipAddresses assertion strict: private/loopback/link-local addresses are
+    redacted with IP_ADDRESS, so the gate's low-severity IP hits are 0 and the assertion is backed."""
+    from pets_release.writer.assemble import evidence_for
+
+    p = private_ip_release
+    texts = p.tables["turns"].text
+    assert not any(ip in x for x in texts for ip in PRIVATE_IPS)
+    assert sum(s["label"] == "IP_ADDRESS" for s in p.spans) >= len(PRIVATE_IPS)
+    res = _gate(_write(tmp_path / "rel", p.tables), p)
+    for name in ("rescan.ip-addresses", "text.ip-addresses"):
+        rec = _rec(res, name)
+        assert (rec.status, rec.hits, len(rec.violations)) == ("pass", 0, 0), name
+    _, _, reasons = evidence_for(res.records, "CS-S1")
+    assert not [r for r in reasons if r.startswith("assertion:ipAddresses")]
+
+
 def test_turn_id_check_not_applicable_without_turns(tmp_path, prepared):
     tables = {"conversations": prepared.tables["conversations"]}
     folder = _write(tmp_path / "rel", tables)

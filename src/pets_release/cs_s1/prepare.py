@@ -1,6 +1,7 @@
 """CS-S1: plan selection (turn_id decision), controller gazetteer, redactor binding, transform."""
 from __future__ import annotations
 
+import ipaddress
 import re
 from dataclasses import dataclass
 
@@ -88,7 +89,8 @@ class ControllerValuesPass:
     at most 3 non-word characters each, in any conversation. The longest value at a position wins.
     Values shorter than ``MIN_VALUE`` alphanumerics are ignored. Below the validators' priority,
     so a validated hit keeps its span; it fills gaps such as letter-prefixed customer numbers and
-    names or addresses the lexicons miss.
+    names or addresses the lexicons miss. It also emits ``IP_ADDRESS`` for every IP literal
+    (``ip_literals``), so private addresses the structured pass masks are redacted too.
     """
 
     name = "controller-values"
@@ -102,7 +104,7 @@ class ControllerValuesPass:
                     self._index.setdefault(toks[0], []).append((toks, label))
         for k in self._index:  # longest first; first label (sorted) wins on equal tokens
             self._index[k].sort(key=lambda e: -len(e[0]))
-        self.labels = frozenset(lab for _, _, lab in CONTROLLER_VALUES)
+        self.labels = frozenset(lab for _, _, lab in CONTROLLER_VALUES) | {"IP_ADDRESS"}
 
     def run(self, view):
         out = []
@@ -117,7 +119,36 @@ class ControllerValuesPass:
                            for j in range(1, n)):
                         out.append(Candidate(ti, s, toks[i + n - 1][1], label, PRIORITY_CUE, None, self.name))
                         break
+            out.extend(Candidate(ti, s, e, "IP_ADDRESS", PRIORITY_CUE, None, self.name) for s, e in ip_literals(t.text))
         return out
+
+
+_IPV4_LIT = re.compile(r"(?<![\w.])(\d{1,3})[ \t]*\.[ \t]*(\d{1,3})[ \t]*\.[ \t]*(\d{1,3})[ \t]*\.[ \t]*(\d{1,3})"
+                       r"(?!\w|\.\d)")
+_IPV6_LIT = re.compile(r"(?<![\w:])(?:[0-9A-Fa-f]{0,4}:){2,7}[0-9A-Fa-f]{0,4}(?![\w:])")
+
+
+def ip_literals(text: str) -> list[tuple[int, int]]:
+    """Spans of every valid IPv4/IPv6 literal, public or not.
+
+    The structured pass masks private, loopback and link-local addresses (they are not personal by
+    its rule), but CS-S1 keeps the ``ipAddresses`` assertion strict: any address in a turn is a
+    gate hit, so the release redacts them all. Public addresses keep the validated span (higher
+    priority); this fills the rest. IPv4 octets may carry leading zeros and spaced dots.
+    """
+    spans = []
+    for m in _IPV4_LIT.finditer(text):
+        if all(int(g) <= 255 for g in m.groups()):
+            spans.append(m.span())
+    for m in _IPV6_LIT.finditer(text):
+        if m.group(0).count(":") < 2:
+            continue
+        try:
+            ipaddress.IPv6Address(m.group(0))
+        except ValueError:
+            continue
+        spans.append(m.span())
+    return spans
 
 
 def controller_values_pass(source: dict) -> ControllerValuesPass:
