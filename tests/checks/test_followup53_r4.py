@@ -76,6 +76,25 @@ def test_three_character_date_after_copula_refuses(tmp_path, check, text):
     assert _hits(tmp_path, text, check) >= 1
 
 
+# a copula-cued date/time directly before (or glued to) a placeholder is a value: only a plain word
+# there is not (round-3 review, fail-open)
+DATE_BEFORE_PLACEHOLDER = ["password is 12/03/2021 [SECRET_1]", "password is 12/03/2021[SECRET_1]",
+                           "password is 12:30 [SECRET_1]", "salasana on 12.03.2021 [SECRET_1]",
+                           "password: 12/03/2021 [SECRET_1]"]
+
+
+@pytest.mark.parametrize("check", SECRETS)
+@pytest.mark.parametrize("text", DATE_BEFORE_PLACEHOLDER)
+def test_date_before_placeholder_refuses(tmp_path, check, text):
+    assert _hits(tmp_path, text, check) >= 1
+
+
+@pytest.mark.parametrize("check", SECRETS)
+@pytest.mark.parametrize("text", ["salasana on kissakala [SECRET_1]", "password reset 12/03/2021 [SECRET_1]"])
+def test_plain_word_or_uncued_date_before_placeholder_passes(tmp_path, check, text):
+    assert _hits(tmp_path, text, check) == 0
+
+
 @pytest.mark.parametrize("delim", [":", "="])
 def test_cli_refuses_hedged_values(tmp_path, delim):
     c = tmp_path / "contract.json"

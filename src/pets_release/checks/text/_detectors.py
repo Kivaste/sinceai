@@ -498,7 +498,9 @@ def _value_ok(kind, lo, hi, value, single, copula=True, plain=None):
     if not copula:  # no copula/colon: only a credential-shaped token counts ("password reset?" is prose)
         value = value.rstrip(_TAIL_PUNCT)
     if _cues.DATE_OR_TIME.fullmatch(value.rstrip(_TAIL_PUNCT)):
-        return plain  # a date counts only right after a copula, as in the cell rescan (any length)
+        # a date counts only right after a copula, as in the cell rescan (any length, also directly
+        # before a placeholder: the plain-word exclusion does not apply to it)
+        return copula
     if not lo <= len(value) <= hi:
         return False
     if _secret_like(value) or single:
