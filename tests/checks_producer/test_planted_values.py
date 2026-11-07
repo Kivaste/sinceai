@@ -238,3 +238,39 @@ def test_missing_release_folder_is_an_error(h, ctx, check):
 @pytest.mark.parametrize("check", [ORIGINALS, HASHES, KEYS])
 def test_empty_release_folder_is_an_error_not_a_pass(h, ctx, check):
     assert check.run(h.release({}), {}, ctx)["status"] == "error"
+
+
+def test_original_inside_a_single_hex_digest_cell_is_refused(h, ctx):
+    ident = "a1b2c3d4e5f6a7"  # synthetic 14-char hex-looking identifier
+    src = ctx["source"]["ed_visits"].copy()
+    src["serial"] = [ident, "zz", "yy"]
+    ctx = dict(ctx, source={"ed_visits": src}, identifiers=[{"table": "ed_visits", "column": "serial"}])
+    cell = "0" * 20 + ident + "f" * 30
+    assert len(cell) == 64
+    rec = ORIGINALS.run(_with_cell(h, "note", 2, cell), {}, ctx)
+    assert rec["status"] == "fail" and rec["violations"][0]["locations"] == [2]
+    assert cell not in json.dumps(rec)
+
+
+def test_short_original_inside_a_hex_digest_cell_is_not_a_chance_hit(h, ctx):
+    src = ctx["source"]["ed_visits"].copy()
+    src["serial"] = ["12345678", "zz", "yy"]  # 8 chars: below the digest floor
+    ctx = dict(ctx, source={"ed_visits": src}, identifiers=[{"table": "ed_visits", "column": "serial"}])
+    cell = "a" * 20 + "12345678" + "b" * 36
+    assert ORIGINALS.run(_with_cell(h, "note", 2, cell), {}, ctx)["status"] == "pass"
+
+
+@pytest.mark.parametrize("check", [ORIGINALS, HASHES])
+def test_non_string_source_identifier_is_an_error_not_a_skip(h, ctx, check):
+    src = ctx["source"]["ed_visits"].copy()
+    src["patient_hetu"] = [121285, HETUS[1], HETUS[2]]  # an int among strings
+    ctx = dict(ctx, source={"ed_visits": src})
+    rec = check.run(_clean(h), {}, ctx)
+    assert rec["status"] == "error", rec
+
+
+def test_empty_source_cells_are_still_skipped_not_errors(h, ctx):
+    src = ctx["source"]["ed_visits"].copy()
+    src["patient_name"] = [NAMES[0], None, float("nan")]
+    ctx = dict(ctx, source={"ed_visits": src})
+    assert ORIGINALS.run(_clean(h), {}, ctx)["status"] == "pass"

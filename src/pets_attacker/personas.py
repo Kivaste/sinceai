@@ -1,4 +1,4 @@
-﻿"""Two HEALTH-S1 attacker personas. Output is aggregate rates only.
+"""Two HEALTH-S1 attacker personas. Output is aggregate rates only.
 
 broker:  fuzzy-links adversary records (news, social posts, directory) to released QIs.
 insider: knows a target's ED visit date and municipality; looks for the visit.
@@ -38,6 +38,8 @@ class _World:
     """protected-row -> record/person, plus true sensitive values per person."""
 
     def __init__(self, protected, rowmap, identity, original, record_key, sensitive):
+        if identity.shape[1] < 2:
+            raise MappingError("identity truth needs record and person columns")
         id_map = dict(zip(identity.iloc[:, 0].astype(str), identity.iloc[:, 1].astype(str)))
         n = len(protected)
         if not {"protected_row", "original_record_id"} <= set(rowmap.columns):
