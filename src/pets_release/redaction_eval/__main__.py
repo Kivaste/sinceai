@@ -36,11 +36,13 @@ def main(argv=None) -> int:
     ap.add_argument("--out", default=None)
     ap.add_argument("--report-only", action="store_true",
                     help="measure and print without a floor; exits 0 and claims no pass")
+    ap.add_argument("--export-spot-check", action="store_true",
+                    help="also write spot_check.csv (raw turn text, local only) into --out; off by default")
     a = ap.parse_args(argv)
     frame, notes = load_frames(a.kit)
     factory, variants, info = _predictor(a.predictor, a.kit)
     rep = evaluate_frames(frame, notes, factory, precision_floor=a.precision_floor, out_dir=a.out,
-                          person_variants=variants, predictor_info=info)
+                          sheet_n=200 if a.export_spot_check else 0, person_variants=variants, predictor_info=info)
     print(json.dumps({"predictor": info, "split_mode": rep["split_mode"], "split": rep["split"],
                       "precision_floor": rep["precision_floor"], "headline": headline(rep),
                       "person_twice_held_out": rep["person_twice_held_out"],
