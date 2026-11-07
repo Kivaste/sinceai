@@ -81,14 +81,6 @@ output, measured privacy and utility, and scenario and limitations. The targets 
 keeps strict utility thresholds separate from allowed sacrifice floors. Missing scores
 are **not measured**, never assumed met.
 
-Add `--measured` to the launch command above to opt in to the slower production
-`python -m pets_release.measure.wire` path instead of plain `run`. View 4 then shows
-the measured privacy scorecard, utility and composite before/after, plus available
-attacker linkage rates. Both verification tiers still run. Plain mode keeps privacy
-honestly **not measured**. The measured release matches the CLI `measure.wire` bytes
-for the same inputs, key, creation time, plan and revision; private measurement
-scratch stays beside the release in `<release>.measure/`, never in the release.
-
 The protected-rows view shows the first 10 released rows per table (`--preview-rows N`,
 1–25). Every display re-runs limited verification on the release and an exact-byte
 snapshot, and checks manifest-listed file digests. No raw input, row maps, `truth/`,

@@ -4,7 +4,6 @@ from __future__ import annotations
 import io
 import json
 import os
-import re
 import subprocess
 import sys
 import time
@@ -272,22 +271,6 @@ def test_measured_mode_matches_wire_bytes_and_shows_privacy(tmp_path):
         assert proc.returncode == 0, "reference measured CLI failed"
         assert {p.name: p.read_bytes() for p in (out / "run-1").iterdir()} == {
             p.name: p.read_bytes() for p in reference.iterdir()}
-
-
-def test_measured_view_shows_all_scorecard_aggregates(tmp_path):
-    """HTTP + CLI seam: displayed before/after scores agree with real pets-eval, not purpose labels."""
-    with running(tmp_path, measured_kit=True, launch_extra=("--measured",)) as (_, url, _, out):
-        assert request(url, "/api/run", data={"scenario": "HEALTH-S1"})[0] == 202
-        assert result(url)["status"] == "RELEASED"
-        page = request(url, "/demo/measurements")[1]
-        summaries = [json.loads((out / "run-1.measure" / "scorecards" / path).read_text())["summary"]
-                     for path in ("before/kit-out/scorecard.json", "after/scorecard.json")]
-        for name in ("privacy", "utility", "composite"):
-            cells = re.search(rf'<tr><td>{name}</td><td>([^<]+)</td><td>([^<]+)</td></tr>', page).groups()
-            assert "not measured" not in cells, f"{name} aggregate is missing"
-            assert [float(cell) for cell in cells] == pytest.approx([s[name] for s in summaries], abs=1e-9)
-        assert "Privacy measurement: measured" in page
-        assert "Attacker linkage rates" in page
 
 
 def test_explicit_hand_plan_matches_cli_bytes(tmp_path):

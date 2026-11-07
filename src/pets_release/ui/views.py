@@ -1,8 +1,6 @@
 """Choose, aggregate proof and explicitly protected preview pages. No external assets."""
 from jinja2 import Environment, StrictUndefined
 
-from pets_release.measure.baselines import composite
-
 ENV = Environment(autoescape=True, undefined=StrictUndefined)
 DEMONSTRATIONS = {
     "risks": "Data types and privacy risks found", "pets": "PETs chosen and why",
@@ -140,10 +138,9 @@ DEMO = r'''
 {% for f in result.get('fieldJustifications', []) %}<tr><td>{{ f.table }}.{{ f.column }}</td><td>source {{ families.get(f.table ~ '.' ~ f.column, 'field') }}</td><td>{{ f.rung }}{% if f.outputColumn %} → {{ f.outputColumn }}{% endif %}</td><td>{{ f.reason }}</td></tr>{% else %}<tr><td colspan="4">No protected release available</td></tr>{% endfor %}</table></section>
 {% if result.status == 'RELEASED' %}<a class="button" data-route="/rows">Protected release rows (fresh verify required) →</a>{% endif %}
 {% elif item == 'measurements' %}
-<section class="card"><h2>pets-eval scorecard, before &amp; after</h2><p>Privacy measurement: {{ measured.get('privacy', {}).get('status', 'not_measured') | replace('_', ' ') }}</p><p>Summary reconstructed from the production manifest's measured task scores and risk components, rounded to the scorecard's four decimals. Utility is the mean scenario task score; composite is the weighted harmonic mean (30 privacy / 25 utility). Missing scores remain not measured.</p><table><tr><th>Score</th><th>Before</th><th>After</th></tr>
+<section class="card"><h2>pets-eval scorecard, before &amp; after</h2><p>The production manifest is the source. Missing scores remain not measured; purpose-check scores are not aggregate utility or composite.</p><table><tr><th>Score</th><th>Before</th><th>After</th></tr>
 {% for name in ['privacy', 'utility', 'composite'] %}{% set component = scorecard.get(name, {}) %}<tr><td>{{ name }}</td><td>{{ value(component.get('before')) }}</td><td>{{ value(component.get('after')) }}</td></tr>{% endfor %}</table>
 <h3>Measured risk components (including attacker rates when available)</h3><table><tr><th>Component</th><th>Before</th><th>After</th></tr>{% for component in measured.get('privacy', {}).get('components', []) %}<tr><td>{{ component.component }}</td><td>{{ value(component.before) }}</td><td>{{ value(component.after) }}</td></tr>{% else %}<tr><td colspan="3">not measured</td></tr>{% endfor %}</table>
-<h3>Attacker linkage rates</h3><table><tr><th>Component</th><th>Before</th><th>After</th></tr>{% for component in measured.get('privacy', {}).get('components', []) if component.component == 'linkage_reid' or (component.component.startswith('risk.') and 'linkage' in component.component) %}<tr><td>{{ component.component }}</td><td>{{ value(component.before) }}</td><td>{{ value(component.after) }}</td></tr>{% else %}<tr><td colspan="3">not measured</td></tr>{% endfor %}</table>
 <h3>Person-k after protection</h3>{% if result.get('personK') %}<pre>{{ result.personK | tojson(indent=2) }}</pre>{% else %}<p>not measured</p>{% endif %}
 <h3>Purpose-check scores</h3><table><tr><th>Check</th><th>Before</th><th>After</th><th>Status</th></tr>{% for task in measured.get('utility', {}).get('tasks', []) %}<tr><td>{{ task.task }}</td><td>{{ value(task.before) }}</td><td>{{ value(task.after) }}</td><td>{{ task.status }}</td></tr>{% else %}<tr><td colspan="4">not measured</td></tr>{% endfor %}</table></section>
 <section class="card wide"><h2>Targets met / not met</h2><p>Strict targets and allowed sacrifice floors are separate.</p><table><tr><th>Target</th><th>Threshold</th><th>Measured</th><th>Outcome</th></tr>{% for t in result.get('targets', []) %}<tr><td>{{ t.name }}</td><td>{{ t.threshold }}</td><td>{{ value(t.measured) }}</td><td>{{ t.status }}</td></tr>{% endfor %}</table></section>
@@ -160,23 +157,6 @@ def demonstration_page(result, item, banner=""):
     measured = result.get("measured", {})
     scorecard = {c["component"]: c for c in measured.get("privacy", {}).get("components", [])
                  if c["component"] in {"privacy", "utility", "composite"}}
-    # The closed measured manifest stores task scores, not utility/composite summary fields.
-    # Reconstruct the scorecard summary without reading private raw scorecard files.
-    required = policy.get("purposeChecks", [])
-    utility = measured.get("utility", {})
-    tasks = {t["task"]: t for t in utility.get("tasks", [])}
-    if (measured.get("privacy", {}).get("status") == utility.get("status") == "measured"
-            and required and all(t in tasks and tasks[t]["status"] == "ok" for t in required)):
-        for side in ("before", "after"):
-            scores = [t[side] for t in tasks.values()]
-            risks = [c[side] for c in measured["privacy"]["components"]
-                     if c["component"].startswith("risk.") and c[side] is not None]
-            if scores and all(s is not None for s in scores) and risks:
-                mean = sum(scores) / len(scores)
-                # Use unrounded privacy for the composite, just as pets-eval does.
-                privacy = 1 - (0.5 * max(risks) + 0.5 * sum(risks) / len(risks))
-                scorecard.setdefault("utility", {})[side] = round(mean, 4)
-                scorecard.setdefault("composite", {})[side] = round(composite(privacy, mean), 4)
     families = {f["table"] + "." + f["column"]: f["family"] for f in policy.get("floors", [])}
     content = ENV.from_string(DEMO).render(result=result, item=item, demonstrations=DEMONSTRATIONS,
                                          policy=policy, measured=measured, families=families,
