@@ -8,6 +8,7 @@ Rows (trigger -> result):
   a source value nested in lists of lists/maps -> fail
   enum item of column a that is a released value of a, at contract.files[t.csv].columns[a].params.values -> pass
   the same item under a column whose released cells do not hold it -> fail
+  the same item at a's params.values while a's form is not ``enum`` -> fail (Grok r1; passed at 19870a2)
   the same item in another params list of column a (not ``values``) -> fail
   an item of a's enum that is a source value but not a released value of a -> fail
   a column name at a structural path (inventory[].column, contract key) -> pass
@@ -82,8 +83,13 @@ def test_source_value_nested_in_lists_fails(tmp_path):
     assert _status(_rel(tmp_path, m), _source()) == ("fail", 1)
 
 
-def _enum(column: str, key: str, items: list) -> dict:
-    return {"contract": {"files": {"t.csv": {"columns": {column: {"form": "enum", "params": {key: items}}}}}}}
+def _enum(column: str, key: str, items: list, form: str = "enum") -> dict:
+    return {"contract": {"files": {"t.csv": {"columns": {column: {"form": form, "params": {key: items}}}}}}}
+
+
+def test_released_value_at_values_path_of_a_non_enum_column_fails(tmp_path):
+    """Grok r1: the exemption also needs the column's form to be ``enum``."""
+    assert _status(_rel(tmp_path, _enum("a", "values", ["alpha_cat"], form="text")), _source()) == ("fail", 1)
 
 
 def test_enum_item_released_in_its_own_column_passes(tmp_path):
