@@ -16,12 +16,19 @@ import importlib.util
 import os
 import re
 import shlex
+import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 README = ROOT / "README.md"
+ALLOWED_SKIP_REASONS = (
+    "environment-setup",
+    "sets-secret-placeholder-only",
+    "runs-the-whole-test-suite-recursively",
+)
 SUBCOMMANDS = ("run", "verify", "detect", "dashboard", "submission")
 MARKER = re.compile(r"<!--\s*docs-test:\s*(run|skip|pending)\b([^>]*?)-->")
 BLOCK = re.compile(r"(?:^(<!--.*?-->)[ \t]*\r?\n)?^```powershell[ \t]*\r?\n(.*?)^```", re.S | re.M)
@@ -90,7 +97,8 @@ def test_every_block_has_a_marker_with_named_reason():
         where = f"README block #{b['n']} (line {b['line']})"
         assert b["kind"], f"{where}: missing <!-- docs-test: ... --> marker"
         if b["kind"] == "skip":
-            assert re.fullmatch(r"reason=[a-z0-9-]+", b["arg"]), f"{where}: skip needs reason=<name>"
+            assert b["arg"].startswith("reason="), f"{where}: skip needs reason=<name>"
+            assert b["arg"][7:] in ALLOWED_SKIP_REASONS, f"{where}: skip reason not in allowlist"
         if b["kind"] == "pending":
             assert re.fullmatch(r"ticket=\d+", b["arg"]), f"{where}: pending needs ticket=NN"
 
@@ -105,12 +113,20 @@ def test_block(block, tmp_path):
     if block["kind"] == "pending":
         sub = next((s for s in SUBCOMMANDS if re.search(rf"\bpets-release\s+{s}\b", block["body"])), None)
         assert sub, f"block {block['n']}: pending block names no known subcommand"
-        note = " (subcommand now exists: promote to run)" if _subcommand_exists(sub) else ""
+        assert not _subcommand_exists(sub), (
+            f"README block #{block['n']}: pets-release {sub} is built; change its marker from pending to run"
+        )
+        note = ""
         _transcript(f"SKIP block {block['n']} (available after {block['arg']}, {sub}){note}: {first}")
         pytest.skip(f"not built yet: pets-release {sub} is available after {block['arg']}{note}")
 
     assert block["kind"] == "run", f"block {block['n']} has no marker"
     kit = conf.write_minikit(tmp_path / "kit")
+    # synthetic stand-in for the unlabelled `unseen` export, copied from the synthetic fixture
+    (kit / "data" / "unseen").mkdir()  # the real unseen export is one table
+    shutil.copy(ROOT / "tests" / "fixtures" / "minikit" / "health" / "ed_visits.csv", kit / "data" / "unseen")
+    out_root = tmp_path / "out"
+    shutil.copytree(ROOT / "tests" / "fixtures" / "manifest" / "release", out_root / "health-s1")
     env = conf.cli_env({"PETS_KIT": str(kit)})
     for stmt in _statements(block["body"]):
         m = re.fullmatch(r'\$env:(\w+)\s*=\s*"(.*)"', stmt)
@@ -118,10 +134,20 @@ def test_block(block, tmp_path):
             env[m.group(1)] = m.group(2)
             continue
         assert stmt.startswith("pets-release"), f"block {block['n']}: unrunnable statement {stmt!r}"
-        args = [a.strip('"') for a in shlex.split(_expand(stmt, env), posix=False)][1:]
+        stmt_x = _expand(stmt, env).replace("..\\sinceai-out\\", str(out_root) + os.sep)
+        args = [a.strip('"') for a in shlex.split(stmt_x, posix=False)][1:]
         for s in SUBCOMMANDS:
             if args and args[0] == s:
                 assert _subcommand_exists(s), f"run block uses unbuilt subcommand {s}"
         proc = conf.run_cli(*args, env=env)
         _transcript(f"$ {stmt}\nexit={proc.returncode}\n{proc.stdout[:600]}{proc.stderr[:300]}")
         assert proc.returncode == 0, f"{stmt!r} exited {proc.returncode}: {proc.stderr[:300]}"
+
+
+@pytest.mark.parametrize(
+    "path",
+    ["pets_submission/rowmap_x.csv", "rowmap_ed_visits.csv", "a/truth/x.csv", "Briefs/x", ".env"],
+)
+def test_sensitive_paths_are_gitignored(path):
+    r = subprocess.run(["git", "check-ignore", "-q", "--no-index", path], cwd=ROOT, check=False)
+    assert r.returncode == 0, f"{path} is not ignored by .gitignore (exit {r.returncode})"

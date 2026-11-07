@@ -51,9 +51,9 @@ The demo has three parts: HEALTH-S1 (ED visits to a university research group) i
 
 ### 1. Live detection on `unseen`
 
-<!-- docs-test: pending ticket=20 -->
+<!-- docs-test: run -->
 ```powershell
-pets-release detect unseen --out unseen_field_labels.csv --format unseen --kit "$env:PETS_KIT"
+pets-release detect unseen --out ..\sinceai-out\unseen_field_labels.csv --format unseen --kit "$env:PETS_KIT"
 ```
 
 ### 2. HEALTH-S1 release
@@ -106,7 +106,7 @@ Limitation: digests catch accidents only. Someone who edits a release can recomp
 
 A static HTML file rendered from the manifest alone. No network assets and no row values.
 
-<!-- docs-test: pending ticket=18 -->
+<!-- docs-test: run -->
 ```powershell
 pets-release dashboard ..\sinceai-out\health-s1 --out ..\sinceai-out\health-s1-dashboard.html
 ```
