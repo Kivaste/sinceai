@@ -20,33 +20,9 @@ Failure rows (trigger -> wrong result before the fix):
 """
 from __future__ import annotations
 
-import copy
-import dataclasses
 import json
 
 import pytest
-
-
-def _run(tmp_path, monkeypatch, alter):
-    """Run the CLI with the search log's entries passed through ``alter(entries) -> entries``."""
-    from run_helpers import TEST_KEY, build_kit, grouped_qis
-
-    from pets_release.cli import main
-    from pets_release.run import pipeline
-
-    monkeypatch.setenv("PETS_HMAC_KEY", TEST_KEY)
-    kit = build_kit(tmp_path / "kit", grouped_qis)
-    real = pipeline.search
-
-    def altered(*a, **k):
-        res = copy.deepcopy(real(*a, **k))
-        return dataclasses.replace(res, log=alter(res.log))
-
-    monkeypatch.setattr(pipeline, "search", altered)
-    out = tmp_path / "out" / "rel"
-    code = main(["run", "--scenario", "HEALTH-S1", "--kit", str(kit), "--out", str(out),
-                 "--created", "2026-11-07T00:00:00Z"])
-    return code, out
 
 
 def _edit(pick, change):
@@ -69,25 +45,24 @@ def _refused(code, out, capsys):
     assert not out.exists()
 
 
-def test_empty_risk_map_refuses(tmp_path, monkeypatch, capsys):
-    code, out = _run(tmp_path, monkeypatch, _edit(lambda e: e["step"] == 0, lambda e: dict(e, risk={})))
+def test_empty_risk_map_refuses(run_search_log, capsys):
+    code, out = run_search_log(_edit(lambda e: e["step"] == 0, lambda e: dict(e, risk={})))
     _refused(code, out, capsys)
 
 
 @pytest.mark.parametrize("risk", [None, False, True, "private-risk-marker", float("nan"), float("inf"), -float("inf")],
                          ids=["none", "false", "true", "string", "nan", "inf", "negative-inf"])
-def test_unmeasured_risk_component_refuses(tmp_path, monkeypatch, capsys, risk):
+def test_unmeasured_risk_component_refuses(run_search_log, capsys, risk):
     """Seam: CLI run. Unknown/non-finite risk -> refusal, never a measured release or value-bearing reason."""
-    code, out = _run(tmp_path, monkeypatch,
-                     _edit(lambda e: e["step"] == 0, lambda e: dict(e, risk={"component": risk})))
+    code, out = run_search_log(_edit(lambda e: e["step"] == 0, lambda e: dict(e, risk={"component": risk})))
     captured = capsys.readouterr()
     assert code == 2, captured.err
     assert captured.err == "pets-release run: measured.search: a search step has no measured risk\n"
     assert not out.exists()
 
 
-def test_empty_score_map_refuses(tmp_path, monkeypatch, capsys):
-    code, out = _run(tmp_path, monkeypatch, _edit(lambda e: not e["accepted"], lambda e: dict(e, scores={})))
+def test_empty_score_map_refuses(run_search_log, capsys):
+    code, out = run_search_log(_edit(lambda e: not e["accepted"], lambda e: dict(e, scores={})))
     _refused(code, out, capsys)
 
 
@@ -95,13 +70,12 @@ def test_empty_score_map_refuses(tmp_path, monkeypatch, capsys):
                                          ("0.5", False), (float("nan"), False), (float("inf"), False),
                                          (-float("inf"), False), (False, True)],
                          ids=["false", "true", "string", "numeric-string", "nan", "inf", "negative-inf", "mixed-missing"])
-def test_rejected_non_numeric_score_refuses(tmp_path, monkeypatch, capsys, score, missing):
+def test_rejected_non_numeric_score_refuses(run_search_log, capsys, score, missing):
     """Seam: CLI run. Rejected candidates must validate present scores, including alongside unknown scores."""
     scores = {"check": score}
     if missing:
         scores["unscored"] = None
-    code, out = _run(tmp_path, monkeypatch,
-                     _edit(lambda e: not e["accepted"], lambda e: dict(e, scores=scores)))
+    code, out = run_search_log(_edit(lambda e: not e["accepted"], lambda e: dict(e, scores=scores)))
     captured = capsys.readouterr()
     assert code == 2, captured.err
     assert captured.err == "pets-release run: measured.search: a search step has a non-numeric purpose score\n"
@@ -113,12 +87,12 @@ def _drop_one_score(e):
     return dict(e, scores={**e["scores"], first: None})
 
 
-def test_accepted_step_with_missing_score_refuses(tmp_path, monkeypatch, capsys):
-    code, out = _run(tmp_path, monkeypatch, _edit(lambda e: e["accepted"], _drop_one_score))
+def test_accepted_step_with_missing_score_refuses(run_search_log, capsys):
+    code, out = run_search_log(_edit(lambda e: e["accepted"], _drop_one_score))
     _refused(code, out, capsys)
 
 
-def _rejected_unscored(tmp_path, monkeypatch):
+def _rejected_unscored(run_search_log):
     """Release whose first rejected step has one unscored check; returns (exit code, out, that step)."""
     picked = {}
 
@@ -127,12 +101,12 @@ def _rejected_unscored(tmp_path, monkeypatch):
         picked["step"] = e["step"]
         return e
 
-    code, out = _run(tmp_path, monkeypatch, _edit(lambda e: not e["accepted"], change))
+    code, out = run_search_log(_edit(lambda e: not e["accepted"], change))
     return code, out, picked["step"]
 
 
-def test_rejected_unscored_candidate_is_null(tmp_path, monkeypatch, capsys):
-    code, out, step = _rejected_unscored(tmp_path, monkeypatch)
+def test_rejected_unscored_candidate_is_null(run_search_log, capsys):
+    code, out, step = _rejected_unscored(run_search_log)
     assert code == 0, capsys.readouterr().err
     s = json.loads((out / "privacy_manifest.json").read_text(encoding="utf-8"))["measured"]["search"]
     assert s["status"] == "measured"
@@ -145,14 +119,14 @@ def test_rejected_unscored_candidate_is_null(tmp_path, monkeypatch, capsys):
     assert all(isinstance(p["utility"], float) for p in s["points"] if p["step"] not in unscored)
 
 
-def test_dashboard_leaves_unscored_candidates_off_the_chart(tmp_path, monkeypatch, capsys):
+def test_dashboard_leaves_unscored_candidates_off_the_chart(tmp_path, run_search_log, capsys):
     """Seam: `pets-release dashboard` on the released folder. An unscored candidate is not plotted (it would
     otherwise sit at utility 0); every scored candidate is."""
     import re
 
     from pets_release.cli import main
 
-    code, out, _ = _rejected_unscored(tmp_path, monkeypatch)
+    code, out, _ = _rejected_unscored(run_search_log)
     assert code == 0, capsys.readouterr().err
     pts = json.loads((out / "privacy_manifest.json").read_text(encoding="utf-8"))["measured"]["search"]["points"]
     html_path = tmp_path / "dash" / "dashboard.html"

@@ -1,6 +1,8 @@
 """Run-command fixtures (synthetic rows only)."""
 from __future__ import annotations
 
+import copy
+import dataclasses
 import sys
 from pathlib import Path
 
@@ -8,7 +10,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from run_helpers import build_kit, cli, coarse_qis, run_args
+from run_helpers import TEST_KEY, build_kit, cli, coarse_qis, grouped_qis, run_args
 
 from pets_release.verify import current_tool_revision
 
@@ -48,3 +50,27 @@ def released(tmp_path_factory, session_tool_revision):
     out = base / "out" / "rel"
     proc = cli(*run_args(kit, out))
     return kit, out, proc
+
+
+@pytest.fixture
+def run_search_log(tmp_path, monkeypatch):
+    """CLI run on a synthetic kit, altering only the returned search log; assertions stay in the tests."""
+    from pets_release.cli import main
+    from pets_release.run import pipeline
+
+    monkeypatch.setenv("PETS_HMAC_KEY", TEST_KEY)
+    kit = build_kit(tmp_path / "kit", grouped_qis)
+    real = pipeline.search
+
+    def run(alter):
+        def altered(*a, **k):
+            res = copy.deepcopy(real(*a, **k))
+            return dataclasses.replace(res, log=alter(res.log))
+
+        monkeypatch.setattr(pipeline, "search", altered)
+        out = tmp_path / "out" / "rel"
+        code = main(["run", "--scenario", "HEALTH-S1", "--kit", str(kit), "--out", str(out),
+                     "--created", "2026-11-07T00:00:00Z"])
+        return code, out
+
+    return run

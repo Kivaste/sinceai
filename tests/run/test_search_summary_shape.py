@@ -14,33 +14,17 @@ Failure rows (trigger -> wrong result before the fix):
 """
 from __future__ import annotations
 
-import copy
-import dataclasses
 import json
 
 PLANTED = 0.4111111111111111  # its repr's digits form a Luhn-valid 16-digit card-shaped run
 
 
-def test_long_float_risk_is_released_rounded(tmp_path, monkeypatch):
-    from run_helpers import TEST_KEY, build_kit, grouped_qis
+def test_long_float_risk_is_released_rounded(run_search_log):
+    def alter(log):
+        return [dict(e, risk={c: PLANTED for c in e["risk"]}) if e["step"] != "final" and e["risk"] else e
+                for e in log]
 
-    from pets_release.cli import main
-    from pets_release.run import pipeline
-
-    monkeypatch.setenv("PETS_HMAC_KEY", TEST_KEY)
-    kit = build_kit(tmp_path / "kit", grouped_qis)
-    real = pipeline.search
-
-    def altered(*a, **k):
-        res = copy.deepcopy(real(*a, **k))
-        log = [dict(e, risk={c: PLANTED for c in e["risk"]}) if e["step"] != "final" and e["risk"] else e
-               for e in res.log]
-        return dataclasses.replace(res, log=log)
-
-    monkeypatch.setattr(pipeline, "search", altered)
-    out = tmp_path / "out" / "rel"
-    code = main(["run", "--scenario", "HEALTH-S1", "--kit", str(kit), "--out", str(out),
-                 "--created", "2026-11-07T00:00:00Z"])
+    code, out = run_search_log(alter)
     assert code == 0
     pts = json.loads((out / "privacy_manifest.json").read_text(encoding="utf-8"))["measured"]["search"]["points"]
     assert any(p["risk"] == round(PLANTED, 6) for p in pts)
