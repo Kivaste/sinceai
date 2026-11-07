@@ -47,8 +47,9 @@ from pets_release.writer.core import (
     WriteResult,
     load_lineage,
     scoring_dir,
+    table_bytes,
     write_release,
 )
 
 __all__ = ["Candidate", "Lineage", "ProtectedTable", "WriteResult", "WriterError", "load_lineage", "scoring_dir",
-           "write_release"]
+           "table_bytes", "write_release"]

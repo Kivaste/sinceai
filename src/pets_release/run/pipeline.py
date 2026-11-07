@@ -7,6 +7,7 @@ contract (10) -> full re-check of every purpose check (``run.purpose``; failing 
 """
 from __future__ import annotations
 
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -27,7 +28,7 @@ from pets_release.run.ksets import measure_sets
 from pets_release.run.narrative import build_narrative
 from pets_release.run.purpose import evaluate as evaluate_purpose
 from pets_release.run.suppress import apply_suppression
-from pets_release.writer import Candidate, ProtectedTable, scoring_dir, write_release
+from pets_release.writer import Candidate, ProtectedTable, scoring_dir, table_bytes, write_release
 
 SUPPRESSION_REPORT = "suppression_report.json"
 PERSON_K_REPORT = "person_k_report.json"
@@ -329,7 +330,13 @@ def run_release(*, kit, scenario: dict, created: str, key_text: str, out, plan_n
             raise RunError(str(e)) from None
         extra = {SEARCH_LOG: search_log_bytes(found.log)}
     # #146 (D58): per-person k on the scenario's QIs and on every kept catalogued QI, before and after suppression
-    k_sets = measure_sets(policy, plan, contract, source=source, master=master, scope_id=rsid, recipient=recipient)
+    # ``released`` is measured on the exact bytes the writer publishes, with row maps derived from those tables
+    # (gate_ctx; checked against lineage above); verify --full measures the published files the same way.
+    with tempfile.TemporaryDirectory(prefix="pets-ksets-released-") as td:
+        for t in tables:
+            (Path(td) / t.name).write_bytes(table_bytes(t))
+        k_sets = measure_sets(policy, plan, contract, source=source, master=master, scope_id=rsid,
+                              recipient=recipient, released_dir=Path(td), released_ctx=gate_ctx)
     narrative = build_narrative(policy=policy, plan=plan, scenario_ids=[s["id"] for s in kit.scenarios()],
                                 suppression=sup, k=contract["k"], purpose=purpose, search=search_info,
                                 rung_steps=steps, k_sets=k_sets)

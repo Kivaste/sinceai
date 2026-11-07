@@ -177,13 +177,15 @@ K_SET_TITLES = {"scenario": "Scenario QIs (the scenario's suggested set, as rele
 def _k_sets(m: dict) -> dict:
     """#146: per-person k on both QI sets and the withheld catalogued QIs (``measured.kSets``)."""
     b = Block("measured.kSets", _get(m, "measured", "kSets"))
-    out: dict[str, Any] = {"blocks": [b], "k": None, "sets": [], "withheld": []}
+    out: dict[str, Any] = {"blocks": [b], "k": None, "sets": [], "withheld": [], "coincide": False}
     if b.ok:
         out["k"] = b.value.get("k")
         out["sets"] = [{**s, "title": K_SET_TITLES.get(s["set"], s["set"]),
                         "qi_text": ", ".join(f"{q['table']}.{q['column']}" for q in s.get("qi", []))}
                        for s in b.value.get("sets", [])]
         out["withheld"] = sorted(b.value.get("withheld", []), key=lambda w: (w["table"], w["column"]))
+        qsets = [tuple(sorted(s["qi_text"].split(", "))) for s in out["sets"] if s.get("status") == "measured"]
+        out["coincide"] = len(qsets) == 2 and qsets[0] == qsets[1]
         for s in out["sets"]:  # a set that is not measured is never shown as complete
             if s.get("status") != "measured":
                 out["blocks"].append(Block(f"measured.kSets.{s['set']}", {"status": "not_measured",
