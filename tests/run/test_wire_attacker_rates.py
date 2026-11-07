@@ -111,6 +111,12 @@ def test_plain_run_names_the_measured_run_instead_of_a_closed_ticket(attack_kit)
     assert "measure.wire" in risks["linkage-attackers"]["rate"]["reason"]
 
 
+def _attacker_measured(r) -> bool:
+    """A measured rate that came from the attacker child (#143's person-k entry is also kind linkage but is the
+    measurer's own count, measured without any attacker run; #139's red-team entries are attacker-sourced)."""
+    return r["rate"]["status"] == "measured" and r["rate"]["source"].startswith("pets_attacker")
+
+
 def _extra_entry_key(entry):
     entry["rows"] = ["planted"]
 
@@ -146,7 +152,7 @@ def test_bridge_output_with_unknown_keys_never_reaches_the_manifest(attack_kit, 
     risks = _risks(out)
     assert risks["linkage-attackers"]["rate"]["status"] == "not_measured"
     assert "malformed" in risks["linkage-attackers"]["rate"]["reason"]
-    assert not any(r["kind"] == "linkage" and r["rate"]["status"] == "measured" for r in risks.values())
+    assert not any(_attacker_measured(r) for r in risks.values())
     assert "planted" not in (out / MANIFEST_FILENAME).read_text(encoding="utf-8")
 
 
@@ -157,5 +163,5 @@ def test_attacker_that_cannot_run_is_recorded_as_not_measured_with_a_current_rea
     risks = _risks(out)
     rate = risks["linkage-attackers"]["rate"]
     assert rate["status"] == "not_measured" and "attacker run failed" in rate["reason"]
-    assert not any(r["kind"] == "linkage" and r["rate"]["status"] == "measured" for r in risks.values())
+    assert not any(_attacker_measured(r) for r in risks.values())
     assert not any(STALE in r["rate"].get("reason", "") for r in risks.values())
