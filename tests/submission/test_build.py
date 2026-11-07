@@ -321,6 +321,21 @@ def test_refuses_key_material_hidden_by_json_escaping(tmp_path):
         scan_key_material(root, MASTER)
 
 
+@pytest.mark.parametrize("suffix", [".json", ".jsonl"])
+def test_refuses_key_material_hidden_in_a_discarded_duplicate_key(tmp_path, suffix):
+    """#131: a last-wins parse drops the first value of a duplicate key; the scan must still see every value."""
+    import json
+
+    from pets_release.submission import SubmissionRefused as R
+    from pets_release.submission.guards import scan_key_material
+    root = tmp_path / "t"
+    root.mkdir()
+    hidden = json.dumps(TEST_KEY[:9] + '"' + TEST_KEY[9:])  # escaped: the raw bytes do not hold the key
+    (root / f"a{suffix}").write_text('{"record_id": ' + hidden + ', "record_id": "x"}\n', encoding="utf-8")
+    with pytest.raises(R):
+        scan_key_material(root, MASTER)
+
+
 def test_refuses_key_material_in_the_scoring_folder(world, tmp_path):
     class Leaky(FakeScorecard):
         def __call__(self, *a, **k):

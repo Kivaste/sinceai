@@ -103,7 +103,8 @@ def _gold_spans(kit, line_for):
     import pandas as pd
 
     (kit / "metadata" / "field_catalog.csv").write_text(CATALOG + FREE_TEXT, encoding="utf-8")
-    vid = pd.read_csv(kit / "data" / "health" / "ed_visits.csv", dtype=str, nrows=1)["visit_id"].iloc[0]
+    vid = pd.read_csv(kit / "data" / "health" / "ed_visits.csv", dtype=str, keep_default_na=False, na_filter=False,
+                      nrows=1)["visit_id"].iloc[0]
     d = kit / "metadata" / "pii_spans"
     d.mkdir()
     (d / "health__ed_visits__chief_complaint.jsonl").write_text(line_for(json.dumps(vid)) + "\n", encoding="utf-8")
@@ -154,6 +155,8 @@ RAW_JSON_ALLOWED = {
     "pets_release/manifest/canonical.py": 1,    # the strict loader itself
     "pets_release/minimiser/search.py": 3,      # re-parses its own canonical() bytes (no duplicates, no NaN)
     "pets_release/redaction_eval/frame.py": 1,  # offline redaction metric harness; not a release/verify/measure path
+    "pets_release/llm/draft.py": 1,             # already strict: own duplicate-key and non-finite hooks (DraftRejected)
+    "pets_release/submission/guards.py": 1,     # key scanner: keeps every duplicate pair (tests/submission/test_build.py)
 }
 
 

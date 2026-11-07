@@ -191,7 +191,8 @@ def _decoded_strings(p: Path, data: bytes):
             if not line.strip():
                 continue
             try:
-                yield from _strings(json.loads(line))
+                # #131: every (key, value) pair, duplicates included; a last-wins dict would hide a value
+                yield from _strings(json.loads(line, object_pairs_hook=lambda pairs: [list(p) for p in pairs]))
             except ValueError:
                 yield line
     else:
