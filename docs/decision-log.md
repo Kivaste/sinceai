@@ -890,3 +890,37 @@ CS-S1 chain done-report + 4 reviews (23 + #53/#54/#56/#92) -> merge -> #63 -> 25
   - #116 and #80: done-reports in progress.
   - #125/#126: close needs a human decision.
   - #106: final person-k is measured (minK 5, suppression 0.09942) but not yet merged.
+
+### Sat 18:15 - Sun 01:15 - D57-D66; trains 28-44; must tier landed except #157
+
+- **Decisions (human, via the planning session; full text in docs/decisions.md):**
+  - D61-D63: fast and slow train tiers run concurrently; merge as soon as approved; scope triage, with must, should and future tiers; #139 timebox 22:00.
+  - D64: attribute-lift bound (#157), with fallback disclosure.
+  - D65 (21:30): demo freeze 00:00; overnight lane 00:00-06:00; release-logic changes overnight need a human go.
+  - D66 (23:58): #157 may slip past 00:00; deadline and final cut 06:30; the demo pin waits for #157.
+  - #157 bound (23:00): per-attribute; ed_visits.los_minutes max_lift 2.0; icd10_primary unbounded and disclosed as a measured residual.
+  - #148 masking cost: merged on the 21:52 steer, disclosed in the index (masked eval turns 198 -> 1447; identifying F2 0.59 -> 0.41).
+- **Integration trains (sha, contents):**
+  - 28-32: df79ec2 .. 23fba6b.
+  - 33: red (fu110 broke the fu85 scorer-isolation audit) -> fixed via the strict_json leaf module.
+  - 34: 7225aa5 (#103 pre-fill only; #146 pulled: exact measured-key test).
+  - 35: 1e64174 (fu110 #110/#113/#131, #147; #138/#143 pulled on a docs conflict).
+  - 36: red in combination (#149 manifest scan x #146 kSets names) -> #149 r3 exact name paths.
+  - 37: 02eaace (#151).
+  - 38: ee888b4 (#148).
+  - 39: red (#138 boundary.py id() vs #148 identity-cache guard) -> #138 r7 AST-node keys.
+  - 40: 3316382 (#149 + #146; measured gate 42/42, 0 scan hits, kSets min k 5 on both sets).
+  - 41: 007eb29 (#138, #143, #139; measured 42/42, 0 scan hits over 35 residualRisks).
+  - 42: no-push integration check of #157 46b09db (all green).
+  - 43: cb58851 (#155 protected half).
+  - 44: conflict (#157 r3 vs #146/#138 in narrative, pipeline, verify core) -> #157 r4 merging integration.
+- **Main tooling:** 4d3246a (#153 A per-file affected mapping); c769e6f (brief D66); 77bbbdd (release-evidence.ps1, the standard #124-format evidence script).
+- **Closed:** #153 (gate PASS). Merged but open (close evidence regenerates on the final tip with release-evidence.ps1): #110, #113, #131, #138, #139, #143, #146, #147, #148, #149, #150, #151, #154, #155, #103 pre-fill.
+- **Defect classes found twice, now automated:** id()-keyed caches (#149, #148) -> tests/policy/test_identity_caches.py; cross-ticket manifest-scan false positives -> measured real-kit release run in every train touching the manifest.
+- **Incidents:**
+  - 18:59: #139 truncated the main checkout's linkage.py through a relative-path write; restored from HEAD; absolute paths since.
+  - A server restart interrupted measured runs in trains 40/41 and the #157 r2 run; each was re-run from the start.
+  - affected-tests.ps1 errors when git prints an LF/CRLF warning to stderr (NativeCommandError); seen twice; tooling follow-up.
+- **Held for a human go (release logic):** #127 parallel search (no speed-up shown: 521 s at w1 vs 583 s at w8 on a shared CPU), #141, #142, #155 risks half (needs the writer to record detector evidence). #144 not reproduced at 007eb29 -> watch-only.
+- **Story numbers (aggregates):** red team 0 unique re-identifications; kSets released min k 5, 0 below k on both QI sets; k with diagnosis known 73.6% of persons below k=5 (#143); los lift 2.92 -> 1.69 under bound 2.0, icd10 lift 2.14 disclosed; gate 42 checks.
+- **Evidence:** C:\Users\kivas\AI\sinceai-out\train3x\ .. train43\, fu*-<sha>\ run folders, heartbeat records.
