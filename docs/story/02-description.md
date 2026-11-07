@@ -1,43 +1,48 @@
 ﻿# Submission description
 
-Character count: 4836 of 5,000 (with placeholders unrendered; re-count after Part B fills the numbers, a rendered number is shorter than its placeholder, so the limit holds).
-First two paragraphs are written to work alone for voters. Terms follow GLOSSARY.md. Numbers are double-brace placeholders, see 06-numbers-to-fill.md.
+Character count: 4933 of 5,000, counting the body below including all conditional blocks and unrendered placeholders. Rendered numbers are shorter than placeholders.
+True for the current build when every conditional block is removed. A block is kept only once its enabling ticket has merged and the claim is verified (see the claims checklist in 06). Strip the HTML comment markers before submitting. The first two paragraphs work alone for voters.
 
 ---
 
-Share data with a recipient without over-sharing: pets-release releases only what the stated purpose needs, then proves it with checks anyone can re-run offline.
+Share data with a recipient without over-sharing: pets-release releases only the fields a stated purpose needs, then ships checks anyone can re-run offline.
 
-Most "anonymised" data is a claim. Ours is a release plus a privacy manifest where every statement is a named check that ran on the actual files, with the number of cells scanned and the hits found.
+Most "anonymised" data is a claim. Ours is a release plus a privacy manifest where every statement names a check that ran on the actual files, with the cells scanned and the hits found.
 
 ## The problem
 
-A data controller has to share data for a purpose: a hospital with a research group, a contact centre with an LLM vendor. Removing names is not enough. Blanket k-anonymity keeps only {{measured.baselines.B2-k.utility_mean}} of the mean utility on HEALTH-S1 and some analyses drop to zero.
+A data controller must share data for a purpose: a hospital with a research group, a contact centre with an LLM vendor. Removing names is not enough, and an "anonymised" claim cannot be re-checked.
+<!-- IF #23 measured numbers -->Blanket k-anonymity (B2-k) scores {{measured.baselines.B2-k.utility}} utility on HEALTH-S1.<!-- END IF -->
 
 ## Purpose first
 
-We start from the data request, not the data. The scenario's required analyses (the purpose checks) decide each field's level of detail: the coarsest level at which every purpose check still passes. Fields no purpose check needs are withheld. Each field has a stated reason in the manifest.
+We start from the data request. The scenario's required analyses (purpose checks) decide which fields are released and at what detail; fields no purpose check needs are withheld. Today a hand-written plan per scenario picks the levels, and the manifest records a reason for every field.
+<!-- IF #26 search merged -->A measured search over detail ladders then picks the coarsest level at which every purpose check still passes.<!-- END IF -->
 
 ## Four patterns
 
-1. Keyed pseudonyms. Identifiers become HMAC-SHA256 tokens under a secret key, so joins survive inside a release but the scorecard's hash-reversal attack recovers nothing. In free text, typed placeholders such as [PERSON_1] stay consistent within one conversation.
-2. Fail-closed gate. Every scenario has a closed contract: allowed files, columns and value forms. An independent rescan, a check for surviving original values and a per-person k check run on the candidate release. Any high-severity hit, error or check that did not run means exit 1 and nothing is published. Refusal reports give counts and labels, never values.
-3. Privacy manifest. The format can only hold the literal false for each assertion, for example paymentCards or nationalIds. Each assertion is bound to a named check, with its version, denominator and hit count. Claims are per label; we never claim "no identifiers remain". Risks that cannot be zero are listed as residual risks with rates. The manifest is HMAC-signed.
-4. Fully offline. No network and no cloud model; sockets are blocked at start-up and the same input, key and creation time give a byte-identical release. We never send data to an AI service to protect it from one.
+1. Keyed pseudonyms. Identifiers become HMAC-SHA256 tokens under a secret key, so joins inside a release survive.
+<!-- IF #29 recipient keys -->Keys can be scoped per recipient, so two recipients cannot join their copies.<!-- END IF -->
+2. Fail-closed gate. A closed contract lists allowed files, columns and value forms. An independent rescan, a check for surviving original values and a per-person k check run on the candidate release. A hit, an error or a check that did not run means exit 1 and nothing is published. Refusal reports give counts and labels, never values.
+3. Privacy manifest. Each assertion, for example paymentCards or nationalIds, can only hold the literal false and is bound to a named check with version, denominator and hits. Claims are per label; we never claim "no identifiers remain". Risks that cannot be zero are listed as residual risks. The manifest is HMAC-signed.
+4. Fully offline. No network, no cloud model; sockets are blocked at start-up. The same input, key and creation time give a byte-identical release.
 
-Verification has two tiers. `pets-release verify <release>` lets the recipient re-run every release-derivable check and always reports "VERIFIED (limited)". `verify --full` with the kit and key re-runs everything, including the signature; a check that cannot run is a failure.
+Verification has two tiers. `pets-release verify <release>` lets the recipient re-run the release-derivable checks and always says "VERIFIED (limited)". `verify --full` with the kit and key re-runs everything, including the signature; a check that cannot run is a failure.
 
-## Two scenarios
+## Scenario HEALTH-S1 (lead)
 
-HEALTH-S1 (lead): emergency-department visits to a university research group studying crowding and revisits. Names and clinical notes are withheld; age becomes a 5-year band, arrival time month and hour, the visit id a keyed pseudonym. {{inventory.count}} columns were classified, {{fieldJustifications.released.count}} released, {{fieldJustifications.withheld.count}} withheld. Required analyses keep their scores: H-U2 {{measured.utility.after.H-U2}}, H-U4 {{measured.utility.after.H-U4}}, H-U6 {{measured.utility.after.H-U6}}, H-U7 {{measured.utility.after.H-U7}}, H-U8 {{measured.utility.after.H-U8}} (1.0 = same answer as the original). Singling-out falls from {{measured.privacy.before.singling_out}} to {{measured.privacy.after.singling_out}}; the share of rows with k below 5 from {{measured.privacy.before.k_below_5_share}} to {{measured.privacy.after.k_below_5_share}}.
+Emergency-department visits go to a university research group studying crowding and revisits. Patient names and clinical notes are withheld; age is released in 10-year bands, arrival time as hour of day, the visit id as a keyed pseudonym. {{inventory.count}} columns were classified: {{fieldJustifications.released.count}} released, {{fieldJustifications.withheld.count}} withheld. Per-person k is checked over every released quasi-identifier.
+<!-- IF #23 measured numbers -->Required analyses after release (1.0 = same answer as the original): H-U2 {{measured.utility.after.H-U2}}, H-U4 {{measured.utility.after.H-U4}}, H-U6 {{measured.utility.after.H-U6}}, H-U7 {{measured.utility.after.H-U7}}, H-U8 {{measured.utility.after.H-U8}}. Scorecard privacy score {{measured.privacy.before.summary.privacy}} before, {{measured.privacy.after.summary.privacy}} after; share of persons below k {{measured.privacy.after.person_k.below_k_share}}.<!-- END IF -->
 
-CS-S1: contact-centre transcripts going to an external LLM vendor. Spoken ID numbers, card numbers, secrets and health remarks are redacted; people become consistent placeholders. We report exact-match precision and recall per label (not the scorer's overlap match). Recall on NATIONAL_ID {{measured.redaction.labels.NATIONAL_ID.recall}}, PAYMENT_CARD {{measured.redaction.labels.PAYMENT_CARD.recall}}, IBAN {{measured.redaction.labels.IBAN.recall}}, SECRET {{measured.redaction.labels.SECRET.recall}}; free-text leakage {{measured.redaction.summary.leakage_after}} against {{measured.redaction.summary.leakage_before}} before.
+<!-- IF #24 CS-S1 release -->## Scenario CS-S1 (free text)
+
+Contact-centre transcripts go to an external LLM vendor. Spoken ID numbers, cards, secrets and health remarks are redacted; people become consistent placeholders such as [PERSON_1] within one conversation. We report exact-match recall per label, not the scorer's overlap match: NATIONAL_ID {{measured.redaction.labels.NATIONAL_ID.recall}}, PAYMENT_CARD {{measured.redaction.labels.PAYMENT_CARD.recall}}, IBAN {{measured.redaction.labels.IBAN.recall}}, SECRET {{measured.redaction.labels.SECRET.recall}}.<!-- END IF -->
 
 ## Honest limitations
 
-Pseudonymised data is still personal data, and whoever holds the key can re-link it. We do not claim anonymity. The data is synthetic and templated; real speech is messier. Names outside our gazetteers and indirect health remarks can survive in text; PERSON, ADDRESS and LOCATION are residual risks with measured recall, not assertions. The gate checks the form of the output; attack resistance is measured against the kit's attackers, not proven in general. Recipient-mode digests catch accidents only; only `verify --full` checks the signature. Languages: Finnish, Swedish, English.
+Pseudonymised data is still personal data, and whoever holds the key can re-link it. We do not claim anonymity. The data is synthetic and templated; real speech is messier. Recipient-mode digests catch accidents only; only `verify --full` checks the signature. The gate checks the form of the output; attack resistance is measured against the kit's attackers, not proven in general. A residual-risk entry reads "not measured" until a measurement exists.
+<!-- IF #24 CS-S1 release -->Names outside our gazetteers and indirect health remarks can survive in text; PERSON, ADDRESS and LOCATION are residual risks, not assertions.<!-- END IF -->
 
 ## What is next
 
-An optional LLM front end that turns a data request into a needs spec, seeing only the request text and the data dictionary, never data values. More scenarios through the same gate and manifest.
-
-
+An optional LLM front end that turns a request into a needs spec, seeing only the request text and the data dictionary, never data values. More scenarios through the same gate and manifest.
