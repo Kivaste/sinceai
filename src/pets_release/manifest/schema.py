@@ -159,7 +159,7 @@ _MEASURED = _obj({
         "accepted": {"type": "integer", "minimum": 0},
         "boundReached": {"type": "boolean"},
         "points": _arr(_obj({"step": {"type": "integer", "minimum": 0}, "risk": {"type": "number"},
-                             "utility": {"type": "number"}, "accepted": {"type": "boolean"}})),
+                             "utility": _SCORE, "accepted": {"type": "boolean"}})),  # null: unscored (#133)
     }),
     "baselines": _measured({"rows": _arr(_obj({
         "baseline": _ref("id"), "metric": _ref("id"), "value": _SCORE,

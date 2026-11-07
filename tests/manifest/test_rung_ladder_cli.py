@@ -61,7 +61,7 @@ def _cs_manifest(m, *, turn_id_rung="id.pseudonym", turn_id_form="hex64"):
           "denominator": {"unit": "turns", "n": 40}, "hits": 0}
     m["exportAssertions"]["healthInText"] = False
     m["assertionEvidence"]["healthInText"] = ev
-    m["gate"]["checks"] = sorted([c for c in m["gate"]["checks"] if c["check"] != old] + [dict(ev)],
+    m["gate"]["checks"] = sorted([c for c in m["gate"]["checks"] if c["check"] not in (old, ev["check"])] + [dict(ev)],
                                  key=lambda c: c["check"])
     m["bindings"]["checkVersions"] = {c["check"]: c["version"] for c in m["gate"]["checks"]}
     m["bindings"]["lexiconDigests"] = {"health-lexicon": "a" * 64}
@@ -71,7 +71,7 @@ def _cs_manifest(m, *, turn_id_rung="id.pseudonym", turn_id_form="hex64"):
     tokens = [{"table": "turns", "column": "turn_id", "scope": "release"}] if turn_id_rung == "id.pseudonym" else []
     m["contract"] = {
         "files": {
-            "conversations.csv": {"columns": {"intent": {"form": "^[a-z_]{1,32}$", "params": {"rung": "keep"}}},
+            "conversations.csv": {"columns": {"intent": {"form": "text", "params": {"rung": "keep"}}},
                                   "required": ["intent"]},
             "turns.csv": {"columns": {"turn_id": {"form": turn_id_form,
                                                   "params": {"nullable": True, "rung": turn_id_rung}}},

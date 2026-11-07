@@ -21,6 +21,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parents[2] / "src"))
 
+from pets_release.checks.text import LEXICON_NAME, lexicon_digest  # #132: text columns bind it
 from pets_release.ladders import CONTRACT_FORMS  # #109: every released column carries its rung's form
 from pets_release.manifest import (
     MANIFEST_FILENAME,
@@ -142,10 +143,12 @@ EXTRA_GATE = [
     _ev("release.token-hex64", "release", "cells", 130),
     _ev("producer.row-k", "release", "rows", 10),
     _ev("producer.original-values", "producer", "cells", 130),
+    _ev("text.health", "release", "turns", 60),  # #132: 6 text-form columns x 10 rows
 ]
 
-# Rungs whose contract form is a validator ID (keep/geo.topn: text, id.pseudonym: hex64, num.round: decimal) may
-# declare a narrower anchored regex; regex-form rungs (timestamp, age, icd) carry exactly their rung's form (#109).
+# Rungs whose contract form is hex64 (id.pseudonym) or decimal (num.round) may declare a narrower regex the manifest
+# validator lists as proven; text-backed rungs (keep, geo.topn) carry exactly ``text`` (#132), and regex-form rungs
+# (timestamp, age, icd) exactly their rung's form (#109).
 SHA = "^[0-9a-f]{64}$"
 
 
@@ -159,10 +162,10 @@ def contract() -> dict:
                     "age_band": {"form": CONTRACT_FORMS["age.band5"], "params": {"bandYears": 5, "rung": "age.band5"}},
                     "arrival_ts": {"form": CONTRACT_FORMS["ts.month_hour"], "params": {"rung": "ts.month_hour"}},
                     "icd10_primary": {"form": CONTRACT_FORMS["icd.3"], "params": {"rung": "icd.3"}},
-                    "municipality": {"form": "^(Municipality-[A-Z]|other)$", "params": {"rung": "geo.topn", "topN": 8}},
-                    "readmit_30d": {"form": "^[01]$", "params": {"rung": "keep"}},
-                    "sex": {"form": "^[FMX]$", "params": {"rung": "keep"}},
-                    "triage": {"form": "^[1-5]$", "params": {"rung": "keep"}},
+                    "municipality": {"form": "text", "params": {"rung": "geo.topn", "topN": 8}},
+                    "readmit_30d": {"form": "text", "params": {"rung": "keep"}},
+                    "sex": {"form": "text", "params": {"rung": "keep"}},
+                    "triage": {"form": "text", "params": {"rung": "keep"}},
                     "visit_id": {"form": SHA, "params": {"rung": "id.pseudonym"}},
                 },
             },
@@ -170,8 +173,8 @@ def contract() -> dict:
                 "required": ["visit_id"],
                 "columns": {
                     "lab_id": {"form": SHA, "params": {"rung": "id.pseudonym"}},
-                    "test_code": {"form": "^[A-Z]{2,8}$", "params": {"rung": "keep"}},
-                    "unit": {"form": "^[A-Za-z/]{1,8}$", "params": {"rung": "keep"}},
+                    "test_code": {"form": "text", "params": {"rung": "keep"}},
+                    "unit": {"form": "text", "params": {"rung": "keep"}},
                     "value": {"form": "^[0-9]+$", "params": {"roundTo": 1, "rung": "num.round"}},
                     "visit_id": {"form": SHA, "params": {"rung": "id.pseudonym"}},
                 },
@@ -229,7 +232,7 @@ def manifest(files: dict[str, bytes]) -> dict:
             "inputs": dict(INPUTS),
             "toolRevision": TOOL_REVISION,
             "checkVersions": {c["check"]: c["version"] for c in gate_checks},
-            "lexiconDigests": {},
+            "lexiconDigests": {LEXICON_NAME: lexicon_digest()},
             "contractDigest": canonical_digest(con),
         },
         "inventory": sorted([

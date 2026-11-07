@@ -143,7 +143,7 @@ Scope <span class="scope-release">release</span> = checked on the released files
 <p>Source: <code>measured.search</code>.</p>
 {{ notes(s.blocks) }}
 {% if s.svg %}{% set g = s.svg %}
-<p>Candidates {{ s.summary.candidates }}, accepted {{ s.summary.accepted }}, bound reached {{ s.summary.boundReached|lower }}. Filled points were accepted by the search.</p>
+<p>Candidates {{ s.summary.candidates }}, accepted {{ s.summary.accepted }}, bound reached {{ s.summary.boundReached|lower }}. Filled points were accepted by the search.{% if s.unscored %} {{ s.unscored }} rejected candidates had a purpose check that could not be scored; they are not plotted.{% endif %}</p>
 <svg viewBox="0 0 {{ g.w }} {{ g.h }}" width="{{ g.w }}" height="{{ g.h }}" role="img" aria-label="Privacy risk versus utility">
 <line x1="{{ g.pad }}" y1="{{ g.h - g.pad }}" x2="{{ g.w - g.pad }}" y2="{{ g.h - g.pad }}" stroke="#555"/>
 <line x1="{{ g.pad }}" y1="{{ g.pad }}" x2="{{ g.pad }}" y2="{{ g.h - g.pad }}" stroke="#555"/>

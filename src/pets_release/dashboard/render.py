@@ -196,7 +196,11 @@ def _chart(m: dict) -> dict:
     out: dict[str, Any] = {"blocks": [b], "svg": None}
     if not b.ok or not b.value.get("points"):
         return out
-    pts = sorted(b.value["points"], key=lambda p: p["step"])
+    # an unscored candidate (utility null, #133) has no y: it is counted in the caption, never plotted at 0
+    pts = sorted((p for p in b.value["points"] if p["utility"] is not None), key=lambda p: p["step"])
+    out["unscored"] = len(b.value["points"]) - len(pts)
+    if not pts:
+        return out
     w, h, pad = 480, 300, 44
     xmax = max(max(p["risk"] for p in pts), 1e-9)
     ymax = max(max(p["utility"] for p in pts), 1e-9)
