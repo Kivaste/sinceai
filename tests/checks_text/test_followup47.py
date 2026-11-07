@@ -52,7 +52,9 @@ def test_password_symbol_before_sentence_end_counts_as_secret_like():
     from pets_release.checks.text import _detectors as d
 
     assert d.secrets("my password is Kissa!") != []
-    assert d.secrets("my password is kissa.") == []  # a sentence period is not a symbol
+    # a sentence period is not a symbol (no copula, so a plain word needs a symbol to count; #53 makes
+    # "password is <word>" a hit on its own)
+    assert d.secrets("my password kissa.") == []
 
 
 def test_pin_followed_by_exclamation_is_still_a_pin():

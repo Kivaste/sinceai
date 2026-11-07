@@ -18,9 +18,12 @@ from __future__ import annotations
 
 import re
 
-# A typed, numbered placeholder such as [PHONE_1]; also bare [PHONE]. Masked with a
-# non-space, non-word character so it can neither be a hit nor bridge two fragments.
-PLACEHOLDER_RE = re.compile(r"\[[A-Z][A-Z_]*(?:_\d+)?\]")
+import pets_release.checks._cues as _cues
+
+# An exact redactor placeholder such as [PHONE_1] (label from the span-label list, n >= 1);
+# also bare [PHONE]. Masked with a non-space, non-word character so it can neither be a hit
+# nor bridge two fragments. Any other bracketed token ("[A_1]", "[Hunter2!]") stays text.
+PLACEHOLDER_RE = _cues.PLACEHOLDER_RE
 MASK = " ¦ "
 
 SPOKEN_AT = "\x01"
