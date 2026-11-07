@@ -1,6 +1,6 @@
 ﻿# Demo video script (target 1:50, hard limit 2:00)
 
-English narration. All screen actions are real CLI or the dashboard rendered from the manifest. No row values on screen: the tool prints counts, names and checks only. Numbers are `{{placeholders}}` (see 06). Pre-record from a real release; `<R>` = release folder.
+English narration. All screen actions are real CLI or the dashboard rendered from the manifest. No row values on screen: the tool prints counts, names and checks only. Numbers are double-brace placeholders (see 06). Pre-record from a real release; `<R>` = release folder.
 Setup before recording: `PETS_KIT`, `PETS_HMAC_KEY` (throwaway), `SOURCE_DATE_EPOCH` set; terminal font large; Wi-Fi visibly off in the tray.
 
 | Time | On screen | Narration |
@@ -19,3 +19,4 @@ Setup before recording: `PETS_KIT`, `PETS_HMAC_KEY` (throwaway), `SOURCE_DATE_EP
 - CS-S1 (free text) is not in the video; mention it in the description and the pitch. If a CS-S1 release exists on recording day, add 5 s of the before/after placeholder view after 0:40 and cut the baseline shot.
 - Do not show the unseen detection output unless it contains only column names and roles.
 - Do not say "anonymised" or "no identifiers remain". Say "per-label checks".
+

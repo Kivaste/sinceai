@@ -1,7 +1,7 @@
 ﻿# Submission description
 
-Character count: 4836 of 5,000 (with {{placeholders}} unrendered; re-count after Part B fills the numbers, a rendered number is shorter than its placeholder, so the limit holds).
-First two paragraphs are written to work alone for voters. Terms follow GLOSSARY.md. Numbers are {{manifest.key}} placeholders, see 06-numbers-to-fill.md.
+Character count: 4836 of 5,000 (with placeholders unrendered; re-count after Part B fills the numbers, a rendered number is shorter than its placeholder, so the limit holds).
+First two paragraphs are written to work alone for voters. Terms follow GLOSSARY.md. Numbers are double-brace placeholders, see 06-numbers-to-fill.md.
 
 ---
 
@@ -39,4 +39,5 @@ Pseudonymised data is still personal data, and whoever holds the key can re-link
 ## What is next
 
 An optional LLM front end that turns a data request into a needs spec, seeing only the request text and the data dictionary, never data values. More scenarios through the same gate and manifest.
+
 

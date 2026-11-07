@@ -1,6 +1,6 @@
 ﻿# Four-minute finals pitch and 6-minute Q&A prep
 
-Based on PRIVACY_PATTERNS_PLAN section 10, updated to what is built: two-tier verify, per-label assertions, signed manifest, search over detail ladders. Numbers are `{{placeholders}}` (see 06). Say "pseudonymised" and "per-label", never "anonymised" or "no identifiers remain".
+Based on PRIVACY_PATTERNS_PLAN section 10, updated to what is built: two-tier verify, per-label assertions, signed manifest, search over detail ladders. Numbers are double-brace placeholders (see 06). Say "pseudonymised" and "per-label", never "anonymised" or "no identifiers remain".
 
 ## Pitch beats
 
@@ -30,3 +30,4 @@ Based on PRIVACY_PATTERNS_PLAN section 10, updated to what is built: two-tier ve
 | Who holds the key? | The controller (`PETS_HMAC_KEY`, 32+ characters, never in output). Recipient-scoped keys stop two recipients joining their copies. |
 | Is the output reproducible? | Same input, key, creation time and versions give a byte-identical release; the network is blocked at start-up. |
 | What did you not finish? | State from the manifest: any `not_measured` field and the stretch features (LLM front end). Never invent a number. |
+
