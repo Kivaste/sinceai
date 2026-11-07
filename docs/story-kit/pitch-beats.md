@@ -58,15 +58,15 @@ Utility, per purpose check, before and after (1.0 = same answer as the original)
 Risk, before and after:
 
 - Share of rows with k below 5: `{{measured.privacy.before.k_below_5_share}}` before, `{{measured.privacy.after.k_below_5_share}}` after.
-- Singling-out rate: `{{measured.privacy.before.singling_out}}` before, `{{measured.privacy.after.singling_out}}` after.
+- Linkage re-identification risk (worst table): `{{measured.privacy.before.linkage_reid}}` before, `{{measured.privacy.after.linkage_reid}}` after.
 
-Against the published baselines (same scenario, mean utility and singling-out):
+Against the published baselines (same scenario, mean utility and worst re-identification risk):
 
-| Baseline | Mean utility | Singling-out |
+| Baseline | Mean utility | Worst re-identification risk |
 |---|---|---|
-| B0 | `{{measured.baselines.B0.utility_mean}}` | `{{measured.baselines.B0.singling_out}}` |
-| B2 | `{{measured.baselines.B2.utility_mean}}` | `{{measured.baselines.B2.singling_out}}` |
-| B2-k | `{{measured.baselines.B2-k.utility_mean}}` | `{{measured.baselines.B2-k.singling_out}}` |
+| B0 | `{{measured.baselines.B0.utility_mean}}` | `{{measured.baselines.B0.worst_reid}}` |
+| B2 | `{{measured.baselines.B2.utility_mean}}` | `{{measured.baselines.B2.worst_reid}}` |
+| B2-k | `{{measured.baselines.B2-k.utility_mean}}` | `{{measured.baselines.B2-k.worst_reid}}` |
 
 - Sacrifices the scenario policy allowed: `{{sacrifices.count}}`, each listed with the check it affects.
 - Close with the honest residual risks (linkage under two attacker personas, the tamper limitation) from `residualRisks`.

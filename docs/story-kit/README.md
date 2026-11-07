@@ -29,9 +29,9 @@ Paths are dotted. Lists in the manifest are addressed by their id field.
 | `measured.baselines.<B0\|B2\|B2-k>.<metric>` | `measured.baselines.rows[baseline==X, metric==Y].value` |
 | `measured.search.candidates` | search candidate count |
 
-Assumption to confirm with ticket 19: privacy components and baseline metrics used here are
-`k_below_5_share`, `singling_out` and `utility_mean` (the ids in the fixture manifest). If 19 uses other ids,
-change the script, the CSV and nothing else; the test checks the rest.
+The metric ids are the measurer's (`pets_release.measure.ids`): privacy components `k_below_5_share` and
+`linkage_reid`, baseline metrics `utility_mean` and `worst_reid`. `tests/measure/test_ids.py` checks that this CSV, the
+fixture manifest and the measurer agree.
 
 ## How part B fills it
 

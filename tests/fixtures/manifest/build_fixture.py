@@ -279,12 +279,16 @@ def manifest(files: dict[str, bytes]) -> dict:
             ]},
             "privacy": {"status": "measured", "source": "fixture", "components": [
                 {"component": "k_below_5_share", "before": 0.9, "after": 0.0},
-                {"component": "singling_out", "before": 0.8, "after": 0.1},
+                {"component": "linkage_reid", "before": 0.8, "after": 0.1},
             ]},
             "search": not_measured("hand-picked plan; no search run"),
             "baselines": {"status": "measured", "source": "fixture", "rows": [
                 {"baseline": "B0", "metric": "utility_mean", "value": 1.0},
+                {"baseline": "B0", "metric": "worst_reid", "value": 0.9},
+                {"baseline": "B2", "metric": "utility_mean", "value": 0.75},
+                {"baseline": "B2", "metric": "worst_reid", "value": 0.4},
                 {"baseline": "B2-k", "metric": "utility_mean", "value": 0.5},
+                {"baseline": "B2-k", "metric": "worst_reid", "value": 0.1},
             ]},
             "redaction": not_measured("no free text released"),
         },
