@@ -115,22 +115,23 @@ def launcher_shape_violates(text: str) -> bool:
             defined[t.id] = t
     if set(defined) != set(LAUNCHER_ASSIGNMENTS):
         return True
-    allowed_stores = {id(t) for t in defined.values()}
+    # AST nodes hash and compare by object (ast.AST defines no __eq__/__hash__): the nodes themselves are the keys
+    allowed_stores = set(defined.values())
     launches = [c for c in ast.walk(tree) if _launch_use(c) is not None]
-    allowed_loads = {id(_launch_use(c)) for c in launches}
+    allowed_loads = {_launch_use(c) for c in launches}
     # round 3: subprocess and sys are used only as these attribute reads, never passed, stored or inspected
-    module_uses = {id(c.func) for c in launches} | {id(c.args[0].elts[0]) for c in launches} | {
-        id(n) for n in ast.walk(tree) if isinstance(n, ast.Attribute) and isinstance(n.ctx, ast.Load)
+    module_uses = {c.func for c in launches} | {c.args[0].elts[0] for c in launches} | {
+        n for n in ast.walk(tree) if isinstance(n, ast.Attribute) and isinstance(n.ctx, ast.Load)
         and _is_name(n.value, "subprocess") and n.attr == "TimeoutExpired"}
-    parent = {id(c): p for p in ast.walk(tree) for c in ast.iter_child_nodes(p)}
+    parent = {c: p for p in ast.walk(tree) for c in ast.iter_child_nodes(p)}
     for node in ast.walk(tree):
         if isinstance(node, ast.Name) and node.id in _PINNED:
             if not isinstance(node.ctx, ast.Load):
-                if id(node) not in allowed_stores:
+                if node not in allowed_stores:
                     return True  # rebinding, deleting or shadowing a pinned name
-            elif node.id in LAUNCHER_ASSIGNMENTS and id(node) not in allowed_loads:
+            elif node.id in LAUNCHER_ASSIGNMENTS and node not in allowed_loads:
                 return True  # a module-name constant used anywhere but the approved launch position
-            elif node.id in _LAUNCH_MODULES and id(parent.get(id(node))) not in module_uses:
+            elif node.id in _LAUNCH_MODULES and parent.get(node) not in module_uses:
                 return True  # e.g. sys.modules, sys._getframe, setattr(subprocess, ...), type(subprocess)
         elif isinstance(node, ast.Attribute) and not isinstance(node.ctx, ast.Load):
             return True  # any attribute store or delete, e.g. ``type(subprocess).run = fn``
