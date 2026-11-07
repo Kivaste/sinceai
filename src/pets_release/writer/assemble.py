@@ -8,6 +8,8 @@ the whole assertion set, which the writer turns into a refusal.
 """
 from __future__ import annotations
 
+import re
+
 from pets_release.manifest import (
     ASSERTION_EVIDENCE,
     SCHEMA_VERSION,
@@ -16,6 +18,7 @@ from pets_release.manifest import (
     release_scope_id,
     required_assertions,
 )
+from pets_release.manifest.schema import SPAN_LABELS
 
 NARRATIVE_KEYS = ("fieldJustifications", "fitFor", "inventory", "measured", "notFitFor", "pets", "residualRisks",
                   "sacrifices")
@@ -64,6 +67,32 @@ def evidence_for(records, scenario: str):
     return {name: False for name in sorted(evidence)}, evidence, []
 
 
+LOW_SEVERITY_KIND = "gate_low_severity"
+
+
+def low_severity_risks(records) -> list[dict]:
+    """``residualRisks`` entries for low-severity gate hits: one per (check, label), with the hit count and the
+    check's denominator. Counts and schema names only. Writer and verify both derive them with this function."""
+    counts: dict = {}
+    for r in records:
+        for v in r.violations:
+            if v.severity == "low":
+                key = (r.check, v.label)
+                counts[key] = (r, counts.get(key, (r, 0))[1] + v.count)
+    out = []
+    for (check, label), (r, count) in sorted(counts.items()):
+        d = {"unit": r.denominator["unit"], "n": r.denominator["n"]}
+        out.append({
+            "risk": re.sub(r"[^A-Za-z0-9._:+-]", "-", f"gate:{check}:{label}")[:64], "kind": LOW_SEVERITY_KIND,
+            "label": label if label in SPAN_LABELS else None,
+            "rate": {"status": "counted", "count": count, "denominator": d,
+                     "source": f"gate check {check} {r.version} ({r.scope} scope)"},
+            "description": (f"{count} low-severity {label} hit(s) over {d['n']} {d['unit']} scanned by {check}; "
+                            "below the refusal threshold, so released and disclosed here")[:500],
+        })
+    return out
+
+
 def justification_reasons(contract: dict, field_justifications: list) -> list[str]:
     """Every released contract column has a released justification and vice versa (02 leaves this to 16)."""
     released = {(f.get("table"), f.get("outputColumn")) for f in field_justifications
@@ -104,6 +133,7 @@ def assemble_manifest(candidate, records, file_digests: dict, input_digests: dic
         "temporaryState": dict(TEMPORARY_STATE),
         **{k: candidate.narrative[k] for k in NARRATIVE_KEYS},
     }
+    m["residualRisks"] = sorted([*m["residualRisks"], *low_severity_risks(records)], key=lambda r: r["risk"])
     m["signature"] = {"alg": "HMAC-SHA256", "keyId": signing_key.key_id(),
                       "value": compute_signature(m, signing_key)}
     return m, []
