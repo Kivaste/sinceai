@@ -8,7 +8,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from run_helpers import build_kit, cli, coarse_qis, run_args  # noqa: E402
+from run_helpers import build_kit, cli, coarse_qis, run_args
 
 
 @pytest.fixture(scope="session")

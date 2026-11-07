@@ -8,7 +8,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[2]
 MINIKIT = ROOT / "tests" / "fixtures" / "minikit" / "health"
 TEST_KEY = "run-test-only-master-key-not-a-secret-0000000000"  # published test constant
