@@ -117,6 +117,9 @@ def _input_problems(manifest: dict, kit: Kit) -> tuple[list[str], dict | None, d
     out = []
     if not bound:
         out.append("inputs: manifest binds no input digests")
+    # The manifest binds EVERY table of the scenario's dataset (withheld ones included): the sets must be equal.
+    for table in sorted(set(have) - set(bound)):
+        out.append(f"inputs: {table}: kit table not bound in manifest")
     for table in sorted(bound):
         if table not in have:
             out.append(f"inputs: {table}: missing from kit")
