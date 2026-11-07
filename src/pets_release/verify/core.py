@@ -213,6 +213,47 @@ def purpose_problems(manifest: dict, release: Path, kit: Kit, source: dict) -> l
     return out
 
 
+def rung_step_problems(manifest: dict, source: dict, master_key) -> list[str]:
+    """Producer-scope re-measure (``--full``) of every recorded rung sacrifice (#89): rebuild the hand plan with the
+    step's column at ``from`` and re-run the run's own ``protect``/``k_at_from``; the figures must equal the
+    signed ``atFrom``. Unknown state fails closed. Content-free lines."""
+    from pets_release.policy import get_policy, hand_plan
+    from pets_release.run.pipeline import k_at_from, protect
+
+    steps = [s for s in manifest["sacrifices"] if "rungStep" in s]
+    if not steps:
+        return []
+    out = []
+    try:
+        scenario = manifest["release"]["scenario"]
+        policy = get_policy(scenario)
+        plan = hand_plan(scenario)
+    except Exception:  # noqa: BLE001 - unknown state fails closed, content-free
+        return ["rungStep: not reproducible (policy or hand plan unavailable)"]
+    fj = {(f["table"], f["column"]): f for f in manifest["fieldJustifications"]}
+    for s in steps:
+        st = s["rungStep"]
+        key = (st["table"], st["column"])
+        rs = next((r for r in policy.rung_sacrifices if (r["check"], r["table"], r["column"], r["from"], r["to"])
+                   == (s["check"], *key, st["from"], st["to"])), None)
+        hand = {(e["table"], e["column"]): e for e in plan}
+        if rs is None or hand.get(key, {}).get("rung") != st["from"] or any(
+                f["source"] != "hand" for f in fj.values()):
+            out.append(f"rungStep: {s['check']}: not reproducible (not an enumerated step of the hand plan)")
+            continue
+        try:
+            *_, sup, _ = protect(plan, policy=policy, source=source, master=master_key,
+                                 scope_id=manifest["release"]["releaseScopeId"],
+                                 recipient=manifest["release"]["recipient"])
+            fresh = k_at_from(sup)
+        except Exception:  # noqa: BLE001 - the message could carry values
+            out.append(f"rungStep: {s['check']}: re-measure failed")
+            continue
+        if fresh != st["atFrom"]:
+            out.append(f"rungStep: {s['check']}: re-measure differs from the manifest")
+    return out
+
+
 def verify_release(release_dir, *, full: bool = False, kit=None, master_key=None, checks=None,
                    context: dict | None = None, purpose=None) -> VerifyReport:
     """Verify ``release_dir``. Recipient mode by default; ``full=True`` needs ``kit`` and ``master_key``.
@@ -311,6 +352,7 @@ def verify_release(release_dir, *, full: bool = False, kit=None, master_key=None
             problems.append("purpose [producer]: not_run (no source dataset)")
         else:
             problems += (purpose or purpose_problems)(manifest, release, kit, run_ctx["source"])
+            problems += rung_step_problems(manifest, run_ctx["source"], master_key)
     if result.refused and not problems:  # the runner's own verdict is a floor, never overridden
         problems.append("checks: runner refused")
 
