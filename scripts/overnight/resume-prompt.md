@@ -54,7 +54,7 @@ If `claude-agent/opus` is rate-limited or errors, use `openai/gpt-6.1-sol`. Log 
 
 **Grok tickets already in flight (dispatched 02:01 on `xai/grok-4.7#high`):** when you process this brief, check each one. If its branch has **no commit** yet, interrupt that implementer session (`opencode api post /api/session/<id>/interrupt`), log it, remove only that ticket's worktree, and re-dispatch the ticket on `claude-agent/sonnet` from the integration tip. If it already has commits, let it finish, but re-dispatch it on Sonnet if it has made no new commit for 30 minutes.
 
-**Reviews (D13b, Sat 05:35; replaces the earlier two-reviewers-everywhere rule):** reviewers are always non-Claude, because every implementer is Claude.
+**Reviews (D13b, Sat 05:35; reviewer models later superseded by D13f/D13g, see above):** reviewers always come from families other than the implementer's. Implementers are Claude (Opus/Sonnet) **or GPT-6.1 Sol** per D13g. Sol-written code is reviewed by Grok + Sonnet.
 - **Core tickets** (`model:opus`) get **two** independent, read-only reviews: `xai/grok-4.7#medium` and `opencode-go/gpt-6-luna#medium`. **Routine tickets** (`model:grok`, built by Sonnet) get **one**: `xai/grok-4.7#medium`.
 - **Round 1** is a full review. **Rounds 2 and later are delta reviews:** confirm each earlier blocking finding is fixed, and check only the fix diff for new high-severity problems. No new full sweep.
 - **At most 3 rounds.** After round 3, only a high-severity finding blocks (it breaks an acceptance criterion, breaks fail-closed, or leaks values). Everything else becomes a follow-up issue filed at merge.
