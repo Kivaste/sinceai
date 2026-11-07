@@ -18,6 +18,9 @@ import pytest
 from pets_release.kiteval import Lineage
 from pets_release.measure import baseline_rows, measure, measured_errors
 from pets_release.measure.ids import PRIVACY_IDS
+from tests.kit_cache import kit_parse_cache  # noqa: F401 (pytest fixture)
+
+pytestmark = pytest.mark.usefixtures("kit_parse_cache")
 
 _DEFAULT_KIT = Path(r"C:\Users\kivas\AI\sinceai-hackaton\Briefs\TRUSTED_PETS_PROVING_GROUND_2026 (1)"
                     r"\TRUSTED_PETS_PROVING_GROUND_2026")

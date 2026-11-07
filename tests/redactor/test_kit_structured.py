@@ -18,8 +18,9 @@ from pets_release.redactor import (
     Turn,
     redact_conversation,
 )
+from tests.kit_cache import kit_parse_cache  # noqa: F401 (pytest fixture)
 
-pytestmark = [pytest.mark.kit]  # fails (never skips) when the kit is absent; see tests/conftest.py
+pytestmark = [pytest.mark.kit, pytest.mark.usefixtures("kit_parse_cache")]
 
 # REGRESSION GUARD, not the policy target. The CS-S1 privacy targets (recall 0.98 on NATIONAL_ID,
 # PAYMENT_CARD, IBAN, SECRET) are evaluated on the held-out split in ticket 23 and handled by policy.
