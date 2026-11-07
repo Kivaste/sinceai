@@ -173,6 +173,15 @@ def _strings(obj, acc: list) -> list:
     return acc
 
 
+def _source_missing(context: Mapping) -> list[str]:
+    """#149: the source-value scan needs the source tables. Absent, empty or malformed is unknown, and unknown
+    refuses (fail closed) instead of scanning nothing."""
+    source = context.get("source")
+    if isinstance(source, Mapping) and source and all(isinstance(df, pd.DataFrame) for df in source.values()):
+        return []
+    return ["selfscan:source-missing"]
+
+
 def _self_scan(build: Path, c: Candidate, manifest: dict, context: dict) -> list[str]:
     reasons = []
     expected = sorted([t.name for t in c.tables] + [MANIFEST_FILENAME])
@@ -189,7 +198,9 @@ def _self_scan(build: Path, c: Candidate, manifest: dict, context: dict) -> list
     # #80: every source cell value (withheld tables and columns, suppressed rows, raw forms) is scanned too. The
     # one exemption is by identity, not frequency: a manifest string that IS a table or column header name (the
     # writer's structured table/column fields) may contain a source value, e.g. a category inside a column name.
-    source = context.get("source", {})
+    missing = _source_missing(context)
+    reasons += missing
+    source = {} if missing else context["source"]
     headers = {stem for stem in source} | {str(col) for df in source.values() for col in df.columns} \
         | {t.name[:-4] for t in c.tables} | {col for t in c.tables for col in t.frame.columns}
     from_source = set()
@@ -245,6 +256,8 @@ def write_release(candidate: Candidate, out, master_key, kit: Kit, *, context: M
         # the pinned scenario policy, not the candidate, fixes the k target and the QI set (#62)
         reasons = [f"policy:{p}" for p in contract_policy_problems(candidate.scenario, candidate.contract,
                                                                          candidate.narrative.get("fieldJustifications"))]
+        # the self-scan's source precondition is evaluated up front, so a sourceless write names it (#149)
+        reasons += _source_missing(context)
         gate = run_checks(build, candidate.contract, {**context, "phase": "gate"})
         reasons += _gate_reasons(gate, "gate") + _registry_reasons(gate.records)
         reasons += evidence_for(gate.records, candidate.scenario)[2]
