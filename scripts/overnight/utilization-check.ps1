@@ -18,6 +18,9 @@
     "#NN"           -> issue NN
     bare NN or NNx ("22B"; 1-2 digits, not glued to letters before, not after pass/round/step/part/v) -> ticket NN -> issue via .scratch/local-spec/issue-map.json
   Branch names: ticket/fuNN-* -> issue NN; ticket/NN-* -> ticket NN -> issue via the map.
+  Before utilization probes, reports newly dirty main-checkout paths (or unknown Git/snapshot state)
+  through send-to-orchestrator.ps1, regardless of CPU, cooldown, phase or GitHub availability.
+  -CheckoutCheckOnly runs just this guard. -DryRun never sends or advances its snapshot.
 
 .EXAMPLE
   powershell -NoProfile -ExecutionPolicy Bypass -File scripts/overnight/utilization-check.ps1 -DryRun
@@ -36,11 +39,14 @@ param(
   [int]$BranchQuietMinutes = 5,
   [int]$DeadIdleMinutes = 25,
   [int]$BudgetSeconds = 90,
+  [string]$MainCheckout = 'C:\Users\kivas\AI\sinceai-hackaton',
+  [string]$StateDir,
+  [switch]$CheckoutCheckOnly,
   [switch]$DryRun
 )
 $ErrorActionPreference = 'Stop'
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
-$StateDir = Join-Path $RepoRoot '.scratch\local-overnight'
+if (-not $StateDir) { $StateDir = Join-Path $RepoRoot '.scratch\local-overnight' }
 New-Item -ItemType Directory -Force -Path $StateDir | Out-Null
 $LogPath = Join-Path $StateDir 'utilization.log'
 $StatePath = Join-Path $StateDir 'utilization-state.json'
@@ -83,6 +89,7 @@ function Invoke-Exe([string]$file, [string[]]$argv, [int]$timeoutSec = 30) {
   $psi.Arguments = ($argv | ForEach-Object { Quote-Arg $_ }) -join ' '
   $psi.UseShellExecute = $false; $psi.CreateNoWindow = $true
   $psi.RedirectStandardOutput = $true; $psi.RedirectStandardError = $true
+  $psi.StandardOutputEncoding = [Text.Encoding]::UTF8
   $psi.WorkingDirectory = $RepoRoot
   try { $p = [System.Diagnostics.Process]::Start($psi) } catch { return [pscustomobject]@{ code = -1; out = ''; err = $_.Exception.Message } }
   $o = $p.StandardOutput.ReadToEndAsync(); $e = $p.StandardError.ReadToEndAsync()
@@ -100,9 +107,40 @@ function JsonList([string]$text) {
   $parsed = $text | ConvertFrom-Json
   return @(foreach ($x in $parsed) { $x })
 }
-$OcExe = (Get-Command opencode -ErrorAction Stop).Source
-$GhExe = (Get-Command gh -ErrorAction Stop).Source
-$GitExe = (Get-Command git -ErrorAction Stop).Source
+function Get-MainCheckoutWrites([string]$Checkout, [string]$SnapshotPath) {
+  $baseline = @('tests/gen_fixtures/test_refusal_manifest_fixtures.py', 'tests/run/test_verify_assertion_rerun.py')
+  $top = (Must (Invoke-Exe $GitExe @('--no-optional-locks', '-C', $Checkout, 'rev-parse', '--show-toplevel') 20) 'git checkout identity').TrimEnd("`r", "`n")
+  if ([IO.Path]::GetFullPath($top).TrimEnd([char[]]@('\', '/')) -ne $Checkout) { throw 'checkout identity mismatch' }
+  $previous = $null
+  if (Test-Path -LiteralPath $SnapshotPath) {
+    $previous = [IO.File]::ReadAllText($SnapshotPath, [Text.Encoding]::UTF8) | ConvertFrom-Json
+    $keys = @($previous.PSObject.Properties.Name | Sort-Object) -join ','
+    if ($keys -cne 'baseline_paths,checkout,previous_paths,version' -or
+        ($previous.version -isnot [int] -and $previous.version -isnot [long]) -or $previous.version -ne 1 -or
+        $previous.checkout -isnot [string] -or $previous.checkout -ne $Checkout -or
+        $previous.baseline_paths -isnot [array] -or ($previous.baseline_paths -join "`0") -cne ($baseline -join "`0") -or
+        $previous.previous_paths -isnot [array]) { throw 'invalid checkout snapshot' }
+    foreach ($path in $previous.previous_paths) {
+      if ($path -isnot [string] -or -not $path -or [IO.Path]::IsPathRooted($path) -or $path -match '(^|/)\.\.(/|$)') { throw 'invalid snapshot path' }
+    }
+  }
+  $output = Must (Invoke-Exe $GitExe @('--no-optional-locks', '-C', $Checkout, 'status', '--porcelain=v1', '-z', '--untracked-files=all') 20) 'git status'
+  # -z gives literal paths, including spaces/newlines; rename records have a second source path.
+  $records = $output.Split([char]0)
+  $paths = @(@(for ($i = 0; $i -lt $records.Count; $i++) {
+    if (-not $records[$i]) { continue }
+    $record = $records[$i]
+    $record.Substring(3)
+    if ($record.Substring(0, 2) -match '[RC]') { $i++; $records[$i] }
+  }) | Sort-Object -Unique)
+  $newPaths = @($paths | Where-Object { $baseline -cnotcontains $_ -and @($previous.previous_paths) -cnotcontains $_ })
+  return [pscustomobject]@{
+    code = $(if ($newPaths.Count) { 1 } else { 0 })
+    status = $(if ($newPaths.Count) { 'dirty' } elseif (@($paths | Where-Object { $baseline -cnotcontains $_ }).Count) { 'unchanged' } else { 'clean' })
+    paths = $newPaths
+    snapshot = [ordered]@{ version = 1; checkout = $Checkout; baseline_paths = $baseline; previous_paths = @($paths) }
+  }
+}
 function OcApi([string]$path) { return ((Must (Invoke-Exe $OcExe @('api', 'get', $path) 30) "opencode api get $path") | ConvertFrom-Json) }
 
 # ---------- one run at a time ----------
@@ -114,6 +152,40 @@ try { $owned = $mutex.WaitOne(0) } catch [System.Threading.AbandonedMutexExcepti
 if (-not $owned) { Write-Log 'action=skip reason="another utilization run holds the mutex"'; exit 0 }
 
 try {
+  # Run before capacity/network probes and without their cooldown or phase restrictions.
+  $MainCheckout = [IO.Path]::GetFullPath($MainCheckout).TrimEnd([char[]]@('\', '/'))
+  $checkoutHash = [Security.Cryptography.SHA256]::Create()
+  try { $checkoutKey = ($checkoutHash.ComputeHash([Text.Encoding]::UTF8.GetBytes($MainCheckout.ToLowerInvariant())) | ForEach-Object { $_.ToString('x2') }) -join '' }
+  finally { $checkoutHash.Dispose() }
+  $checkoutStatePath = Join-Path $StateDir "main-checkout-writes-$checkoutKey.json"
+  try {
+    $GitExe = (Get-Command git -ErrorAction Stop).Source
+    $checkout = Get-MainCheckoutWrites $MainCheckout $checkoutStatePath
+  }
+  catch {
+    # Unknown is an alert, not a clean baseline. Do not forward Git stderr or file contents.
+    $checkout = [pscustomobject]@{ code = 2; status = 'unknown'; paths = @($MainCheckout); snapshot = $null }
+  }
+  Write-Log ('main-checkout writes status={0}' -f $checkout.status)
+  if ($checkout.code -ne 0) {
+    $text = '[main-checkout writes] status=' + $checkout.status + "`n" + (($checkout.paths | ForEach-Object { ConvertTo-Json -Compress -InputObject $_ }) -join "`n")
+    if ($DryRun) { Write-Output '----- checkout message (dry run, not sent) -----'; Write-Output $text }
+    else {
+      $checkoutHb = Read-Json $HbPath
+      if (-not $checkoutHb.session_id) { throw 'checkout alert cannot be sent: heartbeat has no session_id' }
+      $tmp = Join-Path $env:TEMP ('checkout-alert-{0}.md' -f [guid]::NewGuid().ToString('N'))
+      [IO.File]::WriteAllText($tmp, $text, (New-Object System.Text.UTF8Encoding($false)))
+      try {
+        $sent = Invoke-Exe 'powershell.exe' @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $PSScriptRoot 'send-to-orchestrator.ps1'), '-SessionId', $checkoutHb.session_id, '-MessageFile', $tmp) 65
+        if ($sent.code -ne 0) { throw 'checkout alert delivery failed; snapshot not advanced' }
+      } finally { Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue }
+    }
+  }
+  if (-not $DryRun -and $checkout.code -ne 2) { Write-JsonAtomic $checkoutStatePath $checkout.snapshot }
+  # Standalone checkout-check seam: no capacity, GitHub or OpenCode probes.
+  if ($CheckoutCheckOnly -or $checkout.code -ne 0) { exit $checkout.code }
+  $OcExe = (Get-Command opencode -ErrorAction Stop).Source
+  $GhExe = (Get-Command gh -ErrorAction Stop).Source
   # ---------- inputs ----------
   $hb = Read-Json $HbPath
   if (-not $hb) { throw "heartbeat missing or unreadable: $HbPath" }
