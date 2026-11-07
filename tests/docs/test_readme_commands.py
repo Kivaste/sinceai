@@ -132,6 +132,25 @@ def test_windows_quick_start_cli_without_activation():
     )
 
 
+@pytest.mark.parametrize(
+    "block",
+    extract_blocks(README.read_text(encoding="utf-8").split("\n## Demo\n", 1)[1]),
+    ids=lambda b: f"later-block{b['n']}-{b['kind']}",
+)
+def test_later_examples_without_activation(block):
+    """README command-ledger seam: later examples also select the local venv."""
+    commands = [
+        statement
+        for statement in _statements(block["body"])
+        if re.search(r"\b(?:pets-release|python)(?:\.exe)?\s", statement)
+    ]
+    assert commands, "Each later example must include a CLI or Python command"
+    assert all(
+        command.startswith((r".\.venv\Scripts\pets-release.exe ", r".\.venv\Scripts\python.exe "))
+        for command in commands
+    ), "Later README commands must select the venv explicitly without activation under Restricted policy"
+
+
 @pytest.mark.skipif(os.name != "nt", reason="Windows PowerShell execution-policy regression")
 def test_windows_quick_start_interpreter_under_restricted_policy(tmp_path):
     """README + real PowerShell seam: the check prints this tree's interpreter."""
@@ -194,7 +213,7 @@ def test_block(block, tmp_path):
         _transcript(f"SKIP block {block['n']} ({block['arg']}): {first}")
         pytest.skip(f"named reason: {block['arg']}")
     if block["kind"] == "pending":
-        sub = next((s for s in SUBCOMMANDS if re.search(rf"\bpets-release\s+{s}\b", block["body"])), None)
+        sub = next((s for s in SUBCOMMANDS if re.search(rf"\bpets-release(?:\.exe)?\s+{s}\b", block["body"])), None)
         assert sub, f"block {block['n']}: pending block names no known subcommand"
         assert not _subcommand_exists(sub), (
             f"README block #{block['n']}: pets-release {sub} is built; change its marker from pending to run"
@@ -212,7 +231,7 @@ def test_block(block, tmp_path):
     out_root = tmp_path / "out"
     env = rh.env({"PETS_KIT": str(kit)})  # PETS_HMAC_KEY is the published test-only constant
     run_cmd = next(s for b2 in BLOCKS if b2["kind"] == "run" for s in _statements(b2["body"])
-                   if s.startswith("pets-release run --scenario HEALTH-S1"))
+                   if s.startswith(r".\.venv\Scripts\pets-release.exe run --scenario HEALTH-S1"))
 
     def execute(stmt):
         stmt_x = _expand(stmt, env).replace("..\\sinceai-out\\", str(out_root) + os.sep)
@@ -224,7 +243,7 @@ def test_block(block, tmp_path):
                               capture_output=True, text=True, encoding="utf-8", check=False)
         return args, proc
 
-    if "health-s1" in block["body"] and not block["body"].lstrip().startswith("pets-release run"):
+    if "health-s1" in block["body"] and not block["body"].lstrip().startswith(r".\.venv\Scripts\pets-release.exe run"):
         _, pre = execute(run_cmd)  # earlier README step: the release the later commands act on
         assert pre.returncode == 0, f"prerequisite run failed: {pre.stdout[-300:]}{pre.stderr[-300:]}"
 

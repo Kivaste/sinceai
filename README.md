@@ -48,8 +48,7 @@ Check that the install works and that the kit is readable (these print table nam
 .\.venv\Scripts\pets-release.exe kit-info --dataset health --kit "$env:PETS_KIT"
 ```
 
-In the later examples, use `.\.venv\Scripts\pets-release.exe` wherever they say
-`pets-release`; activation is not required.
+The later examples also use the venv executables directly; activation is not required.
 
 Exit codes: `0` success; `1` refusal or verify failure; `2` usage error or unknown state. Unknown counts as failure.
 
@@ -61,7 +60,7 @@ The demo has three parts: HEALTH-S1 (ED visits to a university research group) i
 
 <!-- docs-test: run -->
 ```powershell
-pets-release detect unseen --out ..\sinceai-out\unseen_field_labels.csv --format unseen --kit "$env:PETS_KIT"
+.\.venv\Scripts\pets-release.exe detect unseen --out ..\sinceai-out\unseen_field_labels.csv --format unseen --kit "$env:PETS_KIT"
 ```
 
 ### 2. HEALTH-S1 release
@@ -70,12 +69,12 @@ pets-release detect unseen --out ..\sinceai-out\unseen_field_labels.csv --format
 
 <!-- docs-test: run -->
 ```powershell
-pets-release run --scenario HEALTH-S1 --out ..\sinceai-out\health-s1 --created 2026-11-07T08:00:00Z --kit "$env:PETS_KIT"
+.\.venv\Scripts\pets-release.exe run --scenario HEALTH-S1 --out ..\sinceai-out\health-s1 --created 2026-11-07T08:00:00Z --kit "$env:PETS_KIT"
 ```
 
 <!-- docs-test: skip reason=cs-s1-run-needs-ticket-23 -->
 ```powershell
-pets-release run --scenario CS-S1 --out ..\sinceai-out\cs-s1 --created 2026-11-07T08:00:00Z --kit "$env:PETS_KIT"
+.\.venv\Scripts\pets-release.exe run --scenario CS-S1 --out ..\sinceai-out\cs-s1 --created 2026-11-07T08:00:00Z --kit "$env:PETS_KIT"
 ```
 
 A release folder holds one `<table>.csv` per released table and `privacy_manifest.json`, nothing else. The gate refuses any other file. If a check finds a high-severity violation, errors or does not run, the tool exits 1, prints counts by check and label (never values), and publishes nothing.
@@ -90,14 +89,14 @@ VERIFIED (limited): N release-checked, M producer-attested
 
 <!-- docs-test: run -->
 ```powershell
-pets-release verify ..\sinceai-out\health-s1
+.\.venv\Scripts\pets-release.exe verify ..\sinceai-out\health-s1
 ```
 
 Controller or auditor mode (`--full`) also needs the kit and the key. It re-runs every check in the registry, including the producer-scope ones (original-value survival, reversible hashes, key material, per-person k), the input digests, the tool revision and the signature. Any check that cannot run is a failure.
 
 <!-- docs-test: run -->
 ```powershell
-pets-release verify --full --kit "$env:PETS_KIT" ..\sinceai-out\health-s1
+.\.venv\Scripts\pets-release.exe verify --full --kit "$env:PETS_KIT" ..\sinceai-out\health-s1
 ```
 
 | | `verify <release>` (limited) | `verify --full --kit <path>` |
@@ -116,14 +115,14 @@ A static HTML file rendered from the manifest alone. No network assets and no ro
 
 <!-- docs-test: run -->
 ```powershell
-pets-release dashboard ..\sinceai-out\health-s1 --out ..\sinceai-out\health-s1-dashboard.html
+.\.venv\Scripts\pets-release.exe dashboard ..\sinceai-out\health-s1 --out ..\sinceai-out\health-s1-dashboard.html
 ```
 
 ### 5. Submission bundle
 
 <!-- docs-test: pending ticket=29 -->
 ```powershell
-pets-release submission --out ..\pets_submission --kit "$env:PETS_KIT"
+.\.venv\Scripts\pets-release.exe submission --out ..\pets_submission --kit "$env:PETS_KIT"
 ```
 
 ## Where row maps go
@@ -143,7 +142,7 @@ They must never enter the public repo (decision D15, [ADR 0003](docs/adr/)). The
 <!-- docs-test: skip reason=runs-the-whole-test-suite-recursively -->
 ```powershell
 $env:PYTHONUTF8 = "1"; $env:PYTHONDONTWRITEBYTECODE = "1"; $env:TZ = "UTC"
-python -m pytest -n auto --import-mode=importlib tests
+.\.venv\Scripts\python.exe -m pytest -n auto --import-mode=importlib tests
 ```
 
 Tests marked `kit` need `PETS_KIT` and are reported as not run when it is absent.
