@@ -1,271 +1,246 @@
-"""Release contract generator: withheld absence, derivations, forms, digest."""
+"""Release contract generator: withheld absence, derivations, forms, digest, and the real gate."""
 
 from __future__ import annotations
 
-import hashlib
-import json
+import copy
+import csv
+import re
 
 import pytest
 
-from pets_release.contract import (
-    ContractError,
-    canonical_bytes,
-    digest,
-    generate,
-    load_forms,
-)
-from pets_release.contract.forms import MONTH_HOUR_FORM, TOKEN_FORM
+from pets_release.checks import registry
+from pets_release.checks.runner import run_checks
+from pets_release.contract import ContractError, digest, generate
+from pets_release.ladders import CONTRACT_FORMS, VALIDATOR_FORMS
+from pets_release.manifest import canonical_bytes, canonical_digest
+from pets_release.policy.model import FieldFloor, ScenarioPolicy
+
+REL = {"scope": "release"}
 
 
-def _policy(tables: dict, scenario: str = "HEALTH-S1") -> dict:
-    return {"scenario": scenario, "tables": tables}
-
-
-def _col(**flags) -> dict:
-    return flags
+def _policy(columns: dict, qi: tuple = ()) -> ScenarioPolicy:
+    floors = {key: FieldFloor("x", "keep", "test") for key in columns}
+    return ScenarioPolicy(
+        scenario="HEALTH-S1", dataset="d", purpose_checks=(), privacy_targets=(), floors=floors,
+        direct_identifiers=(), qi=qi, risk_vector=(), sacrifices=(), joint_qi_moves=(), linked=(),
+        param_minimums={},
+    )
 
 
 def _entry(table: str, column: str, rung: str, params: dict | None = None) -> dict:
     return {
-        "table": table,
-        "column": column,
-        "rung": rung,
-        "params": {} if params is None else params,
-        "floor": "withheld" if rung == "withheld" else rung,
-        "reason": "test",
-        "source": "hand",
+        "table": table, "column": column, "rung": rung, "params": params or {},
+        "floor": rung, "reason": "test", "source": "hand",
     }
 
 
-FORMS = {
-    "identifier.pseudonym": TOKEN_FORM,
-    "timestamp.month_hour": MONTH_HOUR_FORM,
-    "category.exact": r"^[^\r\n]+$",
-    "age.band10": r"^(?:0-9|90\+)$",
-}
+def _build(entries: list[dict], qi: tuple = ()):
+    policy = _policy({(e["table"], e["column"]): None for e in entries}, qi)
+    return policy, entries
 
 
-def test_withheld_column_and_table_are_absent() -> None:
-    policy = _policy({
-        "ed_visits": {"columns": {
-            "sex": _col(qi=True),
-            "chief_complaint": _col(),
-            "postcode": _col(),
-        }},
-        "clinical_notes": {"withheld": True, "columns": {
-            "note_text": _col(),
-            "visit_id": _col(),
-        }},
-    })
-    plan = [
-        _entry("ed_visits", "sex", "category.exact"),
+def test_withheld_columns_and_tables_are_absent() -> None:
+    policy, plan = _build([
+        _entry("ed_visits", "sex", "keep"),
         _entry("ed_visits", "chief_complaint", "withheld"),
-        _entry("ed_visits", "postcode", "withheld"),
         _entry("clinical_notes", "note_text", "withheld"),
         _entry("clinical_notes", "visit_id", "withheld"),
-    ]
-    contract = generate(policy, plan, forms=FORMS)
-    files = contract["files"]
-    assert set(files) == {"ed_visits.csv"}
-    assert set(files["ed_visits.csv"]["columns"]) == {"sex"}
+    ])
+    contract = generate(policy, plan)
+    assert set(contract["files"]) == {"ed_visits.csv"}
+    assert set(contract["files"]["ed_visits.csv"]["columns"]) == {"sex"}
     blob = canonical_bytes(contract).decode("utf-8")
-    for absent in ("chief_complaint", "postcode", "clinical_notes", "note_text"):
+    for absent in ("chief_complaint", "clinical_notes", "note_text"):
         assert absent not in blob
-    assert contract["qi"] == [{"table": "ed_visits", "column": "sex", "derived_from": "sex"}]
-    assert contract["tokens"] == []
 
 
-def test_derived_column_uses_release_name_and_source_derivation() -> None:
-    policy = _policy({
-        "ed_visits": {"columns": {
-            "date_of_birth": _col(release_name="age_band", qi=True, required=True),
-            "visit_id": _col(required=True, token_scope="release"),
-        }},
-    })
-    plan = [
-        _entry("ed_visits", "date_of_birth", "age.band10", {"width": 10, "top": 90}),
-        _entry("ed_visits", "visit_id", "identifier.pseudonym"),
-    ]
-    contract = generate(policy, plan, forms=FORMS)
+def test_derived_column_under_release_name_with_derivation_and_qi() -> None:
+    qi = ({"table": "ed_visits", "column": "date_of_birth", "derived": "age_band"},)
+    policy, plan = _build([
+        _entry("ed_visits", "date_of_birth", "age.band10", {"ref_column": "date_of_birth"}),
+        _entry("ed_visits", "sex", "keep"),
+    ], qi)
+    contract = generate(policy, plan)
     columns = contract["files"]["ed_visits.csv"]["columns"]
     assert "date_of_birth" not in columns
-    assert "age_band" in columns
-    assert columns["age_band"]["form"] == FORMS["age.band10"]
+    assert columns["age_band"]["form"] == CONTRACT_FORMS["age.band10"]
     assert columns["age_band"]["params"]["derived_from"] == "date_of_birth"
-    assert columns["age_band"]["params"]["rung"] == "age.band10"
-    assert columns["age_band"]["params"]["width"] == 10
-    assert contract["files"]["ed_visits.csv"]["required"] == ["age_band", "visit_id"]
+    assert contract["qi"] == [{"table": "ed_visits", "column": "age_band", "derived_from": "date_of_birth"}]
+
+
+def test_qi_listed_only_when_released_and_join_derived_named() -> None:
+    qi = ({"table": "lab_results", "column": "sampled_ts", "join_via": ["ed_visits", "visit_id"]},)
+    released_policy, released = _build([
+        _entry("lab_results", "sampled_ts", "ts.month_hour"),
+        _entry("lab_results", "value", "num.exact"),
+    ], qi)
+    contract = generate(released_policy, released)
     assert contract["qi"] == [
-        {"table": "ed_visits", "column": "age_band", "derived_from": "date_of_birth"},
+        {"table": "lab_results", "column": "sampled_ts", "derived_from": "join_ed_visits_visit_id"},
     ]
+    withheld_policy, withheld = _build([
+        _entry("lab_results", "sampled_ts", "withheld"),
+        _entry("lab_results", "value", "num.exact"),
+    ], qi)
+    assert generate(withheld_policy, withheld)["qi"] == []
 
 
-def test_join_derived_qi_present_only_when_released() -> None:
-    def policy(qi_flags: dict) -> dict:
-        return _policy({
-            "lab_results": {"columns": {"sampled_ts": _col(**qi_flags), "visit_id": _col()}},
-        })
-
-    released = generate(
-        policy({"qi": True, "derived_from": "join_ed_visits_visit_id"}),
-        [_entry("lab_results", "sampled_ts", "category.exact"), _entry("lab_results", "visit_id", "category.exact")],
-        forms=FORMS,
-    )
-    assert released["qi"] == [{
-        "table": "lab_results", "column": "sampled_ts", "derived_from": "join_ed_visits_visit_id",
-    }]
-    assert released["files"]["lab_results.csv"]["columns"]["sampled_ts"]["params"]["derived_from"] == (
-        "join_ed_visits_visit_id"
-    )
-
-    withheld = generate(
-        policy({"qi": True, "derived_from": "join_ed_visits_visit_id"}),
-        [_entry("lab_results", "sampled_ts", "withheld"), _entry("lab_results", "visit_id", "category.exact")],
-        forms=FORMS,
-    )
-    assert withheld["qi"] == []
-    assert "sampled_ts" not in canonical_bytes(withheld).decode("utf-8")
+def test_missing_form_rejected_at_generation(monkeypatch: pytest.MonkeyPatch) -> None:
+    policy, plan = _build([_entry("t", "c", "no.such.rung")])
+    with pytest.raises(ContractError, match="t.c: form missing"):
+        generate(policy, plan)
+    monkeypatch.setitem(CONTRACT_FORMS, "keep", "")
+    policy, plan = _build([_entry("t", "c", "keep")])
+    with pytest.raises(ContractError, match="t.c: form invalid"):
+        generate(policy, plan)
+    monkeypatch.setitem(CONTRACT_FORMS, "keep", r"\d+")  # unanchored regex: the gate rejects it
+    with pytest.raises(ContractError, match="t.c: form invalid"):
+        generate(policy, plan)
 
 
-def test_missing_form_rejected_at_generation() -> None:
-    policy = _policy({"ed_visits": {"columns": {"sex": _col()}}})
-    plan = [_entry("ed_visits", "sex", "category.exact")]
-    with pytest.raises(ContractError, match="sex: form missing"):
-        generate(policy, plan, forms={})
-    with pytest.raises(ContractError, match="sex: form missing"):
-        generate(policy, plan, forms={"category.exact": ""})
-    with pytest.raises(ContractError, match="sex: form missing"):
-        generate(policy, plan, forms={"category.exact": "   "})
+def test_every_ladder_form_is_a_gate_form() -> None:
+    for rung, form in CONTRACT_FORMS.items():
+        assert form in VALIDATOR_FORMS or (form.startswith("^") and form.endswith("$")), rung
+        if form not in VALIDATOR_FORMS:
+            re.compile(form)
 
 
-def test_required_column_withheld_rejected() -> None:
-    policy = _policy({"ed_visits": {"columns": {"triage": _col(required=True)}}})
-    with pytest.raises(ContractError, match="ed_visits.triage: required column withheld"):
-        generate(policy, [_entry("ed_visits", "triage", "withheld")], forms=FORMS)
-
-
-def test_token_columns_carry_scope_and_missing_scope_rejected() -> None:
-    policy = _policy({
-        "ed_visits": {"columns": {"visit_id": _col(token_scope="release", required=True)}},
-        "turns": {"columns": {"conversation_id": _col(token_scope="conversation")}},
-    })
-    plan = [
-        _entry("ed_visits", "visit_id", "identifier.pseudonym"),
-        _entry("turns", "conversation_id", "identifier.pseudonym"),
-    ]
-    contract = generate(policy, plan, forms=FORMS)
+def test_token_columns_carry_scope_from_plan() -> None:
+    policy, plan = _build([
+        _entry("ed_visits", "visit_id", "id.pseudonym", REL),
+        _entry("turns", "conversation_id", "id.pseudonym", {"scope": "conversation"}),
+    ])
+    contract = generate(policy, plan)
     assert contract["tokens"] == [
         {"table": "ed_visits", "column": "visit_id", "scope": "release"},
         {"table": "turns", "column": "conversation_id", "scope": "conversation"},
     ]
-    assert contract["files"]["ed_visits.csv"]["columns"]["visit_id"]["form"] == TOKEN_FORM
-
-    bare = _policy({"ed_visits": {"columns": {"visit_id": _col()}}})
-    with pytest.raises(ContractError, match="visit_id: token scope missing"):
-        generate(bare, [_entry("ed_visits", "visit_id", "identifier.pseudonym")], forms=FORMS)
-
-    bad = _policy({"ed_visits": {"columns": {"visit_id": _col(token_scope="global")}}})
-    with pytest.raises(ContractError, match="token scope"):
-        generate(bad, [_entry("ed_visits", "visit_id", "identifier.pseudonym")], forms=FORMS)
+    assert contract["files"]["ed_visits.csv"]["columns"]["visit_id"]["form"] == "hex64"
+    for params in ({}, {"scope": "global"}):
+        policy, plan = _build([_entry("ed_visits", "visit_id", "id.pseudonym", params)])
+        with pytest.raises(ContractError, match="visit_id: token scope"):
+            generate(policy, plan)
 
 
-def test_digest_is_canonical_and_stable_across_runs() -> None:
-    policy = _policy({"ed_visits": {"columns": {
-        "sex": _col(qi=True),
-        "visit_id": _col(token_scope="release"),
-    }}})
-    plan = [
-        _entry("ed_visits", "visit_id", "identifier.pseudonym", {"domain": "visit"}),
-        _entry("ed_visits", "sex", "category.exact"),
-    ]
-    shuffled = list(reversed(plan))
-    first = generate(policy, plan, forms=FORMS)
-    second = generate(policy, shuffled, forms=FORMS)
+def test_plan_must_cover_policy_exactly() -> None:
+    policy, plan = _build([_entry("t", "a", "keep"), _entry("t", "b", "keep")])
+    with pytest.raises(ContractError, match="t.b: plan entry missing"):
+        generate(policy, plan[:1])
+    with pytest.raises(ContractError, match="t.z: not in policy"):
+        generate(policy, [*plan, _entry("t", "z", "keep")])
+    with pytest.raises(ContractError, match="t.a: duplicate plan entry"):
+        generate(policy, [*plan, _entry("t", "a", "keep")])
+    with pytest.raises(ContractError, match="no released files"):
+        generate(*_build([_entry("t", "a", "withheld")]))
+
+
+def test_digest_is_canonical_stable_and_the_manifest_digest() -> None:
+    policy, plan = _build([
+        _entry("ed_visits", "visit_id", "id.pseudonym", REL),
+        _entry("ed_visits", "sex", "keep"),
+    ])
+    first = generate(policy, plan)
+    second = generate(policy, list(reversed(plan)))
     assert canonical_bytes(first) == canonical_bytes(second)
-    assert digest(first) == digest(second)
-    assert digest(first) == hashlib.sha256(canonical_bytes(first)).hexdigest()
+    assert digest(first) == digest(second) == canonical_digest(first)
     assert len(digest(first)) == 64
-    raw = canonical_bytes({"b": 1, "a": [2, 1]})
-    assert raw == b'{"a":[2,1],"b":1}'
-    with pytest.raises(ValueError):
-        canonical_bytes({"n": float("nan")})
 
 
-def test_digest_rejects_unknown_contract_key() -> None:
-    policy = _policy({"ed_visits": {"columns": {"sex": _col()}}})
-    contract = generate(policy, [_entry("ed_visits", "sex", "category.exact")], forms=FORMS)
-    planted = {**contract, "pass": True}
+def test_digest_rejects_unknown_keys_and_unsorted_lists() -> None:
+    qi = (
+        {"table": "t", "column": "a", "derived": "a"},
+        {"table": "t", "column": "b", "derived": "b"},
+    )
+    policy, plan = _build([_entry("t", "a", "keep"), _entry("t", "b", "keep")], qi)
+    contract = generate(policy, plan)
+    with pytest.raises(ContractError, match="unknown key"):
+        digest({**contract, "pass": True})
+    planted = copy.deepcopy(contract)
+    planted["files"]["t.csv"]["columns"]["a"]["extra"] = "x"
     with pytest.raises(ContractError, match="unknown key"):
         digest(planted)
-    planted_col = json.loads(canonical_bytes(contract))
-    planted_col["files"]["ed_visits.csv"]["columns"]["sex"]["extra"] = "x"
-    with pytest.raises(ContractError, match="unknown key"):
-        digest(planted_col)
+    planted = copy.deepcopy(contract)
+    planted["qi"].reverse()
+    with pytest.raises(ContractError, match="unsorted"):
+        digest(planted)
 
 
 def test_unknown_plan_key_rejected() -> None:
-    policy = _policy({"ed_visits": {"columns": {"sex": _col()}}})
-    entry = _entry("ed_visits", "sex", "category.exact")
-    entry["note"] = "planted"
+    policy, plan = _build([_entry("t", "a", "keep")])
+    plan[0]["note"] = "planted"
     with pytest.raises(ContractError, match="unknown key"):
-        generate(policy, [entry], forms=FORMS)
+        generate(policy, plan)
 
 
-def test_dotted_derivation_rejected_so_manifest_name_token_holds() -> None:
-    policy = _policy({"lab_results": {"columns": {
-        "sampled_ts": _col(qi=True, derived_from="ed_visits.visit_id"),
-        "visit_id": _col(),
-    }}})
-    plan = [
-        _entry("lab_results", "sampled_ts", "category.exact"),
-        _entry("lab_results", "visit_id", "category.exact"),
-    ]
-    with pytest.raises(ContractError, match="derived_from"):
-        generate(policy, plan, forms=FORMS)
+# --- the real gate (ticket 04) over a release built from a generated contract -------------
+
+_SAMPLE = {
+    "id.pseudonym": "a" * 64, "keep": "x", "ts.month_hour": "2025-03-01T14:00", "ts.hour": "2025-03-04T14:00",
+    "age.band10": "30-39", "icd.3": "J18", "num.exact": "37.5", "geo.full": "Espoo",
+}
 
 
-def test_load_forms_uses_ladders_table_when_present(monkeypatch: pytest.MonkeyPatch) -> None:
-    import sys
-    import types
-
-    fake = types.ModuleType("pets_release.ladders")
-    fake.RUNG_FORMS = {"from_sibling": r"^sibling$"}
-    monkeypatch.setitem(sys.modules, "pets_release.ladders", fake)
-    assert load_forms()["from_sibling"] == r"^sibling$"
-    assert "identifier.pseudonym" not in load_forms()
+def _contract_checks():
+    return [c for c in registry.all_checks() if c.name.startswith("contract.")]
 
 
-def test_load_forms_fallback_pins_month_hour_regex() -> None:
-    forms = load_forms()
-    assert forms["timestamp.month_hour"] == MONTH_HOUR_FORM
-    assert forms["identifier.pseudonym"] == TOKEN_FORM
+def _write_release(root, contract, rows: dict) -> None:
+    for name, spec in contract["files"].items():
+        columns = sorted(spec["columns"])
+        with (root / name).open("w", encoding="utf-8", newline="") as fh:
+            writer = csv.writer(fh)
+            writer.writerow(columns)
+            for row in rows[name]:
+                writer.writerow([row[c] for c in columns])
 
 
-def test_digest_uses_manifest_digest_when_present(monkeypatch: pytest.MonkeyPatch) -> None:
-    import sys
-    import types
+def _synthetic():
+    qi = ({"table": "ed_visits", "column": "date_of_birth", "derived": "age_band"},)
+    policy, plan = _build([
+        _entry("ed_visits", "visit_id", "id.pseudonym", REL),
+        _entry("ed_visits", "date_of_birth", "age.band10", {"ref_column": "date_of_birth"}),
+        _entry("ed_visits", "arrival_ts", "ts.month_hour"),
+        _entry("ed_visits", "icd10_primary", "icd.3"),
+        _entry("ed_visits", "temp_c", "num.exact"),
+        _entry("ed_visits", "municipality", "geo.full"),
+        _entry("ed_visits", "sex", "keep"),
+        _entry("ed_visits", "postcode", "withheld"),
+    ], qi)
+    contract = generate(policy, plan)
+    sample = {
+        "visit_id": "a" * 64, "age_band": "30-39", "arrival_ts": "2025-03-01T14:00",
+        "icd10_primary": "J18", "temp_c": "37.5", "municipality": "Espoo", "sex": "F",
+    }
+    return contract, {"ed_visits.csv": [dict(sample), {**sample, "visit_id": "b" * 64, "age_band": "90+"}]}
 
-    fake = types.ModuleType("pets_release.manifest")
-    fake.canonical_digest = lambda _obj: "ab" * 32
-    monkeypatch.setitem(sys.modules, "pets_release.manifest", fake)
-    policy = _policy({"ed_visits": {"columns": {"sex": _col()}}})
-    contract = generate(policy, [_entry("ed_visits", "sex", "category.exact")], forms=FORMS)
-    assert digest(contract) == "ab" * 32
+
+def test_generated_contract_passes_the_gate_contract_checks(tmp_path) -> None:
+    contract, rows = _synthetic()
+    _write_release(tmp_path, contract, rows)
+    result = run_checks(tmp_path, contract, checks=_contract_checks())
+    assert {r.check for r in result.records} == {"contract.columns", "contract.files", "contract.forms"}
+    assert [(r.check, r.status) for r in result.records if r.status != "pass"] == []
+    assert not result.refused
 
 
-def test_released_column_in_withheld_table_rejected() -> None:
-    policy = _policy({"clinical_notes": {"withheld": True, "columns": {"note_text": _col()}}})
-    with pytest.raises(ContractError, match="released in withheld table"):
-        generate(policy, [_entry("clinical_notes", "note_text", "category.exact")], forms=FORMS)
+def test_gate_refuses_a_cell_outside_the_generated_form(tmp_path) -> None:
+    contract, rows = _synthetic()
+    rows["ed_visits.csv"][0]["arrival_ts"] = "2025-03-17T14:30"
+    rows["ed_visits.csv"][1]["age_band"] = "1985-02-03"
+    _write_release(tmp_path, contract, rows)
+    result = run_checks(tmp_path, contract, checks=_contract_checks())
+    assert result.refused
+    forms = next(r for r in result.records if r.check == "contract.forms")
+    assert forms.status == "fail"
+    assert {v.column for v in forms.violations} == {"arrival_ts", "age_band"}
 
 
-def test_digest_rejects_unsorted_qi() -> None:
-    policy = _policy({"ed_visits": {"columns": {"sex": _col(qi=True), "municipality": _col(qi=True)}}})
-    plan = [
-        _entry("ed_visits", "municipality", "category.exact"),
-        _entry("ed_visits", "sex", "category.exact"),
-    ]
-    contract = generate(policy, plan, forms=FORMS)
-    contract["qi"].reverse()
-    with pytest.raises(ContractError, match="unsorted"):
-        digest(contract)
+def test_gate_refuses_a_withheld_column_in_the_release(tmp_path) -> None:
+    contract, rows = _synthetic()
+    _write_release(tmp_path, contract, rows)
+    path = tmp_path / "ed_visits.csv"
+    path.write_text(path.read_text(encoding="utf-8").replace("age_band", "postcode", 1), encoding="utf-8")
+    result = run_checks(tmp_path, contract, checks=_contract_checks())
+    columns = next(r for r in result.records if r.check == "contract.columns")
+    assert columns.status == "fail"
+    assert {v.label for v in columns.violations} == {"extraColumn", "missingRequiredColumn"}

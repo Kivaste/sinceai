@@ -1,20 +1,11 @@
 """Release contract generator (ticket 10).
 
-``generate(policy, plan)`` builds the pinned contract. ``digest`` is the SHA-256
-hex of its canonical JSON, the same bytes as ``pets_release.manifest.canonical_digest``
-when that module is importable.
+``generate(policy, plan)`` builds the contract from ticket 09's ``ScenarioPolicy`` and a final
+Plan, with forms from ticket 07 and the digest from ticket 02. See ``generate`` for the shape.
 
-Policy and plan shapes, and the rung-form seam, are documented on ``generate``.
+    python -m pets_release.contract    # contracts for both hand plans (schema names and forms only)
 """
 
-from pets_release.contract.canonical import canonical_bytes
-from pets_release.contract.forms import load_forms
 from pets_release.contract.generate import ContractError, digest, generate
 
-__all__ = [
-    "ContractError",
-    "canonical_bytes",
-    "digest",
-    "generate",
-    "load_forms",
-]
+__all__ = ["ContractError", "digest", "generate"]
