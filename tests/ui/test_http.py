@@ -294,7 +294,9 @@ def test_choose_and_refused_result_views_show_purpose_and_failing_checks(tmp_pat
         frame.loc[0, "disposition"] = "4111 1111 1111 1111"
         frame.to_csv(path, index=False, lineterminator="\n")
 
-    with running(tmp_path, edit=plant) as (_, url, _, _):
+    # Keep the planted field in this deliberate gate-refusal demonstration;
+    # the default search correctly withholds this unnecessary field.
+    with running(tmp_path, edit=plant, launch_extra=("--plan", "hand")) as (_, url, _, _):
         status, choose = request(url)
         assert status == 200
         assert all(text in choose for text in ("HEALTH-S1", "CS-S1", "Purpose checks", "Privacy floors", "Run scenario"))
