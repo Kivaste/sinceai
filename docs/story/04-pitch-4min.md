@@ -1,7 +1,13 @@
 # Four-minute pitch and six-minute Q&A draft
 
-PREP. Five beats follow D40, not feature count. All measurements come from the
-final-SHA manifests under 06's source rules. No final text is created yet.
+**PRE-FILL at df79ec20538e8f02b3256911fb01d549e5af0ebb** (#103, D61).
+Five beats follow D40, not feature count. Numbers trace to this build's manifest
+through `PRE-FILL-SOURCES.md`; refresh from the final manifest after the freeze.
+This is not final-SHA proof or submission readiness.
+
+“sinceai's product is the engine: a library and CLI running as a self-hosted
+pipeline step in your infrastructure, from CI, Airflow or dbt. The web app is the
+approval and audit console for one run. A self-hosted REST API is future work.”
 
 ## 1. Data types and privacy risks (0:00–0:40)
 
@@ -10,12 +16,13 @@ studying crowding and revisits. Removing names leaves ages, places, timestamps a
 joins. Our field inventory records the column roles and their evidence.”
 
 Show the detector separately from the release inventory: a policy-derived inventory
-is not evidence that the detector measured those roles. Original scorecard privacy:
-{{manifest.measured.privacy.components[component=privacy].before}}. Below-k ROW
+is not evidence that the detector measured those roles. Supporting scorecard privacy:
+0.1716. Below-k ROW
 share before protection:
-{{manifest.measured.privacy.components[component=k_below_5_share].before}}. Attacker
-persona rates and a full k histogram: not measured unless supplied by the final
-manifest. A scorecard linkage component is not both attacker personas.
+0.9557179814438992. Attacker
+persona rates: not measured (#138 at this revision). A full k histogram is not
+measured (no histogram field). A scorecard linkage component is not both attacker
+personas; linkage zero means no shared QIs left to match on, not resistance.
 
 ## 2. PETs and why (0:40–1:20)
 
@@ -28,50 +35,43 @@ Show `pets`, `fieldJustifications` and purpose checks together. Read actual rung
 and parameters, not an old hand plan. A bounded detail-ladder search is not proof
 of a global optimum or that every original utility threshold was met.
 
-<!-- IF #127 -->“Parallel search scoring is opt-in. We require byte-identical
-releases at each worker count and fail closed on a failed worker.” Demonstrate
-only if final-SHA runs verify those claims; do not invent a speed-up.<!-- END IF -->
+Search optimises k and purpose-check utility, not attackers. Attacker measurements
+are post-hoc. No parallel-search speed-up is measured by this run.
 
 ## 3. Protected output (1:20–1:55)
 
 Show field-level before-to-after changes from `fieldJustifications`: birth date
 to `age_band`, names and `clinical_notes` withheld, required join keys pseudonymised.
-<!-- IF #106 -->Show D33's lab test-name decision exactly as the final manifest records it: a
-coarsened distinction for H-U7 if adopted, or an explicitly justified threat-model
-exception in residual risks. Do not assert that a pending policy change shipped.
-<!-- END IF -->
+Show `lab_results.test_name`'s actual rung and its H-U7 score from 06. Reporting
+that rung is not proof of D58's all-kept-catalogued-QI coverage: not measured (#146).
 
-<!-- IF #117 -->The human can show protected real-kit rows only through the web
+The human can show protected real-kit rows only through the web
 app's display-time limited verify and matching manifest-file digests. Label:
 “Synthetic kit data © Since AI ry, CC BY 4.0. In a real deployment only the recipient
 sees this view.” No raw input, row maps or truth/. Agents never inspect or
-screenshot the real-kit row view; synthetic fixtures only.<!-- END IF -->
+screenshot the real-kit row view; synthetic fixtures only.
 
 ## 4. Measured privacy and utility (1:55–3:10)
 
 Display the full targets met / not met table from 06. Show original thresholds
 beside policy sacrifice floors, and post-suppression purpose-check scores.
-Independent per-person minimum k:
-{{manifest.measured.privacy.components[component=person_k.min].after}}; PERSON
+Producer-attested per-person minimum k on this manifest's QI set:
+5.0; PERSON
 share below k:
-{{manifest.measured.privacy.components[component=person_k.below_k_share].after}}.
+0.0.
 Scorecard privacy after:
-{{manifest.measured.privacy.components[component=privacy].after}}. Disclose its
+1.0. Disclose its
 renamed-`age_band` blind spot. Overall scorecard utility and composite: not measured
-in the current manifest; never substitute baseline utility or composite scores.
+in this manifest; never substitute baseline utility or composite scores. Per-person
+k needs the key holder's full verification; recipients cannot independently
+recompute it. Separate k on both D58 QI sets: not measured (#146). k with diagnosis
+known and its measured risk share: not measured (#143); never estimate the share.
 
-<!-- IF #24 -->“CS-S1 is a different sharing scenario: contact-centre turns to an
-external LLM analytics vendor, with conversation-scoped placeholders. Each target
-label needs exact-match recall of 0.98. SECRET is an unmet target.”
-
-Read the complete per-label target note:
-{{manifest.residualRisks[risk=target-recall-secret].description}}.
-The note carries the pre-change count and denominator; later results are optimistic
-because held-out misses informed the redactor change. Show the accepted turn-level
-template-held-out split, not a claim of untouched conversation-held-out evaluation.
-Show NATIONAL_ID, PAYMENT_CARD and IBAN separately; no combined-score substitute.
-Any D29 fallback must show withheld-turn counts and the utility effect, and disclose
-reduced checker independence. A strict gate pass does not erase unmet recall.<!-- END IF -->
+“CS-S1 is future work, dropped from the demoable cut under D46. Its strict-gate
+refusal is a limitation, not a released scenario. The CS evaluation path uses
+typed, numbered placeholders and D37 masking, never realistic fake values. Typed
+labels are clearer and avoid accidental matches in the shared synthetic population.”
+CS-S1 recall and purpose-check figures: not measured (no CS manifest in this run).
 
 ## 5. Sharing scenario and limitations, then proof (3:10–4:00)
 
@@ -79,16 +79,23 @@ reduced checker independence. A strict gate pass does not erase unmet recall.<!-
 individual care or arbitrary reuse. Pseudonymised data is still personal data.
 The data is synthetic and templated. Unmeasured risks are not zero.”
 
-Show final manifest `fitFor`, `notFitFor`, `sacrifices`, `residualRisks`; then the
-actual gate N/N (list not-applicable checks separately), fresh limited verify and
-fresh full verify outcomes on the final SHA. Show a deliberate synthetic refusal
+Show the manifest's `fitFor`, `notFitFor`, `sacrifices`, `residualRisks`; then this
+build's actual gate N/N (not-applicable separately), limited verify and full verify
+outcomes from PRE-FILL-SOURCES. Final-SHA refusal: not demonstrated by this run.
+Before final submission, show a deliberate synthetic refusal
 through the real CLI, with check name and counts only. Never reuse an old green
 line. Limited verify cannot authenticate the HMAC signature; full verify needs the
 controller's inputs and key. “Share only what the purpose needs.”
 
-<!-- IF #32 -->“The optional front end turns request text and the data dictionary
-into a needs spec; it never sees row values.” Keep only after the D39 go decision
-and final-SHA proof. Otherwise describe it solely as future work.<!-- END IF -->
+“The pipeline publishes only after a release and successful verification. Exit 1
+means refused or failed check; exit 2 means bad input/configuration or unknown state.
+Both stop publication. Rows and keys stay in-house; optional LLM drafting receives
+only request/schema information and is not an integration demonstrated by this run.”
+
+D60 evidence pack: not generated (#147 pending at this build). It is a DPO/Findata-
+shaped document from the authenticated signed manifest: purpose, method/parameters,
+measured attacker risk, utility, residual risks and reproducibility. Legal basis
+and DPIA are “to be supplied by the controller”, not legal approval from a score.
 
 ## Jury Q&A
 
@@ -96,13 +103,15 @@ and final-SHA proof. Otherwise describe it solely as future work.<!-- END IF -->
 |---|---|
 | Does a passed gate mean anonymity? | No. Assertions cover named checks and labels only; residual risks remain. Pseudonymised data is personal data. |
 | Which targets did you miss? | Read 06's final table. An accepted policy sacrifice is not a full pass at the original utility threshold; unavailable values say not measured. |
-| Can the recipient verify everything? | No. Limited verify re-runs release-scope checks; producer-scope checks, signature and inputs require full verify with the controller's key. |
+| Can the recipient verify everything? | No. Limited verify re-runs release-scope checks; person-k is producer-attested. Producer-scope checks and signature need full verify with inputs and key. |
 | Does the scorecard prove attack resistance? | No. Its renamed-age-band blind spot is disclosed; person-k and row-k are distinct. Both attacker-persona rates must be measured separately or say not measured. |
 | What if the gate misses a name? | Low-severity text labels have residual risks, not universal absence assertions. Known coverage gaps and the evaluation frame stay visible. |
 | Is the processing offline? | The release engine blocks network access; do not confuse an optional request-only front end with transmitting rows. Same inputs, key, creation time and versions must produce identical bytes; demonstrate rather than assert a new run passed. |
 | What remains future work? | Unmerged or unverified optional features, broader sharing scenarios and generalisation beyond templated synthetic data. |
-
-<!-- IF #24 -->SECRET Q&A: the original held-out result is an unmet target against
-0.98. Quote {{manifest.residualRisks[risk=target-recall-secret].description}} rather
-than replacing it with a later optimistic score. Independent gate zero hits is a
-separate bounded check, not recall proof.<!-- END IF -->
+| How does it fit our platform? | Run the library/CLI inside CI, Airflow or dbt today. The web app is the approval and audit console; self-hosted REST API is future work. |
+| What happens when privacy checks fail? | Exit 0 releases; publish only after successful verification. Exit 1 refuses or fails; exit 2 is bad input/configuration or unknown. Either nonzero exit stops publication. |
+| Does our data leave our infrastructure? | Source rows and keys stay local; only approved protected tables and the content-free signed manifest go to the intended recipient. Optional LLM drafting is request/schema-only. |
+| Why no realistic fake names? | Typed, numbered placeholders make redaction explicit and avoid accidental matches with the shared population. This CS evaluation choice is not a passed CS-S1 release claim. |
+| Where is the CS-S1 release? | Future work under D46; the strict-gate refusal is an honest limitation. No CS-S1 measurements are claimed from the HEALTH-S1 manifest. |
+| Does the evidence pack replace a DPIA? | No. #147 is not generated in this PRE-FILL; legal basis and DPIA remain controller-supplied, even when an evidence pack is available. |
+| Did unseen detection achieve a perfect score? | No accuracy score is claimed. The export requires full column coverage, with privacy_role and subtype for every column; omission refuses the export. The organisers score both dimensions. |
