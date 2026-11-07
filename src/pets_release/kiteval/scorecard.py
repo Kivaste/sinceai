@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import os
 import subprocess
 import sys
@@ -18,10 +17,31 @@ from pets_release.kiteval.report import ScorecardRejected, validate_report
 from pets_release.kiteval.rowmap import Lineage, RowMapRejected, validate_row_map
 from pets_release.offline import child_env
 from pets_release.offline import install as install_offline_guard
+from pets_release.strict_json import loads_strict  # leaf module: no pipeline imports (fu85)
 
 
 def _read_str(path, **kw) -> pd.DataFrame:
     return pd.read_csv(path, dtype=str, keep_default_na=False, na_filter=False, **kw)
+
+
+def _strict_child_inputs(root: Path, *dirs: Path) -> None:
+    """#131: the pets-eval child (and its io helpers used in-process here) read the kit's JSON / JSONL with a raw
+    last-wins parser we may not edit. So, before any of them runs, every ``*.json`` and every non-blank line of
+    every ``*.jsonl`` under the kit's ``metadata/`` and the given dataset folders must parse through
+    ``loads_strict`` (duplicate keys and NaN/Infinity refuse). Content-free refusal; nothing is released."""
+    files = sorted(p for d in (Path(root) / "metadata", *dirs) if d.is_dir() for p in d.rglob("*")
+                   if p.is_file() and p.suffix.lower() in (".json", ".jsonl"))
+    for p in files:
+        try:
+            raw = p.read_bytes()
+            if p.suffix.lower() == ".json":
+                loads_strict(raw)
+            else:
+                for line in raw.decode("utf-8").splitlines():
+                    if line.strip():
+                        loads_strict(line)
+        except (OSError, ValueError):
+            raise ScorecardRejected("input_not_strict") from None
 
 
 def _load_catalog(root: Path) -> pd.DataFrame:
@@ -80,11 +100,17 @@ def _expected_sections(root: Path, dataset: str, scen: dict, catalog, tables: di
     the release's columns, used to prove an input was really removed."""
     all_specs = kit_io.load_attack_specs(root)
     spec_file = root / "metadata" / "attack_specs.json"
-    trajectories = json.loads(spec_file.read_text(encoding="utf-8")).get("trajectories", []) if spec_file.exists() else []
+    try:  # #131: strict (duplicate keys, NaN/Infinity refuse), never last-wins
+        trajectories = loads_strict(spec_file.read_bytes()).get("trajectories", []) if spec_file.exists() else []
+    except (OSError, ValueError, AttributeError):
+        raise ScorecardRejected("structure") from None
     out = {}
     for name, path in tables.items():
         cols = set(_read_str(path, nrows=0).columns)
         text = catalog[(catalog.table == name) & (catalog.privacy_role == "free_text")].column
+        # the kit's k step runs on exactly these (scorecard.evaluate_table: catalogued QIs in the release)
+        qis = catalog[(catalog.table == name) & (catalog.privacy_role == "quasi_identifier")].column
+        kept = set(release.get(name, ()))
         specs = [s for s in all_specs if s["dataset"] == dataset and s["table"] == name]
         linkage = None
         identity = _load_identity_truth(root, dataset, name)
@@ -110,6 +136,7 @@ def _expected_sections(root: Path, dataset: str, scen: dict, catalog, tables: di
                                          "location": [t[k] for k in ("lat", "lon", "place") if t.get(k)]}
                              for t in trajectories if t["dataset"] == dataset and t["table"] == name},
             "columns": sorted(release.get(name, ())),
+            "quasi_identifiers": sorted({c for c in qis if c in kept}),
         }
     return out
 
@@ -133,6 +160,7 @@ def run_scorecard(original_dir, protected_dir, *, scenario: str, root, rowmaps: 
         raise ScorecardRejected("out_dir_inside_release")
     if any(_inside(p, protected_dir) for p in rowmaps.values()):
         raise RowMapRejected("rowmap_in_release")  # row maps are private scoring aids
+    _strict_child_inputs(root, original_dir)  # the release folder is tables + the strictly loaded manifest only
     scen = kit_io.get_scenario(scenario, root)
     if not scen or scen.get("dataset") != original_dir.name:
         raise ScorecardRejected("scenario")
@@ -176,7 +204,7 @@ def run_scorecard(original_dir, protected_dir, *, scenario: str, root, rowmaps: 
     if proc.returncode != 0:
         raise ScorecardRejected("evaluator_failed")
     try:
-        report = json.loads((out_dir / "scorecard.json").read_text(encoding="utf-8"))
+        report = loads_strict((out_dir / "scorecard.json").read_bytes())  # #131: duplicate keys / NaN refuse
     except (OSError, ValueError):
         raise ScorecardRejected("structure") from None
     return validate_report(report, scenario=scenario, required_tasks=scen.get("utility_requirements", []),

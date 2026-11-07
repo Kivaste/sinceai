@@ -17,6 +17,7 @@ from pets_release.llm.prompt import build_messages
 from pets_release.llm.screen import MIN_KEY_CHECK, has_credential, has_value_shape
 from pets_release.llm.vocabulary import vocabulary_for
 from pets_release.llm.wire import exact_text
+from pets_release.manifest.canonical import loads_strict
 
 MAX_REQUEST = 2000
 MAX_REPLY_BYTES = 262_144  # whole HTTP body; the sender enforces the same cap before buffering
@@ -109,7 +110,7 @@ def draft_policy(
     if not isinstance(raw, (bytes, bytearray)) or len(raw) > MAX_REPLY_BYTES:
         raise LlmError("the provider reply is missing or larger than the size limit")
     try:
-        content = json.loads(raw)["choices"][0]["message"]["content"]
+        content = loads_strict(bytes(raw))["choices"][0]["message"]["content"]  # #131: duplicate keys / NaN refuse
     except (ValueError, KeyError, IndexError, TypeError):
         raise LlmError("the provider reply is not a chat-completions response") from None
     if not isinstance(content, str) or not content.strip():

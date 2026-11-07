@@ -4,7 +4,20 @@ import json
 
 import pytest
 
-from pets_release.kiteval.report import ScorecardRejected, validate_report
+from pets_release.kiteval.report import ScorecardRejected
+from pets_release.kiteval.report import validate_report as _production_validate_report
+
+# #110: every released table's expectation names the catalogued QIs it keeps; the fixture's k result below
+# was computed on this one. Tests that give their own ed_visits expectation still get it unless they set it.
+K_EXPECTED = {"quasi_identifiers": ["municipality"]}
+
+
+def validate_report(report, *, expected_sections=None, **kw):
+    """The production gate, with the fixture's QI derivation added to ed_visits."""
+    exp = dict(expected_sections or {})
+    exp["ed_visits"] = {**K_EXPECTED, **exp.get("ed_visits", {})}
+    return _production_validate_report(report, expected_sections=exp, **kw)
+
 
 REQUIRED = ("H-U2", "H-U4")
 TABLES = {"ed_visits": 4, "lab_results": 3}  # original table -> original rows, as the adapter read them
@@ -24,7 +37,7 @@ def _passing_report() -> dict:
                 "status": "released",
                 "rows_original": 4,
                 "rows_protected": 4,
-                "k_anonymity": {"n": 4, "min_k": 2, "share_below": {"k<5": 0.5}},
+                "k_anonymity": {"qis": ["municipality"], "n": 4, "min_k": 2, "share_below": {"k<5": 0.5}},
                 "free_text": {
                     "chief_complaint": {
                         "evaluated": True,
@@ -729,6 +742,14 @@ def test_exported_lists_are_sorted_whatever_the_input_order():
     out = _validate(report)
     assert [t["table"] for t in out["tables"]] == sorted(t["table"] for t in out["tables"])
     assert [t["id"] for t in out["tasks"]] == ["H-U2", "H-U4"]
+
+
+def test_released_table_without_a_qi_derivation_is_a_fail_not_a_skipped_k_check():
+    """#110: no expectation for the k evaluation is never read as "nothing to check"."""
+    with pytest.raises(ScorecardRejected) as caught:
+        _production_validate_report(_passing_report(), scenario="HEALTH-S1", required_tasks=REQUIRED,
+                                    tables=TABLES, released=RELEASED, expected_sections=None)
+    assert caught.value.reason == "structure"
 
 
 def test_not_applicable_is_sorted(monkeypatch):

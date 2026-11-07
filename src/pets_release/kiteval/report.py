@@ -248,7 +248,40 @@ def _check_released(name: str, tr: dict, expected: dict, found: list) -> None:
             raise ScorecardRejected("zero_denominator")
     elif not isinstance(k.get("note"), str):
         raise ScorecardRejected("structure")
+    _check_k(tr, expected)
     _check_results(name, tr, expected, found)
+
+
+K_RISK = "records with k<5"
+NO_QI_NOTE = "no catalogued quasi-identifier kept"
+
+
+def _check_k(tr: dict, expected: dict) -> None:
+    """The k evaluation the kit must have run, from the caller's derivation (catalogued QIs the release
+    keeps): QIs kept -> a k result over exactly those QIs, on every protected row, and its k<5 component;
+    none kept -> exactly the kit's "no QI kept" note and no k component. A missing derivation is a fail."""
+    qis = expected.get("quasi_identifiers")
+    if not isinstance(qis, list) or not all(isinstance(c, str) for c in qis):
+        raise ScorecardRejected("structure")
+    k, risks = tr["k_anonymity"], tr["risks"]
+    if not qis:
+        if k != {"note": NO_QI_NOTE} or K_RISK in risks:
+            raise ScorecardRejected("k_mismatch")
+        return
+    if "n" not in k:
+        raise ScorecardRejected("not_evaluated")
+    if not isinstance(k.get("qis"), list) or not all(isinstance(c, str) for c in k["qis"]) \
+            or set(k["qis"]) != set(qis):
+        raise ScorecardRejected("k_mismatch")
+    if k["n"] != tr["rows_protected"]:
+        raise ScorecardRejected("row_count_mismatch")
+    share = k.get("share_below").get("k<5") if isinstance(k.get("share_below"), dict) else None
+    if not _num(share) or not 0.0 <= share <= 1.0:
+        raise ScorecardRejected("structure")
+    if K_RISK not in risks:
+        raise ScorecardRejected("missing_section")
+    if risks[K_RISK] != share:
+        raise ScorecardRejected("risk_mismatch")
 
 
 def _check_table(name: str, tr: dict, expected: dict, found: list, *, rows_original: int,
@@ -300,7 +333,9 @@ def validate_report(report: dict, *, scenario: str, required_tasks: Iterable[str
 
     `expected_sections` (table -> {"free_text": [columns that must be evaluated], "linkage": bool})
     names the result sections this scenario requires beyond the baseline ones; the caller derives it
-    from the kit (catalog, gold spans, identity data). Unavailable evaluations pass only with a BENIGN_REASONS
+    from the kit (catalog, gold spans, identity data). Every released table's entry must carry
+    "quasi_identifiers" (the catalogued QIs the release keeps): the k evaluation is checked against it and
+    a released table without it is a fail (#110). Unavailable evaluations pass only with a BENIGN_REASONS
     reason, and are exported as `not_applicable` with their code."""
     tables, released = _row_counts(tables), _row_counts(released)
     if set(released) - set(tables):
