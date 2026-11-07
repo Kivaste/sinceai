@@ -1,6 +1,11 @@
 from __future__ import annotations
 
+import sys
 from pathlib import Path
+
+for _p in (Path(__file__).resolve().parent, Path(__file__).resolve().parents[1] / "run"):  # cs_kit, run_helpers
+    if str(_p) not in sys.path:
+        sys.path.insert(0, str(_p))
 
 import pandas as pd
 import pytest

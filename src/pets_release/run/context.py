@@ -39,6 +39,14 @@ SCENARIO_SPEC = {
         "technical_identifiers": [("ed_visits", "ambulance_unit"), ("ed_visits", "attending_physician_id"),
                                   ("clinical_notes", "author_staff_id")],
     },
+    # CS-S1 (ticket 23): no k target, so person/joins only describe the source; identifiers come from
+    # pets_release.cs_s1.identifiers (turns.turn_id counts as one only when the contract tokenises it)
+    "CS-S1": {
+        "person": {"table": "conversations", "column": "customer_id"},
+        "record_keys": {"conversations": "conversation_id", "turns": "turn_id", "customers": "customer_id"},
+        "joins": [],
+        "technical_identifiers": [],
+    },
 }
 
 
@@ -76,6 +84,11 @@ def producer_context(*, scenario_id: str, policy, source: Mapping[str, pd.DataFr
     if spec is None:
         raise ContextError("no producer-context spec for this scenario")
     idents = sorted({*policy.direct_identifiers, *spec["technical_identifiers"]})
+    if scenario_id == "CS-S1":
+        from pets_release.cs_s1 import identifiers as cs_identifiers
+
+        tokenised = any((t["table"], t["column"]) == ("turns", "turn_id") for t in contract.get("tokens", []))
+        idents = sorted((d["table"], d["column"]) for d in cs_identifiers(policy, turn_id_kept=not tokenised))
     ctx = {
         "source": dict(source),
         "record_keys": dict(spec["record_keys"]),
