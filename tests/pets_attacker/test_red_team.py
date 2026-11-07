@@ -247,3 +247,35 @@ def test_release_join_without_a_person_register_is_not_measured(tmp_path):
                  "--rungs", str(rungs)]) == 0
     rj = json.loads(out.read_text(encoding="utf-8"))["red_team"]["release_join"]
     assert rj["evaluated"] is False and rj["reason"] == "no-register" and rj["reidentification_rate"] is None
+
+
+def test_planted_target_is_missed_by_the_kits_public_pets_eval_attacker_and_hit_by_the_red_team(tmp_path):
+    """r3 (Spec, acceptance): the kit's own public attacker (the unmodified ``pets_eval scorecard`` child, as the
+    measurer runs it) on the same synthetic kit and release misses both planted targets; the red team's
+    cross-dataset attack re-identifies both. Seams: the pets-eval CLI and the attacker CLI (real children)."""
+    import shutil
+
+    kit, rel, rungs = _kit(tmp_path)
+    (kit / "metadata/scenarios.json").write_text(
+        json.dumps([{"id": "RT-S1", "dataset": "health", "utility_requirements": []}]), encoding="utf-8")
+    scoring = tmp_path / "scoring"  # pets-eval: row maps outside the release
+    scoring.mkdir()
+    shutil.move(str(rel / "rowmap_ed_visits.csv"), scoring / "rowmap_ed_visits.csv")
+    env = {"PYTHONPATH": str(ROOT / "src"), "PYTHONUTF8": "1", "TZ": "UTC", "PYTHONDONTWRITEBYTECODE": "1",
+           "SYSTEMROOT": __import__("os").environ.get("SYSTEMROOT", "")}
+    pe_out = tmp_path / "pets-eval"
+    p = subprocess.run([sys.executable, "-m", "pets_eval", "scorecard", "--original", str(kit / "data/health"),
+                        "--protected", str(rel), "--scenario", "RT-S1", "--root", str(kit), "--out", str(pe_out),
+                        "--rowmap", f"ed_visits={scoring / 'rowmap_ed_visits.csv'}"],
+                       env=env, capture_output=True, text=True, timeout=600, check=False)
+    assert p.returncode == 0, p.stderr[-500:]  # pets_eval missing or failing is a fail, never a skip
+    public = json.loads((pe_out / "scorecard.json").read_text(encoding="utf-8"))["tables"]["ed_visits"]["linkage"]
+    news = public["news_clips_health"]
+    assert news["n_targets_in_data"] == 2 and news["n_unique_claims"] == 0 and news["reidentification_rate"] == 0.0
+    out = tmp_path / "attack.json"
+    p = subprocess.run([sys.executable, "-m", "pets_attacker", "--kit", str(kit), "--release", str(rel), "--label", "t",
+                        "--out", str(out), "--rungs", str(rungs), "--scoring-dir", str(scoring)],
+                       env=env, capture_output=True, text=True, timeout=600, check=False)
+    assert p.returncode == 0, p.stderr[-500:]
+    cross = json.loads(out.read_text(encoding="utf-8"))["red_team"]["cross_dataset"]
+    assert cross["n_targets"] == 2 and cross["reidentification_rate"] == 1.0
