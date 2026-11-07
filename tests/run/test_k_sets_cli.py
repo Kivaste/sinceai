@@ -15,6 +15,9 @@ Failure rows (trigger -> wrong result before #146):
   R4 kSets removed, re-signed -> verify exits 0; want exit 1 (schema)
   R5 the scenario QI set cannot be computed -> silently omitted or a pass; want not_measured with a reason and
        verify --full exit 1
+  R6 a published table altered after signing, re-signed -> verify --full re-derived the tables from the source and
+       matched; want the released figures measured on the published files, exit 1 naming measured.kSets
+  R7 run and verify agree a set is not_measured -> want exit 1 on the not-measured rule alone
 """
 from __future__ import annotations
 
@@ -22,7 +25,7 @@ import json
 
 import pandas as pd
 from run_helpers import TEST_KEY, build_kit, cli, coarse_qis, run_args
-from test_verify_assertion_rerun import MANIFEST, copy_release, resign
+from test_verify_assertion_rerun import MANIFEST, copy_release, resign, set_cell
 
 KS = "kSets"
 
@@ -173,3 +176,32 @@ def test_a_set_that_cannot_be_computed_is_not_measured_and_fails_full_verify(tmp
     full = cli("verify", "--full", "--kit", str(kit), str(rel))
     assert full.returncode == 1, full.stdout + full.stderr
     assert "measured.kSets" in full.stdout, full.stdout
+
+
+def test_full_verify_measures_released_k_on_the_published_tables(released, tmp_path):
+    """R6 (round 2): a published table altered after signing (one retained record's QI changed to a value no one
+    else has), digests rebound and re-signed with the same key -> the signed ``released`` k figures no longer
+    describe the files; verify --full must say so in measured.kSets, not re-derive the tables from the source."""
+    kit, rel = copy_release(released, tmp_path)
+    set_cell(rel, "ed_visits.csv", "municipality", "zz-planted-146")  # synthetic marker, not a kit value
+    resign(rel)
+    full = cli("verify", "--full", "--kit", str(kit), str(rel))
+    assert full.returncode == 1, full.stdout + full.stderr
+    assert "measured.kSets: re-measure differs from the manifest" in full.stdout, full.stdout
+
+
+def test_full_verify_refuses_a_not_measured_set_even_when_the_re_measure_agrees(tmp_path, monkeypatch, capsys):
+    """R7 (round 2): the run and verify --full agree the scenario set is not_measured (same build); the agreement
+    is not a pass: verify --full refuses on the explicit not-measured rule alone."""
+    from pets_release.run import ksets
+    from pets_release.verify import cli as verify_cli
+
+    monkeypatch.setattr(ksets, "SCENARIO_QI", {})
+    kit, rel = _run_in_process(tmp_path, monkeypatch, coarse_qis)
+    assert _sets(_manifest(rel))["scenario"]["status"] == "not_measured"
+    capsys.readouterr()
+    code = verify_cli.main(["--full", "--kit", str(kit), str(rel)])
+    out = capsys.readouterr().out
+    assert code == 1, out
+    assert "measured.kSets: re-measure differs" not in out, out  # the sections agree
+    assert "measured.kSets: scenario: not measured" in out, out
