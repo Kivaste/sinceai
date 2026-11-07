@@ -63,3 +63,12 @@ def load_clinical_notes_frame(kit_root) -> Frame:
         gold={k: gold.get(k, []) for k in texts},
         conversation_of={k: k for k in texts},
     )
+
+
+def subset(frame: Frame, ids) -> Frame:
+    ids = [i for i in sorted(ids)]
+    return Frame(
+        texts={i: frame.texts[i] for i in ids},
+        gold={i: frame.gold.get(i, []) for i in ids},
+        conversation_of={i: frame.conversation_of[i] for i in ids},
+    )

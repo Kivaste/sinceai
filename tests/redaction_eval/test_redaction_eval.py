@@ -160,7 +160,7 @@ def test_person_reported_twice():
     dev = {"A": [sp(0, 4, "PERSON")]}
     r = person_twice(gold, gaz, dev, ["A", "B"])
     assert r["controller_gazetteer"]["recall"] == 1.0
-    assert r["dev_only_lexicon"]["recall"] == 0.5
+    assert r["dev_lexicon"]["recall"] == 0.5
     assert r["controller_gazetteer"]["support"] == 2
 
 
@@ -204,3 +204,105 @@ def test_turn_mode_split_zero_overlap_on_shared_templates():
     assert s.held_out_turns and s.dev_turns
     assert not (s.held_out_skeletons & s.dev_skeletons)
     assert not (set(s.held_out_turns) & set(s.dev_turns))
+
+
+# ---------- review round 1 ----------
+import subprocess  # noqa: E402
+
+from pets_release.redaction_eval.harness import evaluate_frames  # noqa: E402
+from pets_release.redaction_eval.frame import Frame  # noqa: E402
+from pets_release.redaction_eval.predictors import regex_predictor  # noqa: E402
+
+
+def _git_repo(path):
+    subprocess.run(["git", "init", "-q", str(path)], check=True)
+    return path
+
+
+def test_spot_check_autodetects_repo_when_root_omitted(tmp_path, monkeypatch):
+    repo = _git_repo(tmp_path / "repo")
+    (repo / "sub").mkdir()
+    fr = make_frame()
+    with pytest.raises(ValueError):
+        export_spot_check(fr, {}, repo / "sub" / "sheet.csv", n=1)  # repo_root omitted
+    # a WRONG explicit root must not switch the check off
+    other = tmp_path / "elsewhere"
+    other.mkdir()
+    with pytest.raises(ValueError):
+        export_spot_check(fr, {}, repo / "sub" / "sheet.csv", n=1, repo_root=other)
+    # cwd inside a repo, target outside any repo: allowed
+    monkeypatch.chdir(repo)
+    outside = tmp_path / "out" / "sheet.csv"
+    assert export_spot_check(fr, {}, outside, n=1).exists()
+    # git-ignored folder inside repo: allowed
+    (repo / ".gitignore").write_text("private/\n")
+    assert export_spot_check(fr, {}, repo / "private" / "s.csv", n=1).exists()
+
+
+def test_spot_check_fails_closed_without_git(tmp_path, monkeypatch):
+    repo = _git_repo(tmp_path / "repo")
+    monkeypatch.setenv("PATH", str(tmp_path))  # git not runnable
+    with pytest.raises(ValueError):
+        export_spot_check(make_frame(), {}, repo / "s.csv", n=1)
+
+
+def _tmpl_frames():
+    fr = _template_frame()
+    notes = Frame(texts={"N1": "x a@b.fi"}, gold={"N1": [sp(2, 8, "EMAIL")]}, conversation_of={"N1": "N1"})
+    return fr, notes
+
+
+def test_predictor_factory_never_sees_held_out_turns():
+    fr, notes = _tmpl_frames()
+    seen = []
+
+    def factory(dev):
+        seen.append(set(dev.texts))
+        return regex_predictor
+
+    rep = evaluate_frames(fr, notes, factory)
+    held = set(split_by_skeleton(fr, mode="turn").held_out_turns)
+    assert held and len(seen) == 1
+    assert not (seen[0] & held)
+    assert rep["split_mode"] == "turn"
+    assert isinstance(rep["conversations_in_both_partitions"], int)
+
+
+def test_person_twice_not_measured_when_variant_missing():
+    fr, notes = _tmpl_frames()
+    rep = evaluate_frames(fr, notes, lambda d: regex_predictor)
+    assert rep["person_twice_held_out"]["status"] == "not_measured"
+    assert rep["person_twice_held_out"]["reason"]
+    one = evaluate_frames(fr, notes, lambda d: regex_predictor,
+                          person_variants={"controller_gazetteer": lambda d: regex_predictor})
+    assert one["person_twice_held_out"]["status"] == "not_measured"
+
+
+def test_person_twice_records_named_variants():
+    fr, notes = _tmpl_frames()
+    rep = evaluate_frames(fr, notes, lambda d: regex_predictor,
+                          person_variants={"controller_gazetteer": lambda d: regex_predictor,
+                                           "dev_lexicon": lambda d: (lambda t: [])})
+    p = rep["person_twice_held_out"]
+    assert p["status"] == "measured"
+    assert p["variants"] == ["controller_gazetteer", "dev_lexicon"]
+    assert p["controller_gazetteer"]["support"] == p["dev_lexicon"]["support"] > 0
+
+
+def test_precision_floor_not_set_pass_and_fail():
+    fr, notes = _tmpl_frames()
+    assert evaluate_frames(fr, notes, lambda d: regex_predictor)["precision_floor"] == {"status": "not_set"}
+    bad = evaluate_frames(fr, notes, lambda d: (lambda t: [sp(0, len(t), "PERSON")]), precision_floor=0.5)
+    assert bad["precision_floor"]["status"] == "fail" and bad["passed"] is False
+    good = evaluate_frames(fr, notes, lambda d: (lambda t: (
+        [sp(t.index("Anna"), len(t), "PERSON")] if "Anna" in t else [])), precision_floor=0.5)
+    assert good["precision_floor"]["status"] == "pass" and good["passed"] is True
+
+
+def test_cli_exit_code_nonzero_below_floor(monkeypatch):
+    import pets_release.redaction_eval.__main__ as m
+
+    fr, notes = _tmpl_frames()
+    monkeypatch.setattr(m, "load_frames", lambda kit: (fr, notes))
+    assert m.main(["--kit", "x", "--precision-floor", "0.5"]) == 1  # regex finds nothing -> precision 0
+    assert m.main(["--kit", "x"]) == 0

@@ -1,4 +1,4 @@
-"""Local-only spot-check sheet. Never inside the repo tree unless git-ignored."""
+﻿"""Local-only spot-check sheet. Never inside a repo tree unless git-ignored (fails closed)."""
 from __future__ import annotations
 
 import csv
@@ -15,10 +15,35 @@ def _inside(path: Path, root: Path) -> bool:
         return False
 
 
+def _find_repo(start: Path):
+    p = start.resolve()
+    for d in (p, *p.parents):
+        if (d / ".git").exists():
+            return d
+    return None
+
+
 def _git_ignored(path: Path, root: Path) -> bool:
-    r = subprocess.run(["git", "-C", str(root), "check-ignore", "-q", str(path.resolve())],
-                       capture_output=True)
-    return r.returncode == 0  # only exit 0 counts; anything else is unknown = not ignored
+    try:
+        r = subprocess.run(["git", "-C", str(root), "check-ignore", "-q", str(path.resolve())],
+                           capture_output=True)
+    except OSError:
+        return False  # git unavailable = unknown = not ignored
+    return r.returncode == 0  # only exit 0 counts
+
+
+def check_destination(path, repo_root=None) -> None:
+    """Refuse a destination inside any repo (detected from the target, the cwd, and an optional
+    explicit root; an explicit root never disables detection) unless git ignores it."""
+    path = Path(path)
+    anchor = path.resolve().parent
+    while not anchor.exists() and anchor != anchor.parent:
+        anchor = anchor.parent
+    roots = {r for r in (_find_repo(anchor), _find_repo(Path.cwd()),
+                         Path(repo_root).resolve() if repo_root else None) if r is not None}
+    for r in roots:
+        if _inside(path, r) and not _git_ignored(path, r):
+            raise ValueError("spot-check sheet must be outside the repo tree or in a git-ignored folder")
 
 
 def redact_text(text: str, spans) -> str:
@@ -35,8 +60,7 @@ def redact_text(text: str, spans) -> str:
 
 def export_spot_check(frame, pred: dict, path, n: int = 200, repo_root=None, ids=None) -> Path:
     path = Path(path)
-    if repo_root is not None and _inside(path, Path(repo_root)) and not _git_ignored(path, Path(repo_root)):
-        raise ValueError("spot-check sheet must be outside the repo tree or in a git-ignored folder")
+    check_destination(path, repo_root)
     pool = sorted(ids if ids is not None else frame.texts)
     pool.sort(key=lambda t: hashlib.sha256(t.encode()).hexdigest())
     pick = pool[:n]

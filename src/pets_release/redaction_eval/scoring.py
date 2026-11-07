@@ -1,4 +1,4 @@
-"""Exact-match scoring pinned to pets_eval.text.span_scores(mode="exact").
+﻿"""Exact-match scoring pinned to pets_eval.text.span_scores(mode="exact").
 
 Frame = all train turns; gold-absent turns are empty so predictions there are false positives.
 Note: the CS utility module's span_scores defaults to overlap and untyped; do not use it here.
@@ -66,7 +66,7 @@ def person_twice(gold: dict, pred_gazetteer: dict, pred_dev_lexicon: dict, ids) 
     ids = set(ids)
     g = {k: v for k, v in gold.items() if k in ids}
     out = {}
-    for name, pred in (("controller_gazetteer", pred_gazetteer), ("dev_only_lexicon", pred_dev_lexicon)):
+    for name, pred in (("controller_gazetteer", pred_gazetteer), ("dev_lexicon", pred_dev_lexicon)):
         p = {k: v for k, v in pred.items() if k in ids}
         b = _micro_block(g, p, {"PERSON"})
         out[name] = {"precision": b["precision"], "recall": b["recall"], "f2": b["f2"],
