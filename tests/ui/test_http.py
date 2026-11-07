@@ -270,16 +270,20 @@ def test_server_and_children_are_offline_while_loopback_http_works(tmp_path):
         deadline = time.monotonic() + 20
         while not output.exists() and time.monotonic() < deadline:
             time.sleep(0.05)
-        assert json.loads(output.read_text()) == [True, True]
         assert request(url, "/api/scenarios")[0] == 200
+    # Existence can precede completion of the writer's rename on Windows.
+    # running() has now waited for the server to exit and close all probe handles.
+    assert json.loads(output.read_text()) == [True, True]
 
 
-def test_http_client_survives_guarded_pytest_worker():
+def test_http_client_survives_guarded_pytest_worker(tmp_path):
     """HTTP seam: prior in-process CLI calls cannot disable the synthetic browser client."""
+    # Keep nested pytest out of the shared numbered-temp tree and its cleanup.
+    args = ['-q', '-p', 'no:cacheprovider', '--basetemp', str(tmp_path / 'guarded-worker'),
+            'tests/ui/test_http.py::test_server_and_children_are_offline_while_loopback_http_works']
     code = (
         "from pets_release.offline import install; install(); import pytest\n"
-        "result = pytest.main(['-q', '-p', 'no:cacheprovider', "
-        "'tests/ui/test_http.py::test_server_and_children_are_offline_while_loopback_http_works'])\n"
+        f"result = pytest.main({args!r})\n"
         "import socket\n"
         "try: socket.socket()\n"
         "except OSError: pass\n"
