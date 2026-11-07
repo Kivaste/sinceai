@@ -60,12 +60,12 @@ pets-release detect unseen --out ..\sinceai-out\unseen_field_labels.csv --format
 
 `--created` pins the creation time. The same input, key, creation time and tool versions give a byte-identical release.
 
-<!-- docs-test: pending ticket=21 -->
+<!-- docs-test: run -->
 ```powershell
 pets-release run --scenario HEALTH-S1 --out ..\sinceai-out\health-s1 --created 2026-11-07T08:00:00Z --kit "$env:PETS_KIT"
 ```
 
-<!-- docs-test: pending ticket=21 -->
+<!-- docs-test: skip reason=cs-s1-run-needs-ticket-23 -->
 ```powershell
 pets-release run --scenario CS-S1 --out ..\sinceai-out\cs-s1 --created 2026-11-07T08:00:00Z --kit "$env:PETS_KIT"
 ```
@@ -80,14 +80,14 @@ Recipient mode needs only the release folder. It re-runs every release-scope che
 VERIFIED (limited): N release-checked, M producer-attested
 ```
 
-<!-- docs-test: skip reason=verify-blocked-by-unregistered-check -->
+<!-- docs-test: run -->
 ```powershell
 pets-release verify ..\sinceai-out\health-s1
 ```
 
 Controller or auditor mode (`--full`) also needs the kit and the key. It re-runs every check in the registry, including the producer-scope ones (original-value survival, reversible hashes, key material, per-person k), the input digests, the tool revision and the signature. Any check that cannot run is a failure.
 
-<!-- docs-test: skip reason=full-verify-needs-producer-context -->
+<!-- docs-test: run -->
 ```powershell
 pets-release verify --full --kit "$env:PETS_KIT" ..\sinceai-out\health-s1
 ```

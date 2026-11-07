@@ -18,6 +18,7 @@ import re
 import shlex
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -28,11 +29,8 @@ ALLOWED_SKIP_REASONS = (
     "environment-setup",
     "sets-secret-placeholder-only",
     "runs-the-whole-test-suite-recursively",
-    # verify --full needs producer context (inputs, key, signed release) from a real run; promote after ticket 21
-    "full-verify-needs-producer-context",
-    # the fixture release claims `release.manifest-shapes`, which no merged ticket registers yet, so
-    # recipient verify correctly fails closed; promote to run once the check is registered
-    "verify-blocked-by-unregistered-check",
+    # the CS-S1 release needs ticket 23 (turn_id check); guarded below
+    "cs-s1-run-needs-ticket-23",
 )
 SUBCOMMANDS = ("run", "verify", "detect", "dashboard", "submission")
 MARKER = re.compile(r"<!--\s*docs-test:\s*(run|skip|pending)\b([^>]*?)-->")
@@ -41,6 +39,13 @@ BLOCK = re.compile(r"(?:^(<!--.*?-->)[ \t]*\r?\n)?^```powershell[ \t]*\r?\n(.*?)
 
 def _load_conftest():
     spec = importlib.util.spec_from_file_location("_tests_conftest", ROOT / "tests" / "conftest.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _load_run_helpers():
+    spec = importlib.util.spec_from_file_location("_run_helpers", ROOT / "tests" / "run" / "run_helpers.py")
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod
@@ -113,11 +118,9 @@ def test_block(block, tmp_path):
     conf = _load_conftest()
     first = block["body"].strip().splitlines()[0]
     if block["kind"] == "skip":
-        if block["arg"] == "reason=verify-blocked-by-unregistered-check":
-            from pets_release.checks.registry import all_checks
-
-            assert "release.manifest-shapes" not in {c.name for c in all_checks()}, (
-                "release.manifest-shapes is registered now: promote the verify block to run"
+        if block["arg"] == "reason=cs-s1-run-needs-ticket-23":
+            assert not (ROOT / "src" / "pets_release" / "checks" / "turn_id").exists(), (
+                "ticket 23 has landed (checks/turn_id): promote the CS-S1 run block to run"
             )
         _transcript(f"SKIP block {block['n']} ({block['arg']}): {first}")
         pytest.skip(f"named reason: {block['arg']}")
@@ -132,30 +135,47 @@ def test_block(block, tmp_path):
         pytest.skip(f"not built yet: pets-release {sub} is available after {block['arg']}{note}")
 
     assert block["kind"] == "run", f"block {block['n']} has no marker"
-    kit = conf.write_minikit(tmp_path / "kit")
-    # synthetic stand-in for the unlabelled `unseen` export, copied from the synthetic fixture
-    (kit / "data" / "unseen").mkdir()  # the real unseen export is one table
+    rh = _load_run_helpers()
+    kit = rh.build_kit(tmp_path / "kit", rh.coarse_qis)  # synthetic minikit, QIs coarsened so the hand plan reaches k
+    # synthetic stand-in for the unlabelled `unseen` export (one table), copied from the synthetic fixture
+    (kit / "data" / "unseen").mkdir()
     shutil.copy(ROOT / "tests" / "fixtures" / "minikit" / "health" / "ed_visits.csv", kit / "data" / "unseen")
     out_root = tmp_path / "out"
-    shutil.copytree(ROOT / "tests" / "fixtures" / "manifest" / "release", out_root / "health-s1")
-    env = conf.cli_env({"PETS_KIT": str(kit)})
+    env = rh.env({"PETS_KIT": str(kit)})  # PETS_HMAC_KEY is the published test-only constant
+    run_cmd = next(s for b2 in BLOCKS if b2["kind"] == "run" for s in _statements(b2["body"])
+                   if s.startswith("pets-release run --scenario HEALTH-S1"))
+
+    def execute(stmt):
+        stmt_x = _expand(stmt, env).replace("..\\sinceai-out\\", str(out_root) + os.sep)
+        args = [a.strip('"') for a in shlex.split(stmt_x, posix=False)][1:]
+        for s in SUBCOMMANDS:
+            if args and args[0] == s:
+                assert _subcommand_exists(s), f"run block uses unbuilt subcommand {s}"
+        proc = subprocess.run([sys.executable, "-m", "pets_release", *args], cwd=ROOT, env=env,
+                              capture_output=True, text=True, encoding="utf-8", check=False)
+        return args, proc
+
+    if "health-s1" in block["body"] and not block["body"].lstrip().startswith("pets-release run"):
+        _, pre = execute(run_cmd)  # earlier README step: the release the later commands act on
+        assert pre.returncode == 0, f"prerequisite run failed: {pre.stdout[-300:]}{pre.stderr[-300:]}"
+
+    executed = 0
     for stmt in _statements(block["body"]):
         m = re.fullmatch(r'\$env:(\w+)\s*=\s*"(.*)"', stmt)
         if m:
             env[m.group(1)] = m.group(2)
             continue
         assert stmt.startswith("pets-release"), f"block {block['n']}: unrunnable statement {stmt!r}"
-        stmt_x = _expand(stmt, env).replace("..\\sinceai-out\\", str(out_root) + os.sep)
-        args = [a.strip('"') for a in shlex.split(stmt_x, posix=False)][1:]
-        for s in SUBCOMMANDS:
-            if args and args[0] == s:
-                assert _subcommand_exists(s), f"run block uses unbuilt subcommand {s}"
-        proc = conf.run_cli(*args, env=env)
-        _transcript(f"$ {stmt}\nexit={proc.returncode}\n{proc.stdout[:600]}{proc.stderr[:300]}")
+        args, proc = execute(stmt)
+        executed += 1
+        _transcript(f"$ {stmt}\nexit={proc.returncode}\n{proc.stdout[:800]}{proc.stderr[:300]}")
+        if args and args[0] == "verify" and "--full" in args:
+            assert "VERIFIED (full)" in proc.stdout, f"{stmt!r}: no full-verification line"
         if args and args[0] == "verify" and "--full" not in args:
             assert "VERIFIED (limited)" in proc.stdout, f"{stmt!r}: no limited-verification line"
             assert "VERIFIED (full)" not in proc.stdout
-        assert proc.returncode == 0, f"{stmt!r} exited {proc.returncode}: {proc.stderr[:300]}"
+        assert proc.returncode == 0, f"{stmt!r} exited {proc.returncode}: {proc.stdout[-300:]}{proc.stderr[:300]}"
+    assert executed, f"block {block['n']} is marked run but executed no command"
 
 
 @pytest.mark.parametrize(
