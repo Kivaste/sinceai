@@ -727,3 +727,24 @@ CS-S1 chain done-report + 4 reviews (23 + #53/#54/#56/#92) -> merge -> #63 -> 25
   5. Utilization flag on ticket/fu121-readme-examples (#121): not dispatchable. The native blocked-by #117 edge is recorded, and the flag is the #129 monitor defect (parked until the pin).
 - **Why:** Single orchestrator; close only on evidence (D31); D46 pre-pin scope.
 - **Evidence:** heartbeat session id; #32 comment 6707799630; session ses_e49bf4ce verdict.
+
+### Sat 16:00-16:22 - D49 pin fast path; train 23 stopped; review wave; D50/D51
+
+- **When:** Sat 16:00-16:22 EET
+- **Decision:**
+  1. **D49 (human, via the planning session):** #117 is frozen at 8a7d6a8. The round-3 delta reviews both APPROVE at 8a7d6a8 (Grok Standards, Sonnet Spec; fast track). I built the speculative pin c0ece5cd282e3b711d8c63ada55dfbbf39d6803a as a single `--no-ff` merge of 8a7d6a8 into 1c57760. It is not pushed, it lives in the detached worktree `sinceai-wt/pin-117`, and I reported it to the planning session at once. Pin train 24 (ses_e49a4f78) runs the fast tier, the slow tier and the #135 guard stopgap on that SHA.
+  2. **Deviation:** D49 says to use "the integration worktree", but that worktree was in use by train 23 (#30). To keep a single merger, I stopped train 23 before it pushed and built the pin in its own worktree. Train 23 had already gone green on b5b2470 (fast tier 2659 passed; slow tier 123 passed), but that evidence is for the old base only. #30 re-merges onto the pin, with a native blocked-by #117 edge.
+  3. **No decision-log pushes until the pin is pushed.** A push would stop c0ece5c from being a fast-forward of origin.
+  4. **Reviews recorded (per-axis comments on each issue):**
+     - #30 r5 at 9bab611: Grok Standards and Sol Spec APPROVE.
+     - #130 r1 at 796e718: Grok and Sonnet APPROVE. It waits on #117, #121 and #30.
+     - #128 r1 at 9a115ba: 4/4 APPROVE. It merges after the recording, once #30's strict xfails are removed.
+     - #80 r2 at fce77e3: Grok Standards, Sol Standards and Sol Spec APPROVE. It merges after the recording.
+     - #116 r3 at 0d1b51f: Grok APPROVE; Sonnet CHANGES REQUIRED, because the default 720 s timeout is below the measured 1128 s runtime. Round 4 went to Sol (ses_e49e7225): only the D34 lanes run by default, the measured lane becomes opt-in, and the measured timeout goes in docs/testing.md.
+     - #132: Grok Standards r1 APPROVE at eed24a7, superseded by round 2.
+  5. **#32:** the real Mistral run (D47) was done at 5e1bf09: draft exit 0, closed schema and semantic validation exit 0, request digest recorded, 0 key hits across 76 files, and the offline and guard tests pass. Sonnet's Spec evidence check gives APPROVE. D51 (human) amends AC3 to draft-only and removes ready-for-human. It merges after the pin.
+  6. **D50 (human):** app view 4 shows privacy as not_measured, so the video uses the measured dashboard from the pin proof. #136 (Sol, measured mode in the app) is dispatched after the pin.
+  7. **#106 r1** (Opus, core) at 1357e21: all 4 reviews dispatched. It took D33 branch A, and the search withholds test_name. Real kit: suppression 0.09942, minK 5, belowK 0.
+  8. **Utilization flags:** #121 and #130 have native blocked-by #117 edges, and so does #30 now. The flags come from the #129 defect.
+- **Why:** D49 makes the pin the only priority. One merger at a time. Close only on evidence (D31).
+- **Evidence:** pin worktree `sinceai-wt/pin-117`; logs in `sinceai-out/pin-c0ece5c/`; issue comments on #30, #80, #116, #117, #128 and #130; train 23 session ses_e49aa22e.
