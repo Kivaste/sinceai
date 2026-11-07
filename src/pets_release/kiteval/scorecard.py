@@ -12,7 +12,7 @@ import pandas as pd
 from pets_eval import io as kit_io
 
 from pets_release.kiteval.report import ScorecardRejected, validate_report
-from pets_release.kiteval.rowmap import RowMapRejected, validate_row_map
+from pets_release.kiteval.rowmap import Lineage, RowMapRejected, validate_row_map
 
 
 def _tables(folder: Path) -> dict[str, Path]:
@@ -26,12 +26,17 @@ def _inside(child: Path, parent: Path) -> bool:
 
 
 def run_scorecard(original_dir, protected_dir, *, scenario: str, root, rowmaps: dict[str, str | Path],
-                  out_dir) -> dict:
+                  lineage: dict[str, Lineage], out_dir) -> dict:
     """Validate row maps, run pets-eval scorecard in a child process, validate the report,
     and return the allowlisted aggregate summary. Raw output stays in `out_dir`.
 
+    lineage (table -> the writer's Lineage) is required for every protected table: without it a row map
+    can only be checked structurally, not for swapped or wrongly suppressed records.
+    All paths are resolved to absolute before the child starts (its cwd is out_dir).
+
     Raises ScorecardRejected / RowMapRejected; nothing missing, errored or empty passes."""
-    original_dir, protected_dir, root, out_dir = (Path(p) for p in (original_dir, protected_dir, root, out_dir))
+    original_dir, protected_dir, root, out_dir = (Path(p).resolve() for p in (original_dir, protected_dir, root, out_dir))
+    rowmaps = {t: Path(p).resolve() for t, p in rowmaps.items()}
     if _inside(out_dir, protected_dir) or _inside(protected_dir, out_dir):
         raise ScorecardRejected("out_dir_inside_release")
     scen = kit_io.get_scenario(scenario, root)
@@ -46,12 +51,14 @@ def run_scorecard(original_dir, protected_dir, *, scenario: str, root, rowmaps: 
             raise ScorecardRejected("unknown_table")
         if name not in rowmaps:
             raise RowMapRejected("missing_map")
+        if name not in lineage:
+            raise RowMapRejected("missing_lineage")
         orig = pd.read_csv(orig_files[name], dtype=str, keep_default_na=False)
         key = kit_io.record_key(catalog, original_dir.name, name, orig)
         if key is None:
             raise RowMapRejected("no_source_key")
         prot_rows = len(pd.read_csv(pfile, dtype=str, keep_default_na=False))
-        validate_row_map(rowmaps[name], protected_rows=prot_rows, source_keys=orig[key])
+        validate_row_map(rowmaps[name], protected_rows=prot_rows, source_keys=orig[key], expected_lineage=lineage[name])
     if set(rowmaps) - set(prot_files):
         raise RowMapRejected("map_without_table")
 
@@ -75,3 +82,5 @@ def run_scorecard(original_dir, protected_dir, *, scenario: str, root, rowmaps: 
         raise ScorecardRejected("structure") from None
     return validate_report(report, scenario=scenario,
                            required_tasks=scen.get("utility_requirements", []), tables=orig_files)
+
+

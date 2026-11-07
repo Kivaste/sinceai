@@ -5,9 +5,17 @@ import json
 import pandas as pd
 import pytest
 
-from pets_release.kiteval import RowMapRejected, ScorecardRejected, run_scorecard
+from pets_release.kiteval import (
+    Lineage,
+    RowMapRejected,
+    ScorecardRejected,
+    run_scorecard,
+)
 
 ROWS = [("c1", "refund", "300"), ("c2", "refund", "500"), ("c3", "billing", "200"), ("c4", "billing", "400")]
+
+
+LINEAGE = Lineage(final=tuple(r[0] for r in ROWS), suppressed=frozenset())
 
 
 def _write(path, rows, cols=("conversation_id", "intent", "handle_time_s")):
@@ -44,7 +52,8 @@ def release(tmp_path):
 
 def _run(kit, release, **over):
     prot, rms, out = release
-    args = {"scenario": "TEST-S1", "root": kit, "rowmaps": rms, "out_dir": out, **over}
+    args = {"scenario": "TEST-S1", "root": kit, "rowmaps": rms, "out_dir": out,
+            "lineage": {"conversations": LINEAGE}, **over}
     return run_scorecard(kit / "data" / "customer_service", prot, **args)
 
 
@@ -117,3 +126,31 @@ def test_evaluator_exit_code_nonzero_is_a_fail(kit, release, monkeypatch):
     with pytest.raises(ScorecardRejected) as caught:
         _run(kit, release)
     assert caught.value.reason == "evaluator_failed"
+
+
+def test_lineage_is_required_for_every_protected_table(kit, release):
+    with pytest.raises(RowMapRejected) as caught:
+        _run(kit, release, lineage={})
+    assert caught.value.reason == "missing_lineage"
+
+
+def test_row_map_that_disagrees_with_writer_lineage_is_rejected(kit, release):
+    rms = release[1]
+    pd.DataFrame({"protected_row": range(4), "original_record_id": ["c2", "c1", "c3", "c4"]}).to_csv(
+        rms["conversations"], index=False)
+    with pytest.raises(RowMapRejected) as caught:
+        _run(kit, release)
+    assert caught.value.reason == "lineage_mismatch"
+
+
+def test_relative_paths_work(kit, release, tmp_path, monkeypatch):
+    import os
+
+    prot, rms, out = release
+    monkeypatch.chdir(tmp_path)
+    rel = lambda p: os.path.relpath(p, tmp_path)
+    summary = run_scorecard(
+        rel(kit / "data" / "customer_service"), rel(prot), scenario="TEST-S1", root=rel(kit),
+        rowmaps={k: rel(v) for k, v in rms.items()}, out_dir=rel(out), lineage={"conversations": LINEAGE})
+    assert summary["tasks"][0]["status"] == "ok"
+

@@ -96,3 +96,37 @@ def test_unknown_scenario_is_rejected(mini_kit):
     with pytest.raises(ScorecardRejected) as caught:
         purpose_checks("NOPE-S9", {}, {}, root=mini_kit)
     assert caught.value.reason == "scenario"
+
+
+# ---- review round 1: only task columns become numbers ---------------------
+
+
+def _spy_task(monkeypatch, seen, needs, table="turns"):
+    from pets_eval.utility import UtilityTask
+
+    def fn(orig, prot):
+        seen["orig"], seen["prot"] = orig, prot
+        return {"score": 1.0, "metric": "m", "detail": {}}
+
+    task = UtilityTask("X-U1", "customer_service", table, "d", "aggregate", fn, needs, ["TEST-S1"])
+    monkeypatch.setattr("pets_release.kiteval.purpose.all_tasks", lambda *a, **k: [task])
+
+
+def test_numeric_looking_text_keeps_its_string_form(tmp_path, monkeypatch):
+    (tmp_path / "metadata").mkdir()
+    (tmp_path / "metadata" / "scenarios.json").write_text(
+        json.dumps([{"id": "TEST-S1", "dataset": "customer_service", "utility_requirements": ["X-U1"]}]), encoding="utf-8")
+    (tmp_path / "metadata" / "field_catalog.csv").write_text(
+        "dataset,table,column,privacy_role,data_kind,subtype\n"
+        "customer_service,turns,text,free_text,text,\n", encoding="utf-8")
+    seen = {}
+    _spy_task(monkeypatch, seen, needs=["text", "n"])
+    turns = pd.DataFrame({"text": ["007", "0123", "42"], "n": ["1", "2", ""], "other": ["001", "002", "003"]}, dtype=str)
+    res = purpose_checks("TEST-S1", {"turns": turns}, {"turns": turns}, root=tmp_path)
+    assert res[0]["status"] == "ok"
+    for side in ("orig", "prot"):
+        t = seen[side]["turns"]
+        assert list(t["text"]) == ["007", "0123", "42"]  # free text stays a string even though task lists it
+        assert list(t["other"]) == ["001", "002", "003"]  # not a task column: untouched
+        assert pd.api.types.is_numeric_dtype(t["n"]) and t["n"].isna().sum() == 1  # task column converted
+    assert list(turns["text"]) == ["007", "0123", "42"]

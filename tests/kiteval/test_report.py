@@ -229,3 +229,84 @@ def test_withheld_text_without_denominator_is_not_a_zero_denominator_fail():
     }
     summary = _validate(report)
     assert summary["scenario"] == "HEALTH-S1"
+
+
+# ---- review round 1 -------------------------------------------------------
+
+
+def _reject(mutate, reason):
+    report = _passing_report()
+    mutate(report)
+    with pytest.raises(ScorecardRejected) as caught:
+        _validate(report)
+    assert caught.value.reason == reason
+
+
+def _ed(report):
+    return report["tables"]["ed_visits"]
+
+
+def test_caught_attack_failure_in_linkage_is_a_fail():
+    def m(r):
+        _ed(r)["linkage"]["news_clips_health"] = {"evaluated": False, "reason": "error: MARKER_SHOULD_NOT_EXPORT"}
+
+    _reject(m, "error_status")
+
+
+def test_text_not_evaluated_for_lack_of_row_map_is_a_fail():
+    def m(r):
+        _ed(r)["free_text"]["chief_complaint"] = {"evaluated": False, "reason": "needs a row map to align texts"}
+
+    _reject(m, "not_evaluated")
+
+
+def test_nested_trace_anywhere_is_a_fail():
+    def m(r):
+        _ed(r)["hash_attack"] = {"col": {"trace": "MARKER_SHOULD_NOT_EXPORT"}}
+
+    _reject(m, "error_status")
+
+
+def test_missing_k_anonymity_record_is_a_fail():
+    _reject(lambda r: _ed(r).pop("k_anonymity"), "structure")
+
+
+def test_k_anonymity_without_denominator_or_note_is_a_fail():
+    _reject(lambda r: _ed(r).update(k_anonymity={"min_k": 2}), "structure")
+
+
+def test_released_table_without_scored_risks_is_a_fail():
+    _reject(lambda r: _ed(r).pop("risks"), "structure")
+
+
+def test_zero_protected_rows_is_a_fail():
+    _reject(lambda r: _ed(r).update(rows_protected=0), "zero_denominator")
+
+
+def test_missing_protected_rows_is_a_fail():
+    _reject(lambda r: _ed(r).pop("rows_protected"), "structure")
+
+
+def test_linkage_without_target_count_is_a_fail():
+    def m(r):
+        _ed(r)["linkage"]["news_clips_health"] = {"evaluated": True, "reidentification_rate": 0.0}
+
+    _reject(m, "structure")
+
+
+def test_free_text_record_without_evaluated_flag_is_a_fail():
+    _reject(lambda r: _ed(r)["free_text"].update(chief_complaint={"n_values": 3}), "structure")
+
+
+def test_export_rejects_non_integer_row_counts():
+    _reject(lambda r: _ed(r).update(rows_protected={"x": "MARKER_SHOULD_NOT_EXPORT"}), "structure")
+
+
+def test_export_rejects_odd_task_id_and_risk_key_and_score_type():
+    _reject(lambda r: r["utility"][0].update(id="H-U2 MARKER value"), "structure")
+    _reject(lambda r: r["risk_components"].update({"ed_visits: MARKER\nvalue=1234": 0.1}), "structure")
+    _reject(lambda r: r["utility"][0].update(score="1.0"), "not_scored")
+
+
+def test_export_rejects_odd_dataset_and_table_names():
+    _reject(lambda r: r.update(dataset="health; MARKER"), "structure")
