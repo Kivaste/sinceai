@@ -99,7 +99,7 @@ def test_measured_search_summarises_the_log(searched):
     assert [p["step"] for p in s["points"]] == [e["step"] for e in log]
     for p, e in zip(s["points"], log):
         assert p["accepted"] == e["accepted"]
-        assert p["risk"] == max(e["risk"].values())
+        assert p["risk"] == round(max(e["risk"].values()), 6)  # 6 dp: test_search_summary_shape
     assert isinstance(s["boundReached"], bool)
     final = [e for e in _log(out) if e["step"] == "final"]
     assert len(final) == 1 and final[0]["accepted"] and "(privacy pass)" in final[0]["reason"]

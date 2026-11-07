@@ -99,14 +99,16 @@ def _cited(text: str) -> list[int]:
 
 def search_summary(log: list, stats: dict) -> dict:
     """``measured.search``: one point per non-final candidate (risk = worst component, utility = mean score,
-    a missing score counting 0), the candidate count and the accepted count."""
+    a missing score counting 0), the candidate count and the accepted count. Risk and utility are rounded to
+    6 decimals, like the manifest's other shares: a raw float's long digit run would read as an identifier
+    to the manifest identifier-shape scan (#61)."""
     steps = [e for e in log if e["step"] != "final"]
     points = []
     for e in steps:
         risk = list(e["risk"].values()) or [0.0]
         scores = [0.0 if v is None else float(v) for v in e["scores"].values()] or [0.0]
-        points.append({"step": e["step"], "risk": float(max(risk)), "utility": sum(scores) / len(scores),
-                       "accepted": bool(e["accepted"])})
+        points.append({"step": e["step"], "risk": round(float(max(risk)), 6),
+                       "utility": round(sum(scores) / len(scores), 6), "accepted": bool(e["accepted"])})
     return {"status": "measured",
             "source": "search log in the scoring folder (search_log.jsonl): one candidate per point",
             "candidates": len(steps), "accepted": sum(1 for p in points if p["accepted"]),
