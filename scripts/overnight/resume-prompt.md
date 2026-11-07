@@ -24,6 +24,8 @@ Read `C:\Users\kivas\.config\opencode\skills\implement-spec\SKILL.md` and follow
 
 ### Merge and clean up as soon as a ticket is ready (user rule, Sat 02:15)
 
+**Merge train (D28, Sat 10:08, user decision):** the merger takes **up to 4 ready tickets at once**, in Merge-after order. It merges them one after another into its integration worktree, then runs the full suite **once** on the combined result with **`pytest -n 16`** (the priority helper keeps the merger's tests at Normal priority; agent tests stay BelowNormal). If it's green, push and close them all. If it's red, split the batch in half, reset to the last green tip, and retest each half until the failing ticket is isolated. That ticket goes back to its implementer; the rest merge. Only one merger runs at a time.
+
 A ticket is **ready** when both reviews pass on its current head and its tests are green. Do not let ready tickets wait. For each one, immediately:
 
 1. **Merge.** A merger subagent merges the ticket branch into `integration/pets-release`, respecting Merge after. In the integration worktree it then runs the **full** test suite (`pytest -n 8`, with `PYTHONUTF8=1`, `PYTHONDONTWRITEBYTECODE=1`, `TZ=UTC`) on the merged result. If it's green, push. If it's red, don't push: send the failure back to an implementer on that ticket and keep the branch.
