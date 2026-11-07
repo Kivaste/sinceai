@@ -78,6 +78,7 @@ def redaction(kit_root, spans) -> dict:
             risks.append(_risk(lab, {"status": "measured", "value": e["recall"],
                                      "denominator": {"unit": "turns", "n": len(held)},
                                      "source": "exact-match recall on template-held-out train turns"}))
+    risks += _target_risks(by, sc, len(held))
     report = _clean({"status": "measured", "split": split.summary(), "held_out": sc, "full_train": full})
     return {"measured": measured, "risks": risks, "frame": frame, "pred": pred, "held": held, "report": report}
 
@@ -99,6 +100,41 @@ def _clean(v):
     if math.isnan(f) or math.isinf(f):
         return None
     return int(f) if float(f).is_integer() and not isinstance(v, float) else f
+
+
+TARGET_LABELS = ("IBAN", "NATIONAL_ID", "PAYMENT_CARD", "SECRET")  # spec #1 CS-S1: recall >= 0.98 each
+TARGET_RECALL = 0.98
+_HOLDOUT = ("exact-match on the template-held-out split at turn level (skeleton hash, 20%; the accepted "
+            "ticket 14 deviation from conversation level)")
+
+
+def _target_risks(by: dict, sc: dict, n_held: int) -> list[dict]:
+    """Per-label held-out recall of every CS-S1 target label against the spec floor, and SECRET precision; each
+    stated on its own, never only as the combined figure (Sol r1 Spec)."""
+    den = {"unit": "turns", "n": n_held}
+    out = []
+    for lab in TARGET_LABELS:
+        e = by.get(lab)
+        rid = f"target-recall-{lab.lower().replace('_', '-')}"
+        if not e or not e["support"] or e["recall"] is None:
+            rate = not_measured("no held-out gold spans for this label")
+            verdict = f"not measured against the spec floor {TARGET_RECALL}"
+        else:
+            rate = {"status": "measured", "value": e["recall"], "denominator": den,
+                    "source": "redactor spans vs kit gold, " + _HOLDOUT}
+            verdict = (f"{e['tp']}/{e['support']} held-out spans, "
+                       + ("meets" if e["recall"] >= TARGET_RECALL else "BELOW") + f" the spec floor {TARGET_RECALL}")
+        out.append({"risk": rid, "kind": "note", "label": lab, "rate": rate,
+                    "description": f"{lab} recall: {verdict}; {_HOLDOUT}"})
+    sec = sc["cs_s1_target"]["per_label"].get("SECRET", {})
+    p = _num(sec.get("precision"))
+    out.append({"risk": "target-precision-secret", "kind": "note", "label": "SECRET",
+                "rate": not_measured("no held-out SECRET predictions") if p is None else
+                {"status": "measured", "value": p, "denominator": den,
+                 "source": "redactor spans vs kit gold, " + _HOLDOUT},
+                "description": "SECRET precision: over-redaction of gate-flagged cue spans (the #92 cross-turn step "
+                               "and gate-following cue rules) is the accepted privacy-safe cost; " + _HOLDOUT})
+    return out
 
 
 def _risk(label, rate) -> dict:

@@ -308,6 +308,7 @@ class StructuredPass:
             nxt = text[spans[idx + 1][0]:spans[idx + 1][1]].lower().strip(_TRAIL_PUNCT) if idx + 1 < len(spans) else ""
             label = None
             strong_phrase = False
+            typo = False  # a misspelled password cue: only '<copula> <credential-shaped>' after it counts
             if any(c.isdigit() for c in w) and w.startswith(GLUED_SECRET_CUES) and _credential_shaped(w):
                 # a cue word with digits glued on is itself a credential ('salasana123', 'pin1234')
                 ve = _strip_trailing(text, s, e, _TRAIL_PUNCT + "!")
@@ -330,6 +331,8 @@ class StructuredPass:
                 w == "user" and idx + 1 < len(spans) and text[spans[idx + 1][0]:spans[idx + 1][1]].lower() in ("name", "id")
             ):
                 label = "USERNAME"
+            elif _misspelled_password_cue(w):
+                label, typo = "SECRET", True
             if label is None or text[spans[start - 1][0]:spans[start - 1][1]][-1] in _SENTENCE_END:
                 continue
             # skip filler words and further cue words, take the next value token; ordinary words may sit
@@ -394,6 +397,9 @@ class StructuredPass:
                         strong_digits = _has_cue(cue_words, PASSWORD_TYPE_CUES)
                         if len(val) < 3 or (len(val) > 8 and not strong_digits):
                             ok = False
+                if typo:
+                    ok = ok and _credential_shaped(val) and _copula_then_hedges(
+                        text[s:e], [text[a:b] for a, b in spans[start:j]])
                 if ok and len(val) >= 3:
                     # not masked: a validated identifier at the same place (HETU, phone) must still be found
                     # and outranks this cue-only reading in the pipeline's overlap resolution
@@ -748,6 +754,37 @@ def _credential_ahead(text: str, spans: list[tuple[int, int]], j: int, stop: int
         if (any(c.isalpha() for c in tok) or numeric) and _credential_shaped(tok):
             return k
     return None
+
+
+# full password words (general fi/sv/en vocabulary) whose misspellings still cue a credential
+TYPO_PASSWORD_CUES = ("password", "passphrase", "passcode", "salasana", "salasanani", "salasanasi", "tunnussana",
+                      "lösenord", "lösenordet")
+
+
+def _edit_distance(a: str, b: str, cap: int) -> int:
+    """Levenshtein distance, stopping early once every cell of a row exceeds ``cap``."""
+    prev = list(range(len(b) + 1))
+    for i, ca in enumerate(a, 1):
+        cur = [i] + [0] * len(b)
+        for j, cb in enumerate(b, 1):
+            cur[j] = min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (ca != cb))
+        if min(cur) > cap:
+            return cap + 1
+        prev = cur
+    return prev[-1]
+
+
+def _misspelled_password_cue(w: str) -> bool:
+    """A word that is a misspelling of a password word: same first letter, within 1 edit (2 for words of 10+
+    letters), and not the word itself (exact cues are handled by the cue vocabulary). 'passport' is 2 edits
+    from 'password' and stays no cue."""
+    if not (6 <= len(w) <= 14) or not w.isalpha():
+        return False
+    for c in TYPO_PASSWORD_CUES:
+        cap = 2 if len(c) >= 10 else 1
+        if w != c and w[0] == c[0] and abs(len(w) - len(c)) <= cap and _edit_distance(w, c, cap) <= cap:
+            return True
+    return False
 
 
 def _gate_date_or_time(val: str) -> bool:

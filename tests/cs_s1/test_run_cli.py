@@ -101,6 +101,15 @@ def test_manifest_turn_id_measurements_and_risks(cs_run):
     risks = {r["label"]: r for r in m["residualRisks"] if r["kind"] == "text_recall"}
     assert set(risks) == {"PERSON", "ADDRESS", "LOCATION", "ORG", "DATE", "AGE"}
     assert risks["PERSON"]["rate"]["status"] == "measured"
+    # Sol r1 Spec (2,3,5): per-label recall of every CS-S1 target label, SECRET precision, and the hold-out mode
+    # are stated, never only a combined figure
+    by_id = {r["risk"]: r for r in m["residualRisks"]}
+    for lab in ("NATIONAL_ID", "PAYMENT_CARD", "IBAN", "SECRET"):
+        r = by_id[f"target-recall-{lab.lower().replace('_', '-')}"]
+        assert r["kind"] == "note" and r["label"] == lab and "0.98" in r["description"]
+        assert "template-held-out" in r["description"] and "turn level" in r["description"]
+    p = by_id["target-precision-secret"]
+    assert p["kind"] == "note" and p["label"] == "SECRET" and "precision" in p["description"]
     assert "healthInText" in m["exportAssertions"] and "quasiIdentifiersBelowK" not in m["exportAssertions"]
     import pandas as pd
 
