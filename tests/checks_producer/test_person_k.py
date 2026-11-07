@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from pets_release.checks import all_checks, run_checks
 
 
@@ -111,6 +113,38 @@ def test_released_person_token_links_visits_of_one_person(h):
     assert linked["status"] == "fail"
     assert linked["hits"] == 1
     assert linked["violations"][0]["locations"] == [10, 11]
+
+
+def _linked_fixture(h):
+    visits = [f"V{i:02d}" for i in range(12)]
+    persons = [f"P{i // 2:02d}" for i in range(12)]
+    hour = ["08", "09"] * 5 + ["08", "08"]
+    rel = h.release({"ed_visits": {"visit_tok": visits, "person_tok": persons, "hour": hour}})
+    return rel, _health_ctx(h, visits, persons)
+
+
+def test_person_token_released_under_another_name_links_via_released_as(h):
+    rel, ctx = _linked_fixture(h)
+    ctx["person"] = {**ctx["person"], "released_as": [{"table": "ed_visits", "column": "person_tok"}]}
+    rec = PERSON_K.run(rel, h.contract([("ed_visits", "hour")], tokens=[("ed_visits", "person_tok")]), ctx)
+    assert rec["status"] == "fail" and rec["hits"] == 1
+    assert rec["violations"][0]["locations"] == [10, 11]
+
+
+@pytest.mark.parametrize("derived", ["patient_hetu", "ed_visits.patient_hetu"])
+def test_person_token_links_via_token_derived_from(h, derived):
+    rel, ctx = _linked_fixture(h)
+    contract = h.contract([("ed_visits", "hour")], tokens=[("ed_visits", "person_tok")])
+    contract["tokens"][0]["derived_from"] = derived
+    rec = PERSON_K.run(rel, contract, ctx)
+    assert rec["status"] == "fail" and rec["hits"] == 1
+
+
+def test_unrelated_token_released_under_another_name_does_not_link(h):
+    rel, ctx = _linked_fixture(h)
+    contract = h.contract([("ed_visits", "hour")], tokens=[("ed_visits", "visit_tok")])
+    contract["tokens"][0]["derived_from"] = "visit_id"
+    assert PERSON_K.run(rel, contract, ctx)["status"] == "pass"
 
 
 def test_unidentified_records_never_inflate_k_and_count_as_below_k(h):

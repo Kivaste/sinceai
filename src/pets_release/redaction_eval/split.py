@@ -36,7 +36,8 @@ def _is_held_hash(h: str, fraction: float, seed: str) -> bool:
 
 def assert_zero_overlap(held_out_skeletons, dev_skeletons) -> None:
     both = set(held_out_skeletons) & set(dev_skeletons)
-    assert not both, f"{len(both)} skeleton(s) shared between held-out and development"
+    if both:
+        raise ValueError(f"{len(both)} skeleton(s) shared between held-out and development")
 
 
 @dataclass(frozen=True)

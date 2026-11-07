@@ -29,6 +29,19 @@ def _check_name(kind: str, name: str, forbidden: frozenset[str]) -> str:
     return name
 
 
+def refuse_forbidden_path(path: str | Path) -> Path:
+    """Resolve ``path`` and refuse one that passes through a ``truth/``
+    directory or is a field catalog. For callers reading a file directly
+    (not through :class:`Kit`). Returns the resolved path."""
+    try:
+        real = Path(path).resolve(strict=True)
+    except (OSError, RuntimeError) as e:
+        raise KitError(f"cannot resolve {Path(path).name!r}") from e
+    if any(x.lower() in FORBIDDEN_DATASETS or Path(x).stem.lower() in FORBIDDEN_TABLES for x in real.parts):
+        raise KitError(f"{real.name!r} resolves into a forbidden location")
+    return real
+
+
 class Kit:
     def __init__(self, root: str | Path):
         self.root = Path(root)
