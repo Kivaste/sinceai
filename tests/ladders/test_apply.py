@@ -18,7 +18,14 @@ class FakeKeys:
         return hashlib.sha256(f"{label}|{value}".encode()).hexdigest()
 
 
-def e(table, column, rung, params=None, floor=""):
+def _finest(rung):
+    from pets_release.ladders import LADDERS
+
+    return next((lad[0] for lad in LADDERS.values() if rung in lad), "keep")
+
+
+def e(table, column, rung, params=None, floor=None):
+    floor = floor or _finest(rung)
     return {"table": table, "column": column, "rung": rung, "params": params or {}, "floor": floor, "reason": "t", "source": "hand"}
 
 
