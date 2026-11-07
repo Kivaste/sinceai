@@ -469,7 +469,8 @@ def _customer_service(dest: Path, rng: random.Random, used_hetu: set[str]) -> No
 def generate(dest) -> Path:
     """Write the synthetic mini-kit under ``dest`` (health/ and customer_service/). Idempotent."""
     dest = Path(dest)
-    used_hetu: set[str] = set()  # one identity code per person across every table\n    _health(dest, random.Random(f"{SEED}:health"), used_hetu)
+    used_hetu: set[str] = set()  # one identity code per person across every table
+    _health(dest, random.Random(f"{SEED}:health"), used_hetu)
     _customer_service(dest, random.Random(f"{SEED}:customer_service"), used_hetu)
     return dest
 
