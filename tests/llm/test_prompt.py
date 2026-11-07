@@ -10,11 +10,11 @@ import pandas as pd
 import pytest
 
 sys.path.insert(0, str(Path(__file__).parent))
-from helpers import DICT_MD  # noqa: E402
+from llm_helpers import DICT_MD
+
 from pets_release.llm.dictionary import DataDictionary, DictionaryError, parse_dictionary
 from pets_release.llm.prompt import build_messages
 from pets_release.llm.vocabulary import vocabulary_for
-
 
 SRC = Path(__file__).resolve().parents[2] / "src" / "pets_release" / "llm"
 

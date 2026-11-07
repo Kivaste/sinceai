@@ -9,7 +9,8 @@ from pathlib import Path
 import pytest
 
 sys.path.insert(0, str(Path(__file__).parent))
-from helpers import DICT_MD  # noqa: E402
+from llm_helpers import DICT_MD
+
 from pets_release.llm.dictionary import parse_dictionary
 from pets_release.llm.draft import DraftRejected, build_draft, parse_model_output
 from pets_release.llm.vocabulary import ANALYSIS_TYPES

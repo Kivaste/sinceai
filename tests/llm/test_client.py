@@ -1,4 +1,4 @@
-"""Provider config, request screening and the OpenAI-compatible chat-completions exchange."""
+﻿"""Provider config, request screening and the OpenAI-compatible chat-completions exchange."""
 from __future__ import annotations
 
 import json
@@ -8,7 +8,8 @@ from pathlib import Path
 import pytest
 
 sys.path.insert(0, str(Path(__file__).parent))
-from helpers import DICT_MD  # noqa: E402
+from llm_helpers import DICT_MD
+
 from pets_release.llm.client import LlmConfig, LlmError, draft_policy, resolve_config, screen_request
 from pets_release.llm.dictionary import parse_dictionary
 
