@@ -22,6 +22,7 @@ from __future__ import annotations
 import json
 
 import pytest
+from producer_helpers import with_detected
 
 from pets_release.checks import all_checks, run_checks
 from pets_release.pseudonym import RECORD_KEY, normalise
@@ -30,6 +31,7 @@ from pets_release.run.context import person_normaliser
 
 def _run(name, release, contract, context):
     chk = {c.name: c for c in all_checks()}[name]
+    context = with_detected(release, contract, context)  # production detector QI set (#106)
     return run_checks(release, contract, context, checks=[chk]).to_dict()["records"][0]
 
 

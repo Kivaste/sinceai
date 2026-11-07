@@ -31,7 +31,7 @@ Schema/producer references for the pinned PRE-FILL build:
 | Same schema, top-level records | `inventory`, `pets[].{table,column,pet,params}`, `fieldJustifications[].{table,column,outputColumn,decision,rung,floor,reason,source}`, `contract.k`, `contract.files`, `bindings.files`, `bindings.toolRevision` |
 | Same schema, evidence and risks | `assertionEvidence.<name>.{check,version,scope,status,denominator,hits}`, `gate.{status,checks}`, `residualRisks[].{risk,kind,label,rate,description}`, `sacrifices[].{check,floor,before,after,reason}` |
 | `src/pets_release/writer/assemble.py` | `assemble_manifest` copies the narrative, derives assertions only from their required checks, copies gate records and binds `bindings.toolRevision` and inputs; it does not invent measurement fields |
-| `src/pets_release/run/narrative.py` | Writes local suppression under `pets[pet=local_suppression].params.{k,maxShare,unitsSuppressed,share}`; sacrifice floors; risk IDs `free-text-recall`, `linkage-attackers`, `attribute-inference` |
+| `src/pets_release/run/narrative.py` | Writes local suppression under `pets[pet=local_suppression].params.{k,maxShare,unitsSuppressed,share}`; sacrifice floors; risk IDs `free-text-recall`, `linkage-attackers`, `attribute-inference`. #138 replaces the generic attacker placeholders with `linkage-<persona>` / `attribute-inference-<persona>` from `src/pets_release/measure/attackers.py`; those per-persona records are absent from this pinned manifest. |
 | `src/pets_release/measure/ids.py`, `core.py`, `k.py` | Actual component IDs `privacy`, `k_below_5_share`, `linkage_reid`, `person_k.min`, `person_k.persons`, `person_k.below_k_share`; utility/composite overall scores are deliberately not privacy components |
 | `src/pets_release/run/purpose.py`, `policy/health_s1.py`, `policy/cs_s1.py` | Normal utility threshold 0.90; enumerated sacrifice floors 0.60 (H-U4/H-U6/H-U8), 0.80 (CS-U5); k=5, suppression cap 0.10; CS label recall 0.98 and timestamp floor `ts.hour` |
 
@@ -245,10 +245,31 @@ controller retains the key. Synthetic templated data does not establish general
 speech performance. Recipient digests catch accidental changes, not a determined
 editor; only full verify checks the HMAC signature.
 
-Attacker linkage after protection (#138 pending at this revision):
-not measured (#138: per-persona attacker rates not present at this revision); attribute inference:
-not measured (#138: per-persona attacker rates not present at this revision). If either status
-is `not_measured`, write “not measured”, never zero. To claim both personas, require
+Attacker linkage after protection (per persona; value over denominator n):
+the #138 selectors below are retained for finalisation, but neither their values
+nor their denominators exist in the `df79ec2` manifest. All remain typed
+placeholders; no later release supplies a number to this PRE-FILL.
+
+| #138 measurement | Value selector | Denominator selector | PRE-FILL result |
+|---|---|---|---|
+| Municipal insider linkage | `manifest.residualRisks[risk=linkage-insider].rate.value` | `manifest.residualRisks[risk=linkage-insider].rate.denominator.n` | not measured (#138: both selectors absent from df79ec2 manifest) |
+| Data broker: public directory linkage | `manifest.residualRisks[risk=linkage-broker-public_directory].rate.value` | `manifest.residualRisks[risk=linkage-broker-public_directory].rate.denominator.n` | not measured (#138: both selectors absent from df79ec2 manifest) |
+| Data broker: health social posts linkage | `manifest.residualRisks[risk=linkage-broker-social_posts_health].rate.value` | `manifest.residualRisks[risk=linkage-broker-social_posts_health].rate.denominator.n` | not measured (#138: both selectors absent from df79ec2 manifest) |
+| Data broker: health news clips linkage | `manifest.residualRisks[risk=linkage-broker-news_clips_health].rate.value` | `manifest.residualRisks[risk=linkage-broker-news_clips_health].rate.denominator.n` | not measured (#138: both selectors absent from df79ec2 manifest) |
+| Municipal insider attribute inference | `manifest.residualRisks[risk=attribute-inference-insider].rate.value` | `manifest.residualRisks[risk=attribute-inference-insider].rate.denominator.n` | not measured (#138: both selectors absent from df79ec2 manifest) |
+
+#138's municipal-insider method uses a seeded sample capped at 3000 released
+visits (a method cap, not a measured denominator here); never call that sample
+the whole release when capped. Broker denominators count adversary records.
+Attribute-inference records use the same persona IDs with the
+`attribute-inference-` prefix; the insider example is listed explicitly above.
+The fallback selector `manifest.residualRisks[risk=linkage-attackers].rate.reason`
+does exist in this manifest: “not measured yet: the measurer is wired in the
+story-kit ticket”. This is the pinned producer's unmeasured reason, not evidence
+that the later #138 attacker ran on this release. Generic linkage and attribute-
+inference status remain not measured (#138: per-persona rates absent).
+
+If any status is `not_measured`, write “not measured”, never zero. To claim both personas, require
 actual per-persona measured risk entries bound to the final inputs and document
 their IDs; a generic note or scorecard linkage number is insufficient. Linkage zero
 means no shared QIs left to match on, not measured attack resistance. Show scorecard
@@ -283,7 +304,7 @@ pending feature to shipped.
 | Enabling issue | Finalisation condition |
 |---|---|
 | #24 | Future work under D46; no CS-S1 released-scenario claim |
-| #32 | D47/D51 supersede the both-releases condition; any request-only draft-policy claim needs its own real integration proof, not this HEALTH-S1 run |
+| #32 | D47's HEALTH-S1 gate + verify condition replaces D39's two-release gate; front end merged and verified on the final SHA. Describe a validated draft policy for human review; feeding the draft into the search is future work (D51). Disclose the optional Mistral API sender and that row values never leave; unmerged/unverified becomes future work only |
 | #117 | Web app merged; final-SHA evidence for display-time verification, manifest-listed file/digest binding and D41 label; real-kit row view never read by agents |
 | #127 | Parallel search merged; final-SHA determinism across worker counts, offline workers and fail-closed worker error; no timed speed claim without measurement |
 | #106 | D33 rung or disclosed threat-model exception actually merged and present in final release; H-U7 effect measured |

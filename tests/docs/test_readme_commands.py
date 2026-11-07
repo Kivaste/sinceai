@@ -1,7 +1,7 @@
 """Extract every command block from README.md and run the ones that can run today.
 
-Each ```powershell block must be preceded by exactly one marker comment:
-  <!-- docs-test: run -->                    run it (`pets-release ...`, venv-qualified CLI, or `$env:X = "v"`)
+Each ```powershell or ```yaml block must be preceded by exactly one marker comment:
+  <!-- docs-test: run -->                    run it (venv-qualified CLI/module, or `$env:X = "v"`)
   <!-- docs-test: skip reason=<name> -->     not run; the reason is named and listed in the report
   <!-- docs-test: pending ticket=NN -->      subcommand not built yet ("available after ticket NN")
 A block without a marker fails. A `pending` block whose subcommand now exists is reported
@@ -30,13 +30,15 @@ ALLOWED_SKIP_REASONS = (
     "environment-setup",
     "sets-secret-placeholder-only",
     "runs-the-whole-test-suite-recursively",
+    "measure-wire-needs-full-kit-scorecards",
     "starts-a-long-running-server",
-    # the CS-S1 release needs ticket 23 (turn_id check); guarded below
-    "cs-s1-run-needs-ticket-23",
+    "pipeline-needs-real-kit-and-secret-store",
+    # D46: CS-S1 releases are future work, not an implicit passing demo step.
+    "cs-s1-deferred-d46",
 )
 SUBCOMMANDS = ("run", "verify", "detect", "dashboard", "submission")
 MARKER = re.compile(r"<!--\s*docs-test:\s*(run|skip|pending)\b([^>]*?)-->")
-BLOCK = re.compile(r"(?:^(<!--.*?-->)[ \t]*\r?\n)?^```powershell[ \t]*\r?\n(.*?)^```", re.S | re.M)
+BLOCK = re.compile(r"(?:^(<!--.*?-->)[ \t]*\r?\n)?^```(?:powershell|yaml)[ \t]*\r?\n(.*?)^```", re.S | re.M)
 
 
 def _load_conftest():
@@ -101,7 +103,70 @@ def _transcript(line: str) -> None:
 
 
 def test_readme_has_command_blocks():
-    assert BLOCKS, "README has no powershell blocks; the docs check would pass vacuously"
+    assert BLOCKS, "README has no command blocks; the docs check would pass vacuously"
+
+
+def test_pipeline_example_has_named_skip_and_fail_closed_commands():
+    """README/CLI ledger seam: CI is explicit about real-kit execution and publication."""
+    text = README.read_text(encoding="utf-8")
+    assert "## Run it in your pipeline\n" in text
+    section = text.split("## Run it in your pipeline\n", 1)[1].split("\n## ", 1)[0]
+    blocks = extract_blocks(section)
+    assert len(blocks) == 1, "The Actions example must participate in the block ledger"
+    assert (blocks[0]["kind"], blocks[0]["arg"]) == (
+        "skip", "reason=pipeline-needs-real-kit-and-secret-store")
+    example = blocks[0]["body"]
+    assert "runs-on: [self-hosted, linux]" in example
+    assert "shell: bash" in example  # Actions uses bash --noprofile --norc -e -o pipefail
+    assert "python -m pets_release run --scenario HEALTH-S1" in example
+    assert 'python -m pets_release verify --full --kit "$PETS_KIT" "$PETS_RELEASE_OUT"' in example
+    assert "actions/upload-artifact@v4" in example and "/privacy_manifest.json" in example
+    assert "continue-on-error" not in example and "always()" not in example
+    assert "verified locally with the same commands" in section
+
+
+def test_health_examples_cover_default_search_recipient_and_hand_plan():
+    """CLI ledger seam: both documented plans execute, with a recipient on the default search."""
+    commands = [statement for block in BLOCKS if block["kind"] == "run"
+                for statement in _statements(block["body"])
+                if statement.startswith(r".\.venv\Scripts\pets-release.exe run --scenario HEALTH-S1")]
+    assert any("--plan" not in command and "--recipient research-group" in command for command in commands), (
+        "Document the default search with its recipient, without an invented --plan search flag"
+    )
+    assert any("--plan hand" in command for command in commands), "Keep an executable hand-plan example"
+
+
+def test_measured_path_documents_module_cli_and_names_full_kit_dependency():
+    """CLI ledger seam: parse the real wire flags here; full scorecards run on the real kit separately."""
+    wire = [block for block in BLOCKS if "-m pets_release.measure.wire" in block["body"]]
+    assert any(block["kind"] == "run" and "--help" in block["body"] for block in wire), (
+        "The measured module's real argparse entry point must run in the command ledger"
+    )
+    release = [block for block in wire if "--scenario HEALTH-S1" in block["body"]]
+    assert len(release) == 1
+    assert release[0]["kind"] == "skip" and release[0]["arg"] == "reason=measure-wire-needs-full-kit-scorecards"
+    assert "--recipient research-group" in release[0]["body"] and "--plan" not in release[0]["body"]
+
+
+def test_draft_policy_help_is_runnable_and_discloses_the_review_boundary():
+    """README/CLI ledger seam: optional drafting is discoverable, not an input to release search (D51)."""
+    draft = [block for block in BLOCKS if "pets-release.exe draft-policy" in block["body"]]
+    assert len(draft) == 1, "Document the built draft-policy CLI in the command ledger"
+    assert draft[0]["kind"] == "run" and "draft-policy --help" in draft[0]["body"]
+    text = README.read_text(encoding="utf-8")
+    assert "[docs/llm-front-end.md](docs/llm-front-end.md)" in text
+    assert "validated draft policy for human review" in text
+    assert "Feeding the draft into the search is future work" in text
+
+
+@pytest.mark.parametrize("command,reason", [
+    ("run --scenario CS-S1", "cs-s1-deferred-d46"),
+])
+def test_unmerged_commands_have_explicit_named_skips(command, reason):
+    """CLI ledger seam: planned commands cannot masquerade as executed checks."""
+    planned = [block for block in BLOCKS if command in block["body"]]
+    assert len(planned) == 1
+    assert planned[0]["kind"] == "skip" and planned[0]["arg"] == f"reason={reason}"
 
 
 def _windows_quick_start() -> str:
@@ -131,6 +196,25 @@ def test_windows_quick_start_cli_without_activation():
     assert all(line.startswith(r".\.venv\Scripts\pets-release.exe ") for line in commands), (
         "Quick start CLI commands must select the venv executable without activation"
     )
+
+
+@pytest.mark.parametrize(
+    "block",
+    extract_blocks(README.read_text(encoding="utf-8").split("\n## Demo\n", 1)[1]),
+    ids=lambda b: f"later-block{b['n']}-{b['kind']}",
+)
+def test_later_examples_without_activation(block):
+    """README command-ledger seam: later examples also select the local venv."""
+    commands = [
+        statement
+        for statement in _statements(block["body"])
+        if re.search(r"\b(?:pets-release|python)(?:\.exe)?\s", statement)
+    ]
+    assert commands, "Each later example must include a CLI or Python command"
+    assert all(
+        command.startswith((r".\.venv\Scripts\pets-release.exe ", r".\.venv\Scripts\python.exe "))
+        for command in commands
+    ), "Later README commands must select the venv explicitly without activation under Restricted policy"
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows PowerShell execution-policy regression")
@@ -212,14 +296,10 @@ def test_block(block, tmp_path):
     conf = _load_conftest()
     first = block["body"].strip().splitlines()[0]
     if block["kind"] == "skip":
-        if block["arg"] == "reason=cs-s1-run-needs-ticket-23":
-            assert not (ROOT / "src" / "pets_release" / "checks" / "turn_id").exists(), (
-                "ticket 23 has landed (checks/turn_id): promote the CS-S1 run block to run"
-            )
         _transcript(f"SKIP block {block['n']} ({block['arg']}): {first}")
         pytest.skip(f"named reason: {block['arg']}")
     if block["kind"] == "pending":
-        sub = next((s for s in SUBCOMMANDS if re.search(rf"\bpets-release\s+{s}\b", block["body"])), None)
+        sub = next((s for s in SUBCOMMANDS if re.search(rf"\bpets-release(?:\.exe)?\s+{s}\b", block["body"])), None)
         assert sub, f"block {block['n']}: pending block names no known subcommand"
         assert not _subcommand_exists(sub), (
             f"README block #{block['n']}: pets-release {sub} is built; change its marker from pending to run"
@@ -237,19 +317,24 @@ def test_block(block, tmp_path):
     out_root = tmp_path / "out"
     env = rh.env({"PETS_KIT": str(kit)})  # PETS_HMAC_KEY is the published test-only constant
     run_cmd = next(s for b2 in BLOCKS if b2["kind"] == "run" for s in _statements(b2["body"])
-                   if s.startswith("pets-release run --scenario HEALTH-S1"))
+                   if s.startswith(r".\.venv\Scripts\pets-release.exe run --scenario HEALTH-S1"))
 
     def execute(stmt):
         stmt_x = _expand(stmt, env).replace("..\\sinceai-out\\", str(out_root) + os.sep)
         args = [a.strip('"') for a in shlex.split(stmt_x, posix=False)][1:]
+        module = "pets_release"
+        if stmt.startswith(r".\.venv\Scripts\python.exe "):
+            assert args[:2] == ["-m", "pets_release.measure.wire"], "Unknown README Python module"
+            module = args[1]
+            args = args[2:]
         for s in SUBCOMMANDS:
             if args and args[0] == s:
                 assert _subcommand_exists(s), f"run block uses unbuilt subcommand {s}"
-        proc = subprocess.run([sys.executable, "-m", "pets_release", *args], cwd=ROOT, env=env,
-                              capture_output=True, text=True, encoding="utf-8", check=False)
+        proc = subprocess.run([sys.executable, "-m", module, *args], cwd=ROOT, env=env,
+                              capture_output=True, text=True, encoding="utf-8", timeout=180, check=False)
         return args, proc
 
-    if "health-s1" in block["body"] and not block["body"].lstrip().startswith("pets-release run"):
+    if re.search(r"pets-release\.exe (?:verify|dashboard)\b", block["body"]):
         _, pre = execute(run_cmd)  # earlier README step: the release the later commands act on
         assert pre.returncode == 0, f"prerequisite run failed: {pre.stdout[-300:]}{pre.stderr[-300:]}"
 
@@ -259,10 +344,11 @@ def test_block(block, tmp_path):
         if m:
             env[m.group(1)] = m.group(2)
             continue
-        assert stmt.startswith(("pets-release ", r".\.venv\Scripts\pets-release.exe ")), (
+        assert stmt.startswith(("pets-release ", r".\.venv\Scripts\pets-release.exe ",
+                                r".\.venv\Scripts\python.exe ")), (
             f"block {block['n']}: unrunnable statement {stmt!r}"
         )
-        if re.match(r"pets-release submission\b", stmt):
+        if re.search(r"\bpets-release(?:\.exe)?\s+submission\b", stmt):
             _add_submission_inputs(kit)  # after the release run, as in tests/submission (CS tables, catalog)
             rel = re.search(r"--release\s+\.\.\\sinceai-out\\(\S+)", stmt)
             assert rel, f"{stmt!r}: no --release under ..\\sinceai-out"
@@ -284,12 +370,33 @@ def test_block(block, tmp_path):
     assert executed, f"block {block['n']} is marked run but executed no command"
 
 
+@pytest.mark.parametrize("prefix", [
+    r".\.venv\Scripts\pets-release.exe run --scenario HEALTH-S1",
+    r".\.venv\Scripts\python.exe -m pets_release.measure.wire --scenario HEALTH-S1",
+])
+def test_ledger_rejects_wrong_flags_through_real_cli(prefix, tmp_path):
+    """CLI seam: both launch forms must really parse arguments, not silently discard flags."""
+    source = next(block for block in BLOCKS if block["body"].strip().startswith(prefix))
+    mutated = {**source, "kind": "run", "arg": "", "body": source["body"].strip() + " --wrong-readme-flag"}
+    with pytest.raises(AssertionError, match="unrecognized arguments: --wrong-readme-flag"):
+        test_block(mutated, tmp_path)
+
+
 def _readme_complete_submission() -> str:
     stmts = [s for b in BLOCKS if b["kind"] == "run" for s in _statements(b["body"])
-             if s.startswith("pets-release submission")]
+             if re.search(r"\bpets-release(?:\.exe)?\s+submission\b", s)]
     assert len(stmts) == 1, "README must document exactly one runnable submission example"
     assert "--partial" not in stmts[0]
     return stmts[0]
+
+
+def test_submission_example_uses_the_default_search_release():
+    """README/CLI ledger seam: #128 restores the documented default run -> submission flow."""
+    command = _readme_complete_submission()
+    assert re.search(r"--release\s+\.\.\\sinceai-out\\health-s1(?:\s|$)", command), (
+        "The submission example must package the default search release, not the obsolete hand-plan workaround"
+    )
+    assert "Until #128 lands" not in README.read_text(encoding="utf-8")
 
 
 def _run_readme_submission(tmp_path, release_args: list[str]):

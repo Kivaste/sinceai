@@ -79,8 +79,8 @@ CS-S1 strict-gate refusal is a D46 limitation, not a fresh refusal observation.
 
 ## Selector ledger
 
-All 83 original concrete selectors and 16 added concrete selectors are accounted
-for below: **77 filled, 22 typed placeholders**. `manifest.<path>` was a grammar
+All 83 original concrete selectors and 27 added concrete selectors are accounted
+for below: **78 filled, 32 typed placeholders**. `manifest.<path>` was a grammar
 illustration, not a concrete selector. Names are listed without row values.
 
 The filled selectors resolve uniquely in the one manifest above. Utility requires
@@ -165,6 +165,7 @@ The numeric results and targets table are in `06-numbers-to-fill.md`.
 - `manifest.measured.utility.tasks[task=H-U8].before`
 - `manifest.pets[pet=local_suppression,table=ed_visits,column=patient_hetu].params.share`
 - `manifest.residualRisks[risk=free-text-recall].rate.status`
+- `manifest.residualRisks[risk=linkage-attackers].rate.reason`
 - `manifest.sacrifices[check=H-U4].floor`
 - `manifest.sacrifices[check=H-U6].floor`
 - `manifest.sacrifices[check=H-U8].floor`
@@ -189,7 +190,17 @@ They never become zero or a target pass.
 - `manifest.measured.utility.tasks[task=CS-U5].after`
 - `manifest.measured.utility.tasks[task=CS-U5].before`
 - `manifest.residualRisks[risk=attribute-inference].rate.status`
+- `manifest.residualRisks[risk=attribute-inference-insider].rate.denominator.n`
+- `manifest.residualRisks[risk=attribute-inference-insider].rate.value`
 - `manifest.residualRisks[risk=linkage-attackers].rate.status`
+- `manifest.residualRisks[risk=linkage-broker-news_clips_health].rate.denominator.n`
+- `manifest.residualRisks[risk=linkage-broker-news_clips_health].rate.value`
+- `manifest.residualRisks[risk=linkage-broker-public_directory].rate.denominator.n`
+- `manifest.residualRisks[risk=linkage-broker-public_directory].rate.value`
+- `manifest.residualRisks[risk=linkage-broker-social_posts_health].rate.denominator.n`
+- `manifest.residualRisks[risk=linkage-broker-social_posts_health].rate.value`
+- `manifest.residualRisks[risk=linkage-insider].rate.denominator.n`
+- `manifest.residualRisks[risk=linkage-insider].rate.value`
 - `manifest.residualRisks[risk=target-recall-iban].description`
 - `manifest.residualRisks[risk=target-recall-iban].rate.value`
 - `manifest.residualRisks[risk=target-recall-national-id].description`
@@ -201,6 +212,7 @@ They never become zero or a target pass.
 
 ## Pending producer work (no invented selector paths)
 
+- Merge-only update: #138's ten concrete per-persona value/denominator selectors are listed above and in 06, each absent from the unchanged df79ec2 manifest and typed “not measured (#138)”. Its generic fallback reason selector exists and is quoted from that same manifest in 06; no new release or measurement was used. The 3000-visit sample cap is #138 method documentation, not a PRE-FILL denominator.
 - #146 / D58: not measured — separate k on the scenario QIs and all kept catalogued QIs, with withheld-column justifications.
 - #138: not measured — per-persona attacker linkage and attribute-inference rates; the two existing risk-status selectors above stay unmeasured.
 - #143: not measured — diagnosis-known k and risk share; no estimate is substituted.
