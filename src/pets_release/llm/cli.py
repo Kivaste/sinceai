@@ -45,6 +45,9 @@ def _write_atomic(path: Path, text: str) -> None:
 
 
 def main(argv: list[str], *, transport=subprocess_transport) -> int:
+    from pets_release.offline import install
+
+    install()  # direct callers get the guard too (must-fix #82); only the sender child is exempt
     p = _Parser(prog="pets-release draft-policy", description=__doc__.splitlines()[0])
     p.add_argument("--request", help="plain-language data request (who wants what, for which purpose)")
     p.add_argument("--dataset", help="kit dataset name (e.g. health)")
