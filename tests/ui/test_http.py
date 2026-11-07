@@ -277,9 +277,14 @@ def test_server_and_children_are_offline_while_loopback_http_works(tmp_path):
 def test_http_client_survives_guarded_pytest_worker():
     """HTTP seam: prior in-process CLI calls cannot disable the synthetic browser client."""
     code = (
-        "from pets_release.offline import install; install(); import pytest; "
-        "raise SystemExit(pytest.main(['-q', '-p', 'no:cacheprovider', "
-        "'tests/ui/test_http.py::test_server_and_children_are_offline_while_loopback_http_works']))"
+        "from pets_release.offline import install; install(); import pytest\n"
+        "result = pytest.main(['-q', '-p', 'no:cacheprovider', "
+        "'tests/ui/test_http.py::test_server_and_children_are_offline_while_loopback_http_works'])\n"
+        "import socket\n"
+        "try: socket.socket()\n"
+        "except OSError: pass\n"
+        "else: raise AssertionError('pytest worker guard was weakened')\n"
+        "raise SystemExit(result)\n"
     )
     proc = subprocess.run([sys.executable, "-c", code], env=server_env(), cwd=ROOT,
                           capture_output=True, text=True, timeout=60, check=False)
