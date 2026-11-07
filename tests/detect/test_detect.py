@@ -138,11 +138,10 @@ def test_unseen_serialiser_header_and_rows():
     assert [r[0] for r in rows[1:]] == [f"c{i:02d}" for i in range(1, 13)]
 
 
-def test_headers_match_the_kit_scorer_source():
+@pytest.mark.kit
+def test_headers_match_the_kit_scorer_source(kit_root):
     """Copied-from-kit check: the scorer's docstring names the prediction columns."""
-    kit = os.environ.get("PETS_KIT")
-    if not kit:
-        pytest.skip("PETS_KIT not set (kit test not run)")
+    kit = kit_root
     src = (Path(kit) / "toolkit" / "pets_eval" / "detect.py").read_text(encoding="utf-8")
     assert "dataset, table, column, privacy_role [, subtype]" in src
     assert ",".join(KIT_HEADER) == serialise.KIT_HEADER_LINE

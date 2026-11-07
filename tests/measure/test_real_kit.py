@@ -34,8 +34,8 @@ MEASURE_CASES = {"HEALTH-S3": "health", "CS-S3": "customer_service"}
 
 
 def _need_kit():
-    if not (KIT / "results" / "benchmark.json").is_file():
-        pytest.skip("challenge kit not available")
+    """Kept for the call sites; the autouse ``kit`` fixture in tests/conftest.py already fails when the kit is absent."""
+    assert (KIT / "results" / "benchmark.json").is_file(), "kit required but not found"
 
 
 @pytest.mark.kit
