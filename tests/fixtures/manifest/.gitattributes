@@ -1,0 +1,2 @@
+# Fixture release bytes are digest-bound in privacy_manifest.json: never convert line endings.
+release/** -text
