@@ -16,8 +16,8 @@ Order of work per conversation:
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
-from typing import Iterable, Iterator
 
 from . import validators as V
 from .labels import STRUCTURED_LABELS
@@ -149,10 +149,14 @@ class StructuredPass:
             hits.extend(self._cue_tokens(view, i, m))
             masks.append(m)
         runs = [turn_runs(i, t.text, masks[i]) for i, t in enumerate(view.turns)]
+        single: list[_Hit] = []
         for i, rs in enumerate(runs):
             for r in rs:
-                hits.extend(self._classify(view, [r]))
-        hits.extend(self._joins(view, runs))
+                single.extend(self._classify(view, [r]))
+        hits.extend(single)
+        # symbols inside a validated single-turn value are not available to cross-turn joins
+        claimed = {(h.turn_index, p) for h in single if h.priority >= PRIORITY_VALIDATED for p in range(h.start, h.end)}
+        hits.extend(self._joins(view, runs, claimed))
         hits.extend(self._hetu_tails(view, runs, hits))
         for h in hits:
             yield Candidate(h.turn_index, h.start, h.end, h.label, h.priority, h.key, self.name)
@@ -299,14 +303,15 @@ class StructuredPass:
         return out
 
     # ------------------------------------------------------ run classifier
-    def _classify(self, view: ConversationView, chain: list[Run], cross_only: bool = False) -> list[_Hit]:
+    def _classify(self, view: ConversationView, chain: list[Run], cross_only: bool = False,
+                  claimed: frozenset | set = frozenset()) -> list[_Hit]:
         syms: list[Sym] = []
         owner: list[int] = []  # index into chain
         for ci, r in enumerate(chain):
             syms.extend(r.syms)
             owner.extend([ci] * len(r.syms))
         s = "".join(x.ch for x in syms)
-        used = [False] * len(s)
+        used = [(chain[owner[q]].turn_index, syms[q].start) in claimed for q in range(len(s))]
         found: list[tuple[int, int, str, int, str]] = []  # a, b, label, priority, key
 
         def take(a: int, b: int, label: str, prio: int, key: str) -> None:
@@ -316,7 +321,10 @@ class StructuredPass:
 
         for m in re.finditer(r"(?=(\d{6}[-+A-FU-Y]\d{3}[0-9A-Y]))", s):
             a, b = m.start(1), m.end(1)
-            if any(used[a:b]) or (a > 0 and s[a - 1].isdigit()) or (b < len(s) and s[b].isalnum()):
+            # a following digit, or a letter glued to the same token, means this is not a whole HETU;
+            # a separate word read as a letter name ('… är rätt') does not
+            glued_after = b < len(s) and (s[b].isdigit() or (s[b].isalpha() and syms[b].tok == syms[b - 1].tok))
+            if any(used[a:b]) or (a > 0 and s[a - 1].isdigit()) or glued_after:
                 continue
             if V.hetu_valid(s[a:b]):
                 take(a, b, "NATIONAL_ID", PRIORITY_VALIDATED, "hetu\x00" + s[a:b])
@@ -410,7 +418,7 @@ class StructuredPass:
         return [_Hit(r.turn_index, r.syms[0].start, r.syms[-1].end, "NATIONAL_ID", PRIORITY_CUE, key) for r in chain]
 
     # ------------------------------------------------------ N-turn joins
-    def _joins(self, view: ConversationView, runs: list[list[Run]]) -> list[_Hit]:
+    def _joins(self, view: ConversationView, runs: list[list[Run]], claimed: set) -> list[_Hit]:
         out: list[_Hit] = []
         turns = view.turns
         for i, rs in enumerate(runs):
@@ -426,7 +434,7 @@ class StructuredPass:
                 if not runs[j] or runs[j][0].words_before > HEAD_SLACK:
                     break
                 chain = chain + [runs[j][0]]
-                found = self._classify(view, chain, cross_only=True)
+                found = self._classify(view, chain, cross_only=True, claimed=claimed)
                 out.extend(found)
                 if not found:
                     out.extend(self._partial_hetu(view, chain))

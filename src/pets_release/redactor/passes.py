@@ -25,8 +25,9 @@ Contract for lexicon passes (ticket 13, ``pets_release.redactor.lexicon``):
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass, field
-from typing import Iterable, Protocol, runtime_checkable
+from typing import Protocol, runtime_checkable
 
 PRIORITY_VALIDATED = 300
 PRIORITY_CUE = 200

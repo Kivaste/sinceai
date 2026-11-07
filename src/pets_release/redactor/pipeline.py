@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import importlib
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from typing import Callable, Sequence
 
 from .labels import LABELS
 from .normalise import value_key

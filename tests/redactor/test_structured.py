@@ -259,6 +259,17 @@ def test_two_word_username_cue():
     assert found(conv(t)) == [("t0", 16, 24, "USERNAME")]
 
 
+def test_hetu_followed_by_swedish_ar():
+    t = "131052-308T är mitt personnummer"
+    assert found(conv(t)) == [("t0", 0, 11, "NATIONAL_ID")]
+
+
 def test_iban_after_swedish_ar():
     t = "Kontonumret är FI21 1234 5600 0007 85"
     assert found(conv(t)) == [("t0", 15, len(t), "IBAN")]
+def test_validated_hetu_is_not_swallowed_by_a_cross_turn_phone():
+    # a number ending one turn must not join a complete HETU that starts the next one
+    # 010101010 % 31 == 1 -> check character '1'
+    # tail '0' + '010101-0101' would read as an 11-digit 0-leading phone number
+    r = conv("numero alkaa 0", ("agent", "mm"), "010101-0101 on hetu")
+    assert [x[3] for x in found(r)] == ["NATIONAL_ID"]

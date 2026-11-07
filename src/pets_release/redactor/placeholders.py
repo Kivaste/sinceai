@@ -7,7 +7,7 @@ conversations. Lives only in memory; nothing here is ever written out.
 
 from __future__ import annotations
 
-from typing import Callable
+from collections.abc import Callable
 
 from .labels import placeholder
 from .normalise import value_key
