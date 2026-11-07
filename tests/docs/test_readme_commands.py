@@ -31,6 +31,9 @@ ALLOWED_SKIP_REASONS = (
     "runs-the-whole-test-suite-recursively",
     # the CS-S1 release needs ticket 23 (turn_id check); guarded below
     "cs-s1-run-needs-ticket-23",
+    # ticket 23 landed; the fixture CS-S1 release still refuses on #53 (rescan.secrets false positive).
+    # tests/cs_s1/test_run_cli.py strict xfails flip when #53 lands: then promote this block (needs a CS kit here)
+    "cs-s1-release-blocked-by-53",
 )
 SUBCOMMANDS = ("run", "verify", "detect", "dashboard", "submission")
 MARKER = re.compile(r"<!--\s*docs-test:\s*(run|skip|pending)\b([^>]*?)-->")
