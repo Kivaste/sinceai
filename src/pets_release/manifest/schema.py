@@ -208,6 +208,11 @@ def _scenario_rule(scenario: str) -> dict:
     then = {"properties": _assertion_maps(required_assertions(scenario))}
     if scenario == "CS-S1":  # healthInText is checked against the lexicon version bound in the manifest
         then["properties"]["bindings"] = {"properties": {"lexiconDigests": {"minProperties": 1}}}
+    # contract.k (k-anonymity target) exactly when the scenario carries quasiIdentifiersBelowK
+    if "quasiIdentifiersBelowK" in required_assertions(scenario):
+        then["properties"]["contract"] = {"required": ["k"]}
+    else:
+        then["properties"]["contract"] = {"not": {"required": ["k"]}}
     return {
         "if": {"properties": {"release": {"properties": {"scenario": {"const": scenario}},
                                           "required": ["scenario"]}},
@@ -252,6 +257,7 @@ MANIFEST_SCHEMA: dict = {
         }), 1),
         "fieldJustifications": _arr(_FIELD_JUSTIFICATION, 1),
         "contract": _obj({
+            "k": {"type": "integer", "minimum": 2},  # k-anonymity target; required/forbidden per scenario
             "files": _map("fileName", _obj({
                 "required": _arr(_ref("name")),
                 "columns": _map("name", _obj({"form": {"type": "string", "minLength": 1, "maxLength": 300},
@@ -260,7 +266,7 @@ MANIFEST_SCHEMA: dict = {
             "qi": _arr(_obj({"table": _ref("name"), "column": _ref("name"), "derived_from": _ref("name")})),
             "tokens": _arr(_obj({"table": _ref("name"), "column": _ref("name"),
                                  "scope": {"enum": ["conversation", "recipient", "release"]}})),
-        }),
+        }, required=["files", "qi", "tokens"]),
         **_UNION_MAPS,
         "gate": _obj({"status": _status("pass"), "checks": _arr(_ref("gateCheck"), 1)}),
         "measured": _MEASURED,

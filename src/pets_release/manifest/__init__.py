@@ -49,6 +49,8 @@ Writer obligations the schema imposes
     assertion: in those cases the writer must refuse the release instead. Scenario, PET, column-role, span-label and residual-risk-kind enums are
     closed; extending them is a schema change (bump ``SCHEMA_VERSION``). ``exportAssertions`` and
     ``assertionEvidence`` are closed over ALL_ASSERTIONS and, per scenario, over exactly required_assertions().
+    ``contract.k`` (integer >= 2, the k-anonymity target) is required when the scenario carries
+    ``quasiIdentifiersBelowK`` (HEALTH-S1) and forbidden otherwise (CS-S1); it is covered by ``contractDigest``.
     A CS-S1 manifest must bind at least one ``bindings.lexiconDigests`` entry (healthInText is lexicon-scoped).
     Check names in evidence come from ticket 04's ``ASSERTION_CHECKS``.
     Not checked here: that ``contract`` columns agree with ``fieldJustifications``; the writer (ticket 16)
