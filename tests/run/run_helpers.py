@@ -53,7 +53,9 @@ def env(extra=None) -> dict:
     e.update({"PYTHONUTF8": "1", "PYTHONDONTWRITEBYTECODE": "1", "TZ": "UTC", "PYTHONIOENCODING": "utf-8",
               "PYTHONPATH": str(ROOT / "src"), "PETS_HMAC_KEY": TEST_KEY})
     e.update(extra or {})
-    return e
+    from pets_release.offline import child_env
+
+    return child_env(e)
 
 
 def cli(*args, extra=None) -> subprocess.CompletedProcess:
