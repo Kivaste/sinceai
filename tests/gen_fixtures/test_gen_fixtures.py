@@ -246,7 +246,7 @@ def test_identifiers_live_in_namespaces_the_kit_cannot_use(tmp_path, gen):
 
     checks = [
         ("health", "ed_visits", "visit_id", r"SYNV-\d{6}$"),
-        ("health", "ed_visits", "patient_hetu", r"00\d{4}[-A]9\d\d[0-9A-Y]$"),
+        ("health", "ed_visits", "patient_hetu", r"\d{6}[-A]9\d\d[0-9A-Y]$"),
         ("health", "ed_visits", "home_address", r"Synth[A-Za-z]+ \d+$"),
         ("health", "ed_visits", "attending_physician_id", r"SYNP-\d{3}$"),
         ("health", "lab_results", "lab_id", r"SYNL-\d{6}$"),
@@ -255,7 +255,7 @@ def test_identifiers_live_in_namespaces_the_kit_cannot_use(tmp_path, gen):
         ("health", "published_weekly_stats", "stat_id", r"SYNS-\d{6}$"),
         ("customer_service", "customers", "customer_id", r"SYNC-\d{5}$"),
         ("customer_service", "customers", "customer_number", r"SYN\d{7}$"),
-        ("customer_service", "customers", "hetu", r"00\d{4}[-A]9\d\d[0-9A-Y]$"),
+        ("customer_service", "customers", "hetu", r"\d{6}[-A]9\d\d[0-9A-Y]$"),
         ("customer_service", "customers", "street_address", r"Synth[A-Za-z]+ \d+$"),
         ("customer_service", "customers", "contract_number", r"SYN-CN-\d{6}$"),
         ("customer_service", "conversations", "conversation_id", r"SYNQ-\d{5}$"),
@@ -269,3 +269,67 @@ def test_identifiers_live_in_namespaces_the_kit_cannot_use(tmp_path, gen):
         values = values[values != ""]
         bad = values[~values.str.match(pattern)]
         assert bad.empty, (table, column, len(bad))
+
+# Validator logic copied from ticket 04 (origin/ticket/04-gate, checks/cells/_validators.py); 04 is not
+# merged yet, so the fixture's identifiers are checked against the same rules locally.
+import re  # noqa: E402
+
+_HETU_RE = re.compile(r"^(\d{2})(\d{2})(\d{2})([-+A-FYXWVU])(\d{3})([0-9A-Y])$", re.IGNORECASE)
+_HETU_CHK = "0123456789ABCDEFHJKLMNPRSTUVWXY"
+_IBAN_LEN_FI = 18
+
+
+def _hetu_valid(value: str) -> bool:
+    m = _HETU_RE.match(value)
+    if not m:
+        return False
+    dd, mm, yy, _, nnn, chk = m.groups()
+    return 1 <= int(dd) <= 31 and 1 <= int(mm) <= 12 and _HETU_CHK[int(dd + mm + yy + nnn) % 31] == chk.upper()
+
+
+def _iban_valid(value: str) -> bool:
+    s = value.replace(" ", "")
+    if s[:2] == "FI" and len(s) != _IBAN_LEN_FI:
+        return False
+    rearranged = s[4:] + s[:4]
+    return int("".join(str(int(ch, 36)) for ch in rearranged)) % 97 == 1
+
+
+def _century(sign: str) -> int:
+    return {"+": 1800, "-": 1900, "A": 2000}[sign]
+
+
+def test_every_hetu_is_valid_and_matches_the_birth_date(tmp_path, gen):
+    gen.generate(tmp_path / "kit")
+    visits = pd.read_csv(tmp_path / "kit" / "health" / "ed_visits.csv", dtype=str)
+    for code, dob in zip(visits["patient_hetu"], visits["date_of_birth"]):
+        assert _hetu_valid(code), "invalid HETU in ed_visits"
+        dd, mm, yy, sign = code[0:2], code[2:4], code[4:6], code[6]
+        assert dob == f"{_century(sign) + int(yy):04d}-{mm}-{dd}"
+        assert 900 <= int(code[7:10]) <= 999
+    customers = pd.read_csv(tmp_path / "kit" / "customer_service" / "customers.csv", dtype=str)
+    assert all(_hetu_valid(code) for code in customers["hetu"])
+    assert customers["hetu"].str[7:10].astype(int).between(900, 999).all()
+
+
+def test_each_person_has_exactly_one_hetu(tmp_path, gen):
+    gen.generate(tmp_path / "kit")
+    visits = pd.read_csv(tmp_path / "kit" / "health" / "ed_visits.csv", dtype=str)
+    people = visits[["patient_hetu", "patient_name", "date_of_birth", "sex"]].drop_duplicates()
+    assert people["patient_hetu"].is_unique
+    assert not people.duplicated(["patient_name", "date_of_birth", "sex"]).any()
+    customers = pd.read_csv(tmp_path / "kit" / "customer_service" / "customers.csv", dtype=str)
+    assert customers["hetu"].is_unique
+    assert not set(customers["hetu"]) & set(visits["patient_hetu"])
+
+
+def test_every_iban_is_a_valid_finnish_iban(tmp_path, gen):
+    gen.generate(tmp_path / "kit")
+    customers = pd.read_csv(tmp_path / "kit" / "customer_service" / "customers.csv", dtype=str)
+    assert len(customers) >= 100
+    assert all(_iban_valid(v) and v.startswith("FI") for v in customers["iban"])
+    assert customers["iban"].is_unique
+    turns = pd.read_csv(tmp_path / "kit" / "customer_service" / "turns.csv", dtype=str)
+    spoken = turns["text"].str.extractall(r"(FI\d{2}(?: \d{4}){3} \d{2})")[0]
+    assert len(spoken) > 0
+    assert all(_iban_valid(v) for v in spoken)

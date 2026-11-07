@@ -254,21 +254,32 @@ def _phone(rng: random.Random) -> str:
     return f"+358 40 555 {rng.randint(0, 9999):04d}"
 
 
-def _hetu(rng: random.Random, dob: datetime, female: bool) -> str:
-    """Synthetic identity code: day 00 (never a valid date) and the reserved 900-999 individual range."""
-    ind = rng.randint(900, 998)
-    if (ind % 2 == 0) != female:  # even individual number = female
-        ind += 1
-    base = f"00{dob.month:02d}{dob.year % 100:02d}"  # day 00 is impossible, so no real code collides
-    check = "0123456789ABCDEFHJKLMNPRSTUVWXY"[int(base + f"{ind:03d}") % 31]
-    sep = "A" if dob.year >= 2000 else "-"
-    return f"{base}{sep}{ind:03d}{check}"
+def _hetu(rng: random.Random, dob: datetime, female: bool, used: set[str]) -> str:
+    """Valid, unique identity code for one person: real century sign, the person's own birth date,
+    mod-31 check character, and an individual number in the reserved 900-999 test range."""
+    base = f"{dob.day:02d}{dob.month:02d}{dob.year % 100:02d}"
+    sign = "A" if dob.year >= 2000 else "-"
+    start = rng.randint(900, 998)
+    for step in range(100):
+        ind = 900 + (start - 900 + step) % 99
+        if (ind % 2 == 0) != female:  # even individual number = female
+            ind += 1
+        code = f"{base}{sign}{ind:03d}{'0123456789ABCDEFHJKLMNPRSTUVWXY'[int(base + f'{ind:03d}') % 31]}"
+        if code not in used:
+            used.add(code)
+            return code
+    raise RuntimeError("no free individual number for this birth date")
 
 
-def _iban(rng: random.Random) -> str:
-    digits = "".join(str(rng.randint(0, 9)) for _ in range(16))
-    return "FI" + f"{rng.randint(0, 99):02d}" + " " + " ".join(digits[i:i + 4] for i in range(0, 16, 4))
-
+def _iban(rng: random.Random, used: set[str]) -> str:
+    """Valid Finnish IBAN (18 chars, mod-97 check digits) with a synthetic 99xxxx bank part."""
+    while True:
+        bban = "99" + "".join(str(rng.randint(0, 9)) for _ in range(12))
+        check = 98 - int(bban + "151800") % 97  # F=15, I=18, then "00" for the check digits
+        iban = f"FI{check:02d}{bban}"
+        if iban not in used:
+            used.add(iban)
+            return " ".join([iban[i:i + 4] for i in range(0, 16, 4)] + [iban[16:]])
 
 def _age_band(age: int) -> str:
     lo = min(age // 10 * 10, 80)
@@ -284,7 +295,7 @@ def _write(path: Path, header: list[str], rows: list[list[str]]) -> None:
 
 
 # --------------------------------------------------------------------------- health
-def _health(dest: Path, rng: random.Random) -> None:
+def _health(dest: Path, rng: random.Random, used_hetu: set[str]) -> None:
     patients = []
     for i in range(N_PATIENTS):
         female = rng.random() < 0.52
@@ -294,7 +305,7 @@ def _health(dest: Path, rng: random.Random) -> None:
         mi = rng.choices(range(len(MUNICIPALITIES)), MUNI_WEIGHTS)[0]
         municipality = NON_RESIDENT if rng.random() < 0.03 else MUNICIPALITIES[mi]
         patients.append({
-            "hetu": _hetu(rng, dob, female), "name": f"{_first(rng)} {_last(rng)}", "dob": dob,
+            "hetu": _hetu(rng, dob, female, used_hetu), "name": f"{_first(rng)} {_last(rng)}", "dob": dob,
             "sex": "F" if female else "M", "phone": _phone(rng), "address": _street(rng),
             "postcode": POSTCODES[mi], "municipality": municipality,
         })
@@ -376,7 +387,8 @@ def _health(dest: Path, rng: random.Random) -> None:
 
 
 # --------------------------------------------------------------------------- customer service
-def _customer_service(dest: Path, rng: random.Random) -> None:
+def _customer_service(dest: Path, rng: random.Random, used_hetu: set[str]) -> None:
+    used_iban: set[str] = set()
     customers = []
     for i in range(1, N_CUSTOMERS + 1):
         female = rng.random() < 0.5
@@ -384,10 +396,10 @@ def _customer_service(dest: Path, rng: random.Random) -> None:
         first, last = _first(rng), _last(rng)
         customers.append({
             "id": f"SYNC-{i:05d}", "name": f"{first} {last}", "number": f"SYN{rng.randint(1000000, 9999999)}",
-            "hetu": _hetu(rng, dob, female), "street": _street(rng),
+            "hetu": _hetu(rng, dob, female, used_hetu), "street": _street(rng),
             "postcode": rng.choice(POSTCODES), "city": rng.choice(MUNICIPALITIES),
             "email": f"{first.lower()}.{last.lower()}@example.test", "phone": _phone(rng),
-            "lang": rng.choice(LANGUAGES), "iban": _iban(rng),
+            "lang": rng.choice(LANGUAGES), "iban": _iban(rng, used_iban),
         })
     cust_rows = []
     for c in customers:
@@ -457,8 +469,8 @@ def _customer_service(dest: Path, rng: random.Random) -> None:
 def generate(dest) -> Path:
     """Write the synthetic mini-kit under ``dest`` (health/ and customer_service/). Idempotent."""
     dest = Path(dest)
-    _health(dest, random.Random(f"{SEED}:health"))
-    _customer_service(dest, random.Random(f"{SEED}:customer_service"))
+    used_hetu: set[str] = set()  # one identity code per person across every table\n    _health(dest, random.Random(f"{SEED}:health"), used_hetu)
+    _customer_service(dest, random.Random(f"{SEED}:customer_service"), used_hetu)
     return dest
 
 
