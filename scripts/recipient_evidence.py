@@ -1,4 +1,4 @@
-"""Counts-only evidence for ticket 28: two real HEALTH-S1 releases for two recipients.
+﻿"""Counts-only evidence for ticket 28: two real HEALTH-S1 releases for two recipients.
 
 Usage: python scripts/recipient_evidence.py <kit root> <work dir>
 
@@ -44,12 +44,14 @@ def main(kit: Path, work: Path) -> dict:
         frames = {t: pd.read_csv(out / f"{t}.csv", dtype=str, keep_default_na=False) for t, _ in cols}
         toks[rec] = {v for t, c in cols for v in frames[t][c]}
         lab, ed = set(frames["lab_results"]["visit_id"]), set(frames["ed_visits"]["visit_id"])
-        cov[rec] = round(len(lab & ed) / len(lab), 6)
+        cov[rec] = round(len(lab & ed) / len(lab), 6) if lab else 0.0
         exits[rec]["tokenColumns"] = len(cols)
         exits[rec]["distinctTokens"] = len(toks[rec])
     result = {"perRecipient": exits, "joinCoverageLabInEd": cov,
               "tokenOverlapBetweenRecipients": len(toks[RECIPIENTS[0]] & toks[RECIPIENTS[1]])}
     print(json.dumps(result, sort_keys=True))
+    if result["tokenOverlapBetweenRecipients"] != 0 or any(e["verifyFull"] != 0 for e in exits.values()):
+        raise SystemExit(1)
     return result
 
 

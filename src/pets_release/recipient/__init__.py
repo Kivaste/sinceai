@@ -1,4 +1,4 @@
-"""Recipient-ID validation for ``run --recipient <id>`` (ticket 28).
+﻿"""Recipient-ID validation for ``run --recipient <id>`` (ticket 28).
 
 ``run`` calls :func:`validate_recipient_id` and then threads the ID through its
 existing scope plumbing: the release scope ID (``manifest.release_scope_id``)
@@ -14,11 +14,13 @@ from __future__ import annotations
 
 import re
 
+from pets_release.pseudonym.keys import MANIFEST_SIGNATURE_INFO
+
 # Same shape as ticket 02's check-name pattern, with upper case allowed.
 _RECIPIENT = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
 # "manifest-signature": HKDF info of the signing key. "default": the manifest
 # value of a release without --recipient (keyed by the master itself).
-_RESERVED = frozenset({"manifest-signature", "default"})
+_RESERVED = frozenset({MANIFEST_SIGNATURE_INFO, "default"})
 
 
 class RecipientError(ValueError):

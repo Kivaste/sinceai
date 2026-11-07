@@ -103,3 +103,23 @@ def test_invalid_recipient_exits_2_without_output(tmp_path, bad):
         assert bad not in text
     else:  # the reserved / flag-like IDs may appear in generic usage text, but never echoed as a quoted value
         assert f"'{bad}'" not in text and f'"{bad}"' not in text and f"recipient {bad}" not in text
+
+
+def test_release_tokens_are_keyed_by_the_recipient_key(releases):
+    """Tokens in the release are the recipient-keyed pseudonyms (production derivation), not master-keyed ones."""
+    from run_helpers import TEST_KEY
+
+    from pets_release.ladders import PseudonymKeys
+    from pets_release.pseudonym import MasterKey, Scope, pseudonymiser_for
+
+    kit, outs, _ = releases
+    master = MasterKey.from_text(TEST_KEY)
+    src = pd.read_csv(kit / "data" / "health" / "ed_visits.csv", dtype=str, keep_default_na=False)["visit_id"]
+    for name, rid in (("a", "recipient-a"), ("b", "recipient-b")):
+        rsid = json.loads((outs[name] / "privacy_manifest.json").read_text(encoding="utf-8"))["release"][
+            "releaseScopeId"]
+        released = _tokens(outs[name])[0]
+        for recipient, expect_in in ((rid, True), (None, False)):
+            keys = PseudonymKeys(pseudonymiser_for(master, recipient=recipient), Scope.release(rsid))
+            got = {keys.token(v, "RECORD_KEY") for v in src}
+            assert (released and released <= got) if expect_in else got.isdisjoint(released)
