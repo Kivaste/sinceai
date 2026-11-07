@@ -15,6 +15,8 @@ from pathlib import Path
 import pandas as pd
 
 from pets_release.checks import RegistryError, all_checks, run_checks
+from pets_release.kit import Kit, KitError
+from pets_release.kiteval import Lineage
 from pets_release.manifest import (
     MANIFEST_FILENAME,
     SCENARIOS,
@@ -29,14 +31,6 @@ from pets_release.writer.assemble import (
     evidence_for,
     justification_reasons,
 )
-
-try:  # ticket 08's type once merged; same fields
-    from pets_release.kiteval.rowmap import Lineage
-except ImportError:  # pragma: no cover - until 08 merges
-    @dataclass(frozen=True)
-    class Lineage:
-        final: tuple
-        suppressed: frozenset
 
 FILE_NAME = re.compile(r"^[A-Za-z0-9_]{1,64}\.csv$")
 SCORING_NAME = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.\-]{0,99}$")
@@ -64,7 +58,6 @@ class Candidate:
     recipient: str
     tables: tuple
     contract: dict
-    inputs: Mapping[str, str]          # input table name -> sha256
     tool_revision: str                 # 40-hex git revision
     created: str                       # "YYYY-MM-DDTHH:MM:SSZ" (passed in; never wall clock)
     narrative: Mapping[str, object]    # exactly NARRATIVE_KEYS
@@ -110,20 +103,28 @@ def _validate(c: Candidate) -> None:
             raise WriterError("bad scoring file name")
 
 
-def _select(checks):
-    if checks is None:
-        return None
-    checks = list(checks)
-    names = [c.name for c in checks]
-    if len(set(names)) != len(names):
-        raise WriterError("duplicate check names")
+def _input_digests(kit: Kit, scenario: str) -> dict:
+    """SHA-256 of every table of the scenario's dataset (withheld tables included), via ticket 01's kit access."""
+    if not isinstance(kit, Kit):
+        raise WriterError("kit must be a pets_release.kit.Kit")
     try:
-        registered = {c.name for c in all_checks()}
-    except RegistryError as e:
-        raise WriterError("check registry unavailable") from e
-    if not registered <= set(names):
-        raise WriterError("check selection must cover every registered check")
-    return checks
+        dataset = kit.scenario(scenario).get("dataset")
+        digests = kit.input_digests(dataset)
+    except (KitError, OSError) as e:
+        raise WriterError("kit inputs unavailable for scenario") from e
+    if not digests:
+        raise WriterError("scenario dataset has no tables")
+    return dict(sorted(digests.items()))
+
+
+def _registry_reasons(records) -> list[str]:
+    """The gate's records must be exactly the registry's checks (name, version, scope, unit), in order."""
+    try:
+        reg = [(c.name, c.version, c.scope, c.unit) for c in all_checks()]
+    except RegistryError:
+        return ["gate:registry-error"]
+    got = [(r.check, r.version, r.scope, r.denominator.get("unit")) for r in records]
+    return [] if got == reg else ["gate:registry-mismatch"]
 
 
 def _csv_bytes(header, rows) -> bytes:
@@ -169,14 +170,15 @@ def _strings(obj, acc: list) -> list:
     return acc
 
 
-def _self_scan(build: Path, c: Candidate, manifest: dict, context: dict, checks) -> list[str]:
+def _self_scan(build: Path, c: Candidate, manifest: dict, context: dict) -> list[str]:
     reasons = []
     expected = sorted([t.name for t in c.tables] + [MANIFEST_FILENAME])
     if sorted(p.name for p in build.iterdir()) != expected or not all(p.is_file() for p in build.iterdir()):
         reasons.append("selfscan:entries")
     reasons += [f"selfscan:manifest:{e}" for e in validate_manifest_file(build)]
-    reasons += _gate_reasons(run_checks(build, c.contract, {**context, "phase": "verify"}, checks=checks),
-                             "selfscan")
+    verify = run_checks(build, c.contract, {**context, "phase": "verify"})
+    reasons += _gate_reasons(verify, "selfscan")
+    reasons += [r.replace("gate:", "selfscan:") for r in _registry_reasons(verify.records)]
     text = "\x00".join(_strings({k: v for k, v in manifest.items() if k != "contract"}, []))
     values = set()
     for t in c.tables:
@@ -205,34 +207,33 @@ def _write_scoring(parent: Path, scoring: Path, files: dict) -> None:
             shutil.rmtree(staging, ignore_errors=True)
 
 
-def write_release(candidate: Candidate, out, master_key, *, context: Mapping | None = None,
-                  checks=None) -> WriteResult:
+def write_release(candidate: Candidate, out, master_key, kit: Kit, *, context: Mapping | None = None) -> WriteResult:
     """Write ``<out>/`` (protected tables + signed manifest) or refuse. See the package docstring."""
     out = Path(out).absolute()
     scoring = scoring_dir(out)
     if out.exists() or scoring.exists():
         raise WriterError("output folder exists")
     _validate(candidate)
-    selected = _select(checks)
+    inputs = _input_digests(kit, candidate.scenario)
     signing_key = manifest_signing_key(master_key)
     context = dict(context or {})
     out.parent.mkdir(parents=True, exist_ok=True)
     build = Path(tempfile.mkdtemp(prefix=f".{out.name}.build-", dir=out.parent))
     try:
         digests, lineage = _write_tables(build, candidate)
-        gate = run_checks(build, candidate.contract, {**context, "phase": "gate"}, checks=selected)
-        reasons = _gate_reasons(gate, "gate")
+        gate = run_checks(build, candidate.contract, {**context, "phase": "gate"})
+        reasons = _gate_reasons(gate, "gate") + _registry_reasons(gate.records)
         reasons += evidence_for(gate.records, candidate.scenario)[2]
         reasons += justification_reasons(candidate.contract, list(candidate.narrative["fieldJustifications"]))
         manifest = None
         if not reasons:
-            manifest, more = assemble_manifest(candidate, gate.records, digests, signing_key)
+            manifest, more = assemble_manifest(candidate, gate.records, digests, inputs, signing_key)
             reasons += more
         if manifest is not None and not reasons:
             reasons += [f"manifest:{e}" for e in validate_manifest(manifest)]
         if not reasons:
             (build / MANIFEST_FILENAME).write_bytes(canonical_bytes(manifest))
-            reasons += _self_scan(build, candidate, manifest, context, selected)
+            reasons += _self_scan(build, candidate, manifest, context)
         reasons = tuple(sorted(set(reasons)))
         if reasons:
             shutil.rmtree(build)

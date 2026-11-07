@@ -69,7 +69,7 @@ def justification_reasons(contract: dict, field_justifications: list) -> list[st
     return out
 
 
-def assemble_manifest(candidate, records, file_digests: dict, signing_key):
+def assemble_manifest(candidate, records, file_digests: dict, input_digests: dict, signing_key):
     """``(manifest, reasons)``; the manifest is None when any reason exists. Signed with ``signing_key``."""
     assertions, evidence, reasons = evidence_for(records, candidate.scenario)
     if reasons:
@@ -82,11 +82,11 @@ def assemble_manifest(candidate, records, file_digests: dict, signing_key):
         "release": {
             "scenario": candidate.scenario, "recipient": candidate.recipient, "created": candidate.created,
             "releaseScopeId": release_scope_id(scenario=candidate.scenario, recipient=candidate.recipient,
-                                               inputs=dict(candidate.inputs), tool_revision=candidate.tool_revision),
+                                               inputs=dict(input_digests), tool_revision=candidate.tool_revision),
         },
         "bindings": {
             "files": dict(sorted(file_digests.items())),
-            "inputs": dict(sorted(candidate.inputs.items())),
+            "inputs": dict(sorted(input_digests.items())),
             "toolRevision": candidate.tool_revision,
             "checkVersions": {g["check"]: g["version"] for g in gate},
             "lexiconDigests": dict(sorted(candidate.lexicon_digests.items())),

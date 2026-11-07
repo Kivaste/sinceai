@@ -4,17 +4,20 @@ Public API::
 
     from pets_release.writer import Candidate, ProtectedTable, write_release, scoring_dir, load_lineage
 
-    res = write_release(candidate, out_dir, master_key, context={...})   # -> WriteResult
+    res = write_release(candidate, out_dir, master_key, kit, context={...})   # -> WriteResult
     res.status            # "released" | "refused"
     res.reasons           # sorted content-free codes (empty when released)
 
 What it does, in order:
   1. Refuses to start (``WriterError``, nothing written) if ``<out>/`` or ``<out>.scoring/`` exists, the candidate
      is malformed (non-str cells, lineage not one unique source key per row, narrative keys not exactly
-     ``NARRATIVE_KEYS``), or a ``checks=`` selection omits any registered check (it may only add or replace).
+     ``NARRATIVE_KEYS``), or the kit has no dataset for the scenario. ``bindings.inputs`` is
+     ``kit.input_digests(dataset)``: every table of the scenario's dataset, withheld tables included.
   2. Writes each protected table, rows sorted, into a hidden build folder ``.<out>.build-*`` next to ``<out>``.
-  3. Gate: ticket 04's ``run_checks(build, contract, {**context, "phase": "gate"})``. Producer checks read their
-     inputs from ``context`` (e.g. source tables, row maps, keys); absent inputs mean ``not_run``, which refuses.
+  3. Gate: ticket 04's ``run_checks(build, contract, {**context, "phase": "gate"})`` over exactly the registry.
+     There is no way to pass other checks; the records must equal the registry's (name, version, scope, unit),
+     else ``gate:registry-mismatch`` refuses. Producer checks read their inputs from ``context`` (source tables,
+     row maps, keys, ...); absent inputs mean ``not_run``, which refuses.
   4. Evidence (``assemble.evidence_for``): each of the scenario's required assertions needs its
      ``ASSERTION_CHECKS`` record with status pass, 0 hits, n >= 1 and 02's scope/unit. Otherwise refuse. The
      assertion value is the literal ``False``; there is no other code path. ``not_applicable`` records are listed in
