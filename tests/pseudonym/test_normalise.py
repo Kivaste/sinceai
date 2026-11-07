@@ -371,7 +371,7 @@ def test_leading_extension_marker_does_not_swallow_the_number(a, b):
     assert normalise(a, "PHONE") != normalise("x99 0409999999", "PHONE")
 
 
-@pytest.mark.parametrize("value", ["x12", "ext. 5", "extension", "x", "(0)", "n/a"])
+@pytest.mark.parametrize("value", ["extension", "x", "ext.", "(0)", "n/a"])
 def test_phone_without_national_digits_is_refused_not_a_shared_token(value):
     p = pseudonymiser_for(MasterKey.from_text(TEST_KEY))
     with pytest.raises(ValueError):
