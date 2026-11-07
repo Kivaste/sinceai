@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from pets_release.checks import run_checks
+from pets_release.checks import all_checks, run_checks
 
 FIX = Path(__file__).resolve().parents[1] / "fixtures" / "refusals"
 CONTRACT = json.loads((FIX / "contract.json").read_text(encoding="utf-8"))
@@ -94,7 +94,9 @@ def test_private_ip_is_low_severity_not_refusal(tmp_path):
 
 
 def test_placeholders_are_not_hits(tmp_path):
-    res = run_checks(_plant(tmp_path, "[PHONE_1] [EMAIL_1] [PAYMENT_CARD_1] [SECRET_1]"), CONTRACT, GATE)
+    own = [c for c in all_checks() if c.run.__module__.startswith("pets_release.checks.cells.")]
+    res = run_checks(_plant(tmp_path, "[PHONE_1] [EMAIL_1] [PAYMENT_CARD_1] [SECRET_1]"), CONTRACT, GATE, checks=own)
+    assert {r.check: r.status for r in res.records if r.status != "pass"} == {}
     assert not res.refused
 
 

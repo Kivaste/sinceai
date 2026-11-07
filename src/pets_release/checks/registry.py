@@ -35,7 +35,7 @@ ASSERTION_CHECKS = {
     "propertyIds": "rescan.property-ids",
     "quasiIdentifiersBelowK": "producer.person-k",
     "rawTimestamps": "rescan.raw-timestamps",
-    "reversibleHashes": "producer.reversible-hashes",
+    "reversibleHashes": "producer.unkeyed-hashes",
     "rowMaps": "release.row-maps",
     "secrets": "rescan.secrets",
     "urlsWithTokens": "rescan.urls-with-tokens",
