@@ -22,6 +22,7 @@ COMMAND_PACKAGES: dict[str, str] = {
     "verify": "pets_release.verify",
     "detect": "pets_release.detect",
     "dashboard": "pets_release.dashboard",
+    "evidence-pack": "pets_release.evidence_pack",
     "submission": "pets_release.submission",
     "draft-policy": "pets_release.llm",
 }
@@ -30,6 +31,7 @@ HELP = {
     "verify": "re-run checks on a release folder",
     "detect": "detect personal-data types in a dataset",
     "dashboard": "render the judge dashboard",
+    "evidence-pack": "render a DPO / Findata evidence pack from the signed manifest",
     "submission": "build the submission bundle",
     "draft-policy": "optional: draft a scenario policy from a plain-language request (needs --allow-network)",
 }
