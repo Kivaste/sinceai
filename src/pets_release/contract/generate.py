@@ -31,9 +31,10 @@ from typing import Any
 from pets_release.ladders import (
     VALIDATOR_FORMS,
     LadderError,
-    contract_form,
+    contract_entry,
     output_column,
 )
+from pets_release.ladders.rungs import coarseness
 from pets_release.manifest import canonical_digest
 
 _NAME = re.compile(r"^[A-Za-z0-9_]{1,64}$")
@@ -67,19 +68,22 @@ def generate(policy: Any, plan: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     released: dict[tuple[str, str], str] = {}  # (table, source column) -> release name
     tokens: list[dict[str, str]] = []
     for (table, column), entry in sorted(entries.items()):
+        floor = policy.floors[(table, column)].rung
         if entry["rung"] == _WITHHELD:
+            _check_floor(table, column, entry, floor)
             continue
+        body = _form(table, column, entry["rung"])
+        _check_floor(table, column, entry, floor)
         name = output_column(entry)
         if not isinstance(name, str) or not _NAME.fullmatch(name):
             raise ContractError(f"{table}.{column}: release name")
         spec = columns.setdefault(table, {})
         if name in spec:
             raise ContractError(f"{table}.{name}: duplicate release name")
-        form = _form(table, column, entry["rung"])
-        params: dict[str, Any] = {"nullable": True, "rung": entry["rung"]}
+        params: dict[str, Any] = {**body["params"], "rung": entry["rung"]}
         if name != column or entry["rung"].startswith("age."):
             params["derived_from"] = column
-        spec[name] = {"form": form, "params": dict(sorted(params.items()))}
+        spec[name] = {"form": body["form"], "params": dict(sorted(params.items()))}
         released[(table, column)] = name
         if entry["rung"] == "id.pseudonym":
             scope = entry["params"].get("scope", _PSEUDONYM_SCOPE)
@@ -87,8 +91,7 @@ def generate(policy: Any, plan: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
                 raise ContractError(f"{table}.{column}: token scope invalid")
             tokens.append({"table": table, "column": name, "scope": scope})
 
-    # Tables reaching the person only through a linked key (non-anchor tables of a linked group).
-    joined_tables = {t for group in policy.linked for t, _ in group[1:]} - {group[0][0] for group in policy.linked}
+    person_tables = {t for t, _ in policy.direct_identifiers}  # tables that hold the person directly
     qi: list[dict[str, str]] = []
     for row in policy.qi:
         key = (row["table"], row["column"])
@@ -97,11 +100,16 @@ def generate(policy: Any, plan: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
         if key not in released:
             continue
         join = row.get("join_via")
-        if join is None and key[0] in joined_tables:
+        if join is None and key[0] not in person_tables:
             raise ContractError(f"{key[0]}.{key[1]}: join-derived qi needs join_via")
         if join is not None:
-            if not (isinstance(join, (list, tuple)) and len(join) == 2):
-                raise ContractError(f"{key[0]}.{key[1]}: join_via")
+            if not (
+                isinstance(join, (list, tuple))
+                and len(join) == 2
+                and all(isinstance(x, str) and _NAME.fullmatch(x) for x in join)
+                and tuple(join) in expected
+            ):
+                raise ContractError(f"{key[0]}.{key[1]}: join_via invalid")
             derived = f"join_{join[0]}_{join[1]}"
         else:
             derived = key[1]
@@ -126,14 +134,34 @@ def digest(contract: Mapping[str, Any]) -> str:
     return canonical_digest(contract)
 
 
-def _form(table: str, column: str, rung: str) -> str:
+def _form(table: str, column: str, rung: str) -> dict[str, Any]:
     try:
-        form = contract_form(rung)
-    except LadderError:
+        body = contract_entry(rung)
+    except (LadderError, KeyError):
         raise ContractError(f"{table}.{column}: form missing for rung {rung}") from None
-    if not _gate_form(form):
+    if not _gate_form(body["form"]):
         raise ContractError(f"{table}.{column}: form invalid for rung {rung}")
-    return form
+    return body
+
+
+def _check_floor(table: str, column: str, entry: Mapping[str, Any], floor: str) -> None:
+    """The plan floor equals the policy floor, and the rung is not finer than it (07's ordering)."""
+    if entry["floor"] != floor:
+        raise ContractError(f"{table}.{column}: plan floor differs from policy floor")
+    rung = entry["rung"]
+    if rung == _WITHHELD:
+        return
+    if floor == _WITHHELD:
+        finer = True
+    else:
+        try:
+            (rung_kind, rung_pos), (floor_kind, floor_pos) = coarseness(rung), coarseness(floor)
+        except LadderError:
+            finer = True
+        else:
+            finer = rung_kind != floor_kind or rung_pos < floor_pos
+    if finer:
+        raise ContractError(f"{table}.{column}: rung finer than floor")
 
 
 def _gate_form(form: Any) -> bool:
@@ -171,7 +199,9 @@ def _parse_plan(plan: Sequence[Mapping[str, Any]]) -> dict[tuple[str, str], dict
         key = (table, column)
         if key in entries:
             raise ContractError(f"{table}.{column}: duplicate plan entry")
-        entries[key] = {"rung": rung, "params": dict(raw["params"]), "column": column}
+        if not isinstance(raw["floor"], str) or not raw["floor"]:
+            raise ContractError(f"{table}.{column}: floor")
+        entries[key] = {"rung": rung, "params": dict(raw["params"]), "column": column, "floor": raw["floor"]}
     if not entries:
         raise ContractError("plan: empty")
     return entries
@@ -221,6 +251,11 @@ def _validate_contract(contract: Mapping[str, Any]) -> None:
             order.append((row["table"], row["column"]))
         if order != sorted(set(order)):
             raise ContractError(f"{label}: unsorted")
+    for label in ("qi", "tokens"):
+        for row in contract[label]:
+            spec = files.get(f"{row['table']}.csv")
+            if spec is None or row["column"] not in spec["columns"]:
+                raise ContractError(f"{label}: column not in files")
     for row in contract["tokens"]:
         if row["scope"] not in _SCOPES:
             raise ContractError("tokens: scope")

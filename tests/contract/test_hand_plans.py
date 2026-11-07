@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import dataclasses
 import subprocess
 import sys
 
 import pytest
 
-from pets_release.contract import digest, generate
+from pets_release.contract import ContractError, digest, generate
+from pets_release.contract import __main__ as cli
 from pets_release.policy import get_policy, hand_plan
 
 
@@ -48,21 +50,43 @@ def test_cli_prints_both_contracts(tmp_path) -> None:
     assert (tmp_path / "HEALTH-S1.contract.json").is_file() and (tmp_path / "contracts.txt").is_file()
 
 
-def test_released_join_derived_qi_without_join_via_is_rejected() -> None:
-    """Real 09 policy, sampled_ts released: the QI must carry join metadata, else reject."""
-    import pytest
+def test_cli_writes_nothing_when_a_scenario_is_rejected(tmp_path, monkeypatch) -> None:
+    real = cli.generate
 
-    from pets_release.contract import ContractError
+    def failing(policy, plan):
+        if policy.scenario == "CS-S1":
+            raise ContractError("forced")
+        return real(policy, plan)
 
+    monkeypatch.setattr(cli, "generate", failing)
+    assert cli.main([str(tmp_path)]) == 1
+    assert list(tmp_path.iterdir()) == []
+
+
+def _with_sampled_ts_released(join_via):
+    """Real 09 policy and plan, sampled_ts released, the QI row's join_via replaced (None removes it)."""
     policy, plan = get_policy("HEALTH-S1"), hand_plan("HEALTH-S1")
     for entry in plan:
         if (entry["table"], entry["column"]) == ("lab_results", "sampled_ts"):
             entry["rung"], entry["params"] = "ts.month_hour", {}
-    row = next(r for r in policy.qi if r["column"] == "sampled_ts")
-    if row.get("join_via") is None:
-        with pytest.raises(ContractError, match="sampled_ts: join-derived qi needs join_via"):
-            generate(policy, plan)
-    else:
-        contract = generate(policy, plan)
-        derived = [r for r in contract["qi"] if r["column"] == "sampled_ts"]
-        assert derived[0]["derived_from"].startswith("join_")
+    qi = []
+    for row in policy.qi:
+        if row["column"] == "sampled_ts":
+            row = {k: v for k, v in row.items() if k != "join_via"}
+            if join_via is not None:
+                row["join_via"] = join_via
+        qi.append(row)
+    return dataclasses.replace(policy, qi=tuple(qi)), plan
+
+
+def test_released_join_derived_qi_carries_join_derivation() -> None:
+    policy, plan = _with_sampled_ts_released(["ed_visits", "visit_id"])
+    row = next(r for r in generate(policy, plan)["qi"] if r["column"] == "sampled_ts")
+    assert row["derived_from"] == "join_ed_visits_visit_id"
+
+
+def test_released_join_derived_qi_without_join_via_is_rejected() -> None:
+    policy, plan = _with_sampled_ts_released(None)
+    assert not any("join_via" in r for r in policy.qi if r["column"] == "sampled_ts")
+    with pytest.raises(ContractError, match="sampled_ts: join-derived qi needs join_via"):
+        generate(policy, plan)

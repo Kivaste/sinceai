@@ -11,33 +11,104 @@ import pytest
 from pets_release.checks import registry
 from pets_release.checks.runner import run_checks
 from pets_release.contract import ContractError, digest, generate
-from pets_release.ladders import CONTRACT_FORMS, VALIDATOR_FORMS
+from pets_release.ladders import CONTRACT_FORMS, LADDERS, RUNG_KIND, VALIDATOR_FORMS, contract_entry
 from pets_release.manifest import canonical_bytes, canonical_digest
 from pets_release.policy.model import FieldFloor, ScenarioPolicy
 
 REL = {"label": "RECORD_KEY"}
 
 
-def _policy(columns: dict, qi: tuple = ()) -> ScenarioPolicy:
-    floors = {key: FieldFloor("x", "keep", "test") for key in columns}
+PERSON_TABLES = ("ed_visits", "t", "turns")  # tables the test policy marks as holding a direct identifier
+
+
+def _policy(floors: dict, qi: tuple = ()) -> ScenarioPolicy:
     return ScenarioPolicy(
         scenario="HEALTH-S1", dataset="d", purpose_checks=(), privacy_targets=(), floors=floors,
-        direct_identifiers=(), qi=qi, risk_vector=(), sacrifices=(), joint_qi_moves=(), linked=(),
-        param_minimums={},
+        direct_identifiers=tuple((t, "person_ref") for t in PERSON_TABLES), qi=qi, risk_vector=(),
+        sacrifices=(), joint_qi_moves=(), linked=(), param_minimums={},
     )
 
 
-def _entry(table: str, column: str, rung: str, params: dict | None = None) -> dict:
+def _finest(rung: str) -> str:
+    """Default floor for a test entry: the finest rung of its ladder (so the entry is never finer)."""
+    return "withheld" if rung in ("withheld", "no.such.rung") else LADDERS[RUNG_KIND[rung]][0]
+
+
+def _entry(table: str, column: str, rung: str, params: dict | None = None, floor: str | None = None) -> dict:
     return {
         "table": table, "column": column, "rung": rung, "params": params or {},
-        "floor": rung, "reason": "test", "source": "hand",
+        "floor": floor or _finest(rung), "reason": "test", "source": "hand",
     }
 
 
 def _build(entries: list[dict], qi: tuple = ()):
-    policy = _policy({(e["table"], e["column"]): None for e in entries}, qi)
-    return policy, entries
+    floors = {(e["table"], e["column"]): FieldFloor("x", e["floor"], "test") for e in entries}
+    return _policy(floors, qi), entries
 
+
+def test_rung_finer_than_policy_floor_is_rejected() -> None:
+    policy, plan = _build([_entry("ed_visits", "patient_hetu", "keep", floor="withheld")])
+    with pytest.raises(ContractError, match="patient_hetu: rung finer than floor"):
+        generate(policy, plan)
+    policy, plan = _build([_entry("ed_visits", "municipality", "geo.full", floor="geo.topn")])
+    with pytest.raises(ContractError, match="municipality: rung finer than floor"):
+        generate(policy, plan)
+    policy, plan = _build([_entry("ed_visits", "municipality", "geo.topn", floor="geo.topn")])
+    assert "municipality" in generate(policy, plan)["files"]["ed_visits.csv"]["columns"]
+    policy, plan = _build([_entry("ed_visits", "municipality", "withheld", floor="geo.topn")])
+    with pytest.raises(ContractError, match="no released files"):
+        generate(policy, plan)
+    policy, plan = _build([_entry("ed_visits", "municipality", "ts.day", floor="geo.topn")])
+    with pytest.raises(ContractError, match="municipality: rung finer than floor"):
+        generate(policy, plan)  # a different ladder is not coarser
+
+
+def test_plan_floor_must_equal_policy_floor() -> None:
+    policy, plan = _build([_entry("ed_visits", "municipality", "geo.topn", floor="geo.topn")])
+    plan[0]["floor"] = "geo.full"
+    with pytest.raises(ContractError, match="municipality: plan floor differs from policy floor"):
+        generate(policy, plan)
+
+
+def test_join_derived_qi_without_join_via_on_non_person_table_rejected() -> None:
+    qi = ({"table": "lab_results", "column": "sampled_ts", "derived": "sampled_ts"},)
+    policy, plan = _build([_entry("lab_results", "sampled_ts", "ts.month_hour")], qi)
+    with pytest.raises(ContractError, match="sampled_ts: join-derived qi needs join_via"):
+        generate(policy, plan)
+
+
+def test_join_via_must_name_an_existing_column() -> None:
+    plan = [_entry("lab_results", "sampled_ts", "ts.month_hour"), _entry("ed_visits", "visit_id", "id.pseudonym")]
+    for bad in (["ed_visits"], "ed_visits.visit_id", ["ed_visits", "no_col"], ["no_table", "visit_id"], ["a b", "c"]):
+        qi = ({"table": "lab_results", "column": "sampled_ts", "join_via": bad},)
+        policy, entries = _build(plan, qi)
+        with pytest.raises(ContractError, match="join_via"):
+            generate(policy, entries)
+
+
+def test_qi_and_token_rows_must_name_contract_columns() -> None:
+    policy, plan = _build([_entry("t", "a", "keep"), _entry("t", "b", "keep")], (
+        {"table": "t", "column": "a", "derived": "a"},))
+    contract = generate(policy, plan)
+    phantom = copy.deepcopy(contract)
+    phantom["qi"].append({"table": "t", "column": "zz", "derived_from": "zz"})  # sorts last
+    with pytest.raises(ContractError, match="qi: column not in files"):
+        digest(phantom)
+    phantom = copy.deepcopy(contract)
+    phantom["tokens"] = [{"table": "t", "column": "zz", "scope": "release"}]
+    with pytest.raises(ContractError, match="tokens: column not in files"):
+        digest(phantom)
+    phantom = copy.deepcopy(contract)
+    phantom["qi"] = [{"table": "other", "column": "a", "derived_from": "a"}]
+    with pytest.raises(ContractError, match="qi: column not in files"):
+        digest(phantom)
+
+
+def test_column_params_come_from_ladder_contract_entry() -> None:
+    policy, plan = _build([_entry("t", "a", "keep")])
+    body = generate(policy, plan)["files"]["t.csv"]["columns"]["a"]
+    assert body["form"] == contract_entry("keep")["form"]
+    assert {k: v for k, v in body["params"].items() if k != "rung"} == contract_entry("keep")["params"]
 
 def test_withheld_columns_and_tables_are_absent() -> None:
     policy, plan = _build([
@@ -73,6 +144,7 @@ def test_qi_listed_only_when_released_and_join_derived_named() -> None:
     released_policy, released = _build([
         _entry("lab_results", "sampled_ts", "ts.month_hour"),
         _entry("lab_results", "value", "num.exact"),
+        _entry("ed_visits", "visit_id", "id.pseudonym"),
     ], qi)
     contract = generate(released_policy, released)
     assert contract["qi"] == [

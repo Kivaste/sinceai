@@ -7,6 +7,7 @@ Writes ``contracts.txt`` and one ``<scenario>.contract.json`` to OUT_DIR when gi
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -42,21 +43,25 @@ def render(scenario: str) -> tuple[str, dict]:
 
 def main(argv: list[str]) -> int:
     out_dir = Path(argv[0]) if argv else None
-    chunks = []
-    try:
+    chunks: list[str] = []
+    files: dict[str, bytes] = {}
+    try:  # generate everything first: a rejection writes nothing
         for scenario in SCENARIOS:
             text, contract = render(scenario)
             chunks.append(text)
-            if out_dir is not None:
-                out_dir.mkdir(parents=True, exist_ok=True)
-                (out_dir / f"{scenario}.contract.json").write_bytes(canonical_bytes(contract))
+            files[f"{scenario}.contract.json"] = canonical_bytes(contract)
     except ContractError as exc:
         sys.stderr.write(f"contract rejected: {exc}\n")
         return 1
     text = "".join(chunks)
+    files["contracts.txt"] = text.encode("utf-8")
     sys.stdout.write(text)
     if out_dir is not None:
-        (out_dir / "contracts.txt").write_text(text, encoding="utf-8", newline="\n")
+        out_dir.mkdir(parents=True, exist_ok=True)
+        for name, data in sorted(files.items()):
+            tmp = out_dir / f".{name}.tmp"
+            tmp.write_bytes(data)
+            os.replace(tmp, out_dir / name)
     return 0
 
 
