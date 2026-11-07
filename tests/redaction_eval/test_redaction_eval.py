@@ -307,9 +307,10 @@ def test_cli_exit_code_nonzero_below_floor(monkeypatch):
 
     fr, notes = _tmpl_frames()
     monkeypatch.setattr(m, "load_frames", lambda kit: (fr, notes))
-    assert m.main(["--kit", "x", "--precision-floor", "0.5"]) == 1  # regex finds nothing -> precision 0
-    assert m.main(["--kit", "x"]) == 2  # floor unset = unknown, never 0
-    assert m.main(["--kit", "x", "--report-only"]) == 0  # explicit opt-in, claims no pass
+    base = ["--kit", "x", "--predictor", "regex-baseline"]
+    assert m.main(base + ["--precision-floor", "0.5"]) == 1  # regex finds nothing -> precision 0
+    assert m.main(base) == 2  # floor unset = unknown, never 0
+    assert m.main(base + ["--report-only"]) == 0  # explicit opt-in, claims no pass
 
 
 # ---------- follow-up #40 ----------

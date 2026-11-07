@@ -17,7 +17,19 @@ PERSON_VARIANTS = ("controller_gazetteer", "dev_lexicon")
 
 
 def predict_all(frame, predictor) -> dict:
-    return {tid: predictor(text) for tid, text in sorted(frame.texts.items())}
+    """Text predictors see one turn; conversation-level predictors (the shipped redactor) see each
+    conversation of the frame as one unit, turns in seq order."""
+    if not getattr(predictor, "conversation_level", False):
+        return {tid: predictor(text) for tid, text in sorted(frame.texts.items())}
+    from .production import as_turns
+
+    by_conv: dict = {}
+    for tid in frame.texts:
+        by_conv.setdefault(frame.conversation_of[tid], []).append(tid)
+    out: dict = {}
+    for cid in sorted(by_conv):
+        out.update(predictor.predict(cid, as_turns(frame, by_conv[cid])))
+    return dict(sorted(out.items()))
 
 
 def _person_section(frame, split, held, dev_frame, person_variants):
@@ -26,7 +38,9 @@ def _person_section(frame, split, held, dev_frame, person_variants):
     if missing:
         return {"status": "not_measured",
                 "reason": "missing named variant(s): " + ", ".join(missing)}
-    preds = [predict_all(frame, have[v](dev_frame)) for v in PERSON_VARIANTS]
+    convs = {frame.conversation_of[t] for t in held}
+    scope = subset(frame, [t for t in frame.texts if frame.conversation_of[t] in convs])  # whole conversations
+    preds = [predict_all(scope, have[v](dev_frame)) for v in PERSON_VARIANTS]
     out = person_twice(frame.gold, preds[0], preds[1], held)
     out["status"] = "measured"
     out["variants"] = list(PERSON_VARIANTS)
@@ -34,7 +48,7 @@ def _person_section(frame, split, held, dev_frame, person_variants):
 
 
 def evaluate_frames(frame, notes, make_predictor, precision_floor=None, person_variants=None,
-                    out_dir=None, repo_root=None, sheet_n=200) -> dict:
+                    out_dir=None, repo_root=None, sheet_n=200, predictor_info=None) -> dict:
     """make_predictor(dev_frame) -> predictor(text) -> spans. It receives development turns only;
     held-out turns are never passed to it. person_variants: {'controller_gazetteer': factory,
     'dev_lexicon': factory}, factories with the same signature."""
@@ -46,6 +60,7 @@ def evaluate_frames(frame, notes, make_predictor, precision_floor=None, person_v
     dev_convs = {frame.conversation_of[t] for t in split.dev_turns}
     held_convs = {frame.conversation_of[t] for t in held}
     report = {
+        "predictor": predictor_info or {"mode": "caller-supplied"},
         "split_mode": SPLIT_MODE,
         "split_note": SPLIT_NOTE,
         "conversations_in_both_partitions": len(dev_convs & held_convs),
