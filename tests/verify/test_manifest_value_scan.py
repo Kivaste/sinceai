@@ -119,6 +119,31 @@ def test_unchanged_real_manifest_has_no_shape_errors(real_bed, tb):
     assert validate_manifest(tb.load(real_bed.release)) == []
 
 
+# --- the scan is a registered release-scope check (round-3 review, Sol): named, versioned record in the gate,
+# re-run by recipient (limited) verify -------------------------------------------------------------------------
+SCAN = "release.manifest-values"
+
+
+def test_real_run_gate_records_the_manifest_scan(real_bed, tb):
+    m = tb.load(real_bed.release)
+    rec = next((r for r in m["gate"]["checks"] if r["check"] == SCAN), None)
+    assert rec is not None, "the real run's gate carries no manifest-scan record"
+    assert (rec["scope"], rec["status"], rec["hits"]) == ("release", "pass", 0)
+    assert rec["denominator"]["n"] >= 1
+    assert m["bindings"]["checkVersions"][SCAN] == rec["version"]
+
+
+def test_recipient_verify_reruns_the_manifest_scan(real_bed, verify_cli, tb):
+    """An attested not_applicable is contradicted by the re-run: proof that limited verify runs it by name."""
+    m = tb.load(real_bed.release)
+    rec = next(r for r in m["gate"]["checks"] if r["check"] == SCAN)
+    rec.update(status="not_applicable", hits=0, denominator={**rec["denominator"], "n": 0})
+    real_bed.resign(m)
+    r = verify_cli(real_bed.release, env=real_bed.env())
+    assert r.returncode == 1, r.stdout
+    assert f"check {SCAN} [release]: status mismatch (manifest not_applicable, re-run pass)" in r.stdout, r.stdout
+
+
 # --- no echo of a flagged map key (round-2 review, Sol) -------------------------------------------------------
 SECRET_KEY = "passwordHunterTwo"  # schema-valid param name that the secrets detector flags (cue + value)
 LOGIN_KEY = "loginAliceSmith"  # username detector: cue + handle

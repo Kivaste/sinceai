@@ -68,15 +68,28 @@ def _texts(node: Any, path: tuple, out: list) -> None:
         out.append((path, str(node)))  # not JSON-native: scanned as text (schema validation rejects it anyway)
 
 
-def identifier_shape_errors(manifest: Any, fmt) -> list[str]:
-    """``"<path>: identifier-shape:<LABEL>"`` for every detector hit; ``fmt`` renders a content-free path."""
+def _hits(node: Any, root: tuple) -> set[tuple[tuple, str]]:
+    """``{(path, LABEL)}`` for every detector hit under ``node`` (rooted at JSON path ``root``)."""
     texts: list = []
-    _texts(manifest, (), texts)
-    errs = set()
+    _texts(node, root, texts)
+    out = set()
     detectors = _detectors()
     for path, text in texts:
         for label, finder in detectors:
             high, low = finder(text)
             if high or low:
-                errs.add(f"{fmt(list(path))}: identifier-shape:{label}")
-    return sorted(errs)
+                out.add((path, label))
+    return out
+
+
+def identifier_shape_errors(manifest: Any, fmt) -> list[str]:
+    """``"<path>: identifier-shape:<LABEL>"`` for every detector hit; ``fmt`` renders a content-free path."""
+    return sorted({f"{fmt(list(path))}: identifier-shape:{label}" for path, label in _hits(manifest, ())})
+
+
+def identifier_shape_counts(node: Any, root: tuple = ()) -> dict[str, int]:
+    """``{LABEL: number of JSON paths it hits}`` under ``node``: the registered check's aggregate view."""
+    counts: dict[str, int] = {}
+    for _path, label in _hits(node, root):
+        counts[label] = counts.get(label, 0) + 1
+    return dict(sorted(counts.items()))
