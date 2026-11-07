@@ -1,4 +1,4 @@
-"""Regenerate test tiers from a successful, unfiltered pytest --durations run.
+"""Regenerate test tiers from a completed, unfiltered pytest --durations run.
 
 Run with PYTHONUTF8=1, PYTHONDONTWRITEBYTECODE=1, TZ=UTC and PYTHONPATH=src.
 Only node IDs and aggregate counts are emitted; the source log stays local.
@@ -10,6 +10,7 @@ import argparse
 import io
 import re
 import runpy
+import sys
 from collections import defaultdict
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
@@ -44,11 +45,18 @@ def select_slow(measured: set[str], real_kit: set[str], keep_fast: set[str]) -> 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("durations", type=Path, help="local successful full-suite pytest output")
+    parser.add_argument("durations", type=Path, help="local completed full-suite pytest output")
+    parser.add_argument("--allow-failed-profile", action="store_true",
+                        help="use failed/skipped run for timing classification only, never pass evidence")
     args = parser.parse_args()
     text = read_duration_log(args.durations)
-    if not re.search(r"\b\d+ passed\b", text) or re.search(r"\b\d+ (?:failed|errors?|skipped)\b", text):
+    if not re.search(r"\b\d+ passed\b.*\bin \d+(?:\.\d+)?s\b", text):
+        parser.error("profile has no completed pytest summary")
+    failed = re.search(r"\b\d+ (?:failed|errors?|skipped)\b", text) is not None
+    if failed and not args.allow_failed_profile:
         parser.error("profile must be a passing full run, with no failures/errors/skips")
+    if failed:
+        print("WARNING: failed/skipped profile used for timings only; not pass evidence", file=sys.stderr)
     if re.search(r"\b\d+ deselected\b", text):
         parser.error("profile must be unfiltered (no deselected tests)")
     try:

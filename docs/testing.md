@@ -53,7 +53,12 @@ python tools/list_slow_tests.py C:\path\outside-repo\durations.log
 The generator sums reported setup/call/teardown seconds for each exact node ID,
 selects totals >=2 seconds, adds collected real-kit dependencies, removes only
 the synthetic CLI smoke exceptions, and sorts the output. It collects tests but
-does not run them again. Use an unfiltered passing full run from this revision.
+does not run them again. Prefer an unfiltered passing full run from this revision.
+If the approved single profile failed or skipped tests, the explicit
+`--allow-failed-profile` option uses its timings only and warns; it does **not**
+turn that run into pass evidence. Report its actual failures/skips and use the
+affected-tests helper on the finished revision rather than rerunning the full
+suite as an agent.
 With `--durations-min=1.0`, subsecond phases are unavailable and cannot be
 included in totals; use zero on future refreshes. Relative ordering matters more
 than absolute timings on a loaded machine. Review and commit the generated list;

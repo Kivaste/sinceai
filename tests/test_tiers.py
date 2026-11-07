@@ -129,3 +129,28 @@ def test_generator_reads_powershell_and_utf8_logs(generator, tmp_path, encoding)
 def test_generator_includes_real_kit_and_exempts_only_synthetic_smoke(generator):
     assert generator.select_slow({"measured", "smoke"}, {"real", "real_smoke"},
                                  {"smoke", "real_smoke"}) == {"measured", "real", "real_smoke"}
+
+
+def test_failed_profile_requires_explicit_timing_only_opt_in(generator, monkeypatch, tmp_path, capsys):
+    tests = tmp_path / "tests"
+    tests.mkdir()
+    shutil.copyfile(ROOT / "tests" / "conftest.py", tests / "conftest.py")
+    log = tmp_path / "profile.log"
+    log.write_text("2.00s call tests/a.py::test_a\n1 failed, 2 passed, 1 skipped in 3.00s\n", encoding="utf-8")
+    monkeypatch.setattr(generator, "ROOT", tmp_path)
+
+    def collect(args, plugins):
+        plugins[0].collected = {"tests/a.py::test_a"}
+        plugins[0].real_kit = set()
+        return pytest.ExitCode.OK
+
+    monkeypatch.setattr(generator.pytest, "main", collect)
+    monkeypatch.setattr(sys, "argv", ["list_slow_tests.py", str(log)])
+    with pytest.raises(SystemExit) as exc:
+        generator.main()
+    assert exc.value.code == 2
+    assert not (tests / "slow_tests.txt").exists()
+    monkeypatch.setattr(sys, "argv", ["list_slow_tests.py", str(log), "--allow-failed-profile"])
+    assert generator.main() == 0
+    assert "not pass evidence" in capsys.readouterr().err
+    assert "tests/a.py::test_a\n" in (tests / "slow_tests.txt").read_text(encoding="utf-8")
