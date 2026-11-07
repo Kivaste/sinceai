@@ -116,9 +116,12 @@ def search_summary(log: list, stats: dict, policy) -> dict:
     Members are exact (#150): every step carries one risk component per ``policy.risk_vector`` component and no
     other; its score members are a subset of ``policy.purpose_checks``. An omitted member is unknown, never
     measured: an omitted risk component refuses; an omitted score refuses on an accepted step and makes a rejected
-    candidate's utility ``null``."""
+    candidate's utility ``null``. A present score is a finite, non-boolean number on every step, and a log with
+    no candidate step raises."""
     want_risk, want_scores = set(policy.risk_vector), set(policy.purpose_checks)
     steps = [e for e in log if e["step"] != "final"]
+    if not steps:
+        raise JustificationError("measured.search: the search log has no candidate step")
     points = []
     for e in steps:
         if set(e["risk"]) != want_risk:
@@ -130,6 +133,8 @@ def search_summary(log: list, stats: dict, policy) -> dict:
             raise JustificationError("measured.search: a search step has no measured risk")
         if not e["scores"]:
             raise JustificationError("measured.search: a search step has no purpose scores")
+        if not all(v is None or _measured_number(v) for v in e["scores"].values()):
+            raise JustificationError("measured.search: a search step has a non-numeric purpose score")
         scores = [e["scores"].get(c) for c in sorted(want_scores)]  # an omitted member reads as unknown (None)
         if e["accepted"] and any(v is None for v in scores):
             raise JustificationError("measured.search: an accepted search step has a missing purpose score")

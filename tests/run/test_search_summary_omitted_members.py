@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import json
 
+import pytest
 from test_search_summary_unmeasured import _edit, _refused, _run
 
 
@@ -80,3 +81,42 @@ def test_rejected_step_omitting_a_score_is_null(tmp_path, monkeypatch, capsys):
     s = json.loads((out / "privacy_manifest.json").read_text(encoding="utf-8"))["measured"]["search"]
     assert s["status"] == "measured"
     assert next(p for p in s["points"] if p["step"] == picked["step"])["utility"] is None
+
+
+# Rule 2 (#150 scope addition, final review pass 4 Gemini 8): a purpose score that is present is a finite,
+# non-boolean number on every step, and the log has at least one candidate; otherwise `run` refuses.
+#   an accepted step's score is a boolean    -> released, True averaged in as 1.0, status measured
+#                                                    -> test_non_number_score_refuses[accepted-bool]
+#   a rejected step's score is NaN           -> NaN utility published (or a non-search failure), not a refusal
+#                                                    -> test_non_number_score_refuses[rejected-nan]
+#   an accepted step's score is infinite     -> inf utility published (or a non-search failure), not a refusal
+#                                                    -> test_non_number_score_refuses[accepted-inf]
+#   a log with no candidate step             -> CLI: refused by justify's start-step check (already, kept by
+#                                               test_log_without_candidates_refuses); search_summary itself
+#                                               published candidates 0, status measured
+#                                                    -> test_search_summary_without_candidates_raises (direct)
+@pytest.mark.parametrize("which,value", [(True, True), (False, float("nan")), (True, float("inf"))],
+                         ids=["accepted-bool", "rejected-nan", "accepted-inf"])
+def test_non_number_score_refuses(tmp_path, monkeypatch, capsys, which, value):
+    def change(e):
+        first = sorted(k for k, v in e["scores"].items() if v is not None)[0]
+        return dict(e, scores={**e["scores"], first: value})
+
+    code, out = _run(tmp_path, monkeypatch, _edit(lambda e: e["accepted"] is which, change))
+    _refused(code, out, capsys)
+
+
+def test_log_without_candidates_refuses(tmp_path, monkeypatch, capsys):
+    code, out = _run(tmp_path, monkeypatch, lambda log: [e for e in log if e["step"] == "final"])
+    err = capsys.readouterr().err
+    assert code == 2, err
+    assert not out.exists()
+
+
+def test_search_summary_without_candidates_raises():
+    """Direct seam: justify refuses first in `run`, so the CLI cannot reach this guard (defence in depth)."""
+    from pets_release.policy.health_s1 import POLICY
+    from pets_release.run.justify import JustificationError, search_summary
+
+    with pytest.raises(JustificationError, match="measured.search"):
+        search_summary([{"step": "final", "scores": {}, "risk": {}, "accepted": True}], {}, POLICY)
