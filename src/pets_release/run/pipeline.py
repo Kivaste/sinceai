@@ -20,6 +20,7 @@ from pets_release.minimiser import LOG_KEYS, MinimiserRefused, search
 from pets_release.minimiser.kit import search_options
 from pets_release.policy import get_policy, hand_plan, validate_plan
 from pets_release.pseudonym import MasterKey
+from pets_release.recipient import RecipientError, validate_recipient_id
 from pets_release.run.context import DEFAULT_RECIPIENT, SCENARIO_SPEC, producer_context, token_keys
 from pets_release.run.justify import JustificationError, justify, search_summary
 from pets_release.run.narrative import build_narrative
@@ -104,7 +105,7 @@ def _search(scenario_id, policy, source, keys, kit, out: Path):
 
 
 def run_release(*, kit, scenario: dict, created: str, key_text: str, out, plan_name: str,
-                tool_revision: str) -> RunOutcome:
+                tool_revision: str, recipient: str | None = None) -> RunOutcome:
     scenario_id = scenario.get("id")
     if scenario_id not in SCENARIO_SPEC:
         raise RunError("run supports only HEALTH-S1 in this build")
@@ -120,7 +121,13 @@ def run_release(*, kit, scenario: dict, created: str, key_text: str, out, plan_n
     source = kit.load_dataset(policy.dataset)
     inputs = kit.input_digests(policy.dataset)
     master = MasterKey.from_text(key_text)
-    recipient = DEFAULT_RECIPIENT
+    if recipient is None:
+        recipient = DEFAULT_RECIPIENT
+    else:  # recipient-scoped keys (ticket 28): HKDF key + recipient-bound scope ID; manifest records the ID
+        try:
+            validate_recipient_id(recipient)
+        except RecipientError as e:
+            raise RunError(str(e)) from None
     rsid = release_scope_id(scenario=scenario_id, recipient=recipient, inputs=inputs, tool_revision=tool_revision)
     keys = token_keys(master, rsid, recipient)
 
