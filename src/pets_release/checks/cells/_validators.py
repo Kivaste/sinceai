@@ -242,20 +242,20 @@ def urls_with_tokens(s):
 
 
 # --- raw timestamps (minute or second precision) ------------------------------------------------
-_ISO_TS = re.compile(r"(?<!\d)\d{4}-\d{2}-\d{2}[T ](\d{2}):(\d{2})(?::(\d{2})(?:[.,](\d+))?)?")
-_FI_TS = re.compile(r"(?<![\d.])\d{1,2}\.\d{1,2}\.\d{4}\s*(?:klo|kl\.?|at|,)?\s*(\d{1,2})[:.](\d{2})(?![\d])")
+# Every supported format captures (hour, minute, second?, fraction?); any non-zero sub-hour part is a hit.
+_ISO_TS = re.compile(r"(?<!\d)\d{4}-\d{2}-\d{2}[T ](\d{2}):(\d{2})(?::(\d{2})(?:[.,](\d+))?)?(?!\d)")
+_FI_TS = re.compile(r"(?<![\d.])\d{1,2}\.\d{1,2}\.\d{4}\s*(?:klo|kl\.?|at|,)?\s*"
+                    r"(\d{1,2})[:.](\d{2})(?:[:.](\d{2})(?:[.,](\d+))?)?(?!\d)")
+TIMESTAMP_FORMATS = (_ISO_TS, _FI_TS)
+
+
+def _sub_hour(m) -> bool:
+    _, minute, second, frac = m.groups()
+    return minute != "00" or (second or "00") != "00" or bool((frac or "").strip("0"))
 
 
 def raw_timestamps(s):
-    n = 0
-    for m in _ISO_TS.finditer(s):
-        frac = m.group(4) or ""
-        if m.group(2) != "00" or (m.group(3) and m.group(3) != "00") or frac.strip("0"):
-            n += 1
-    for m in _FI_TS.finditer(s):
-        if m.group(2) != "00":
-            n += 1
-    return n, 0
+    return sum(1 for rx in TIMESTAMP_FORMATS for m in rx.finditer(s) if _sub_hour(m)), 0
 
 
 # --- 64-hex anywhere --------------------------------------------------------------------------
