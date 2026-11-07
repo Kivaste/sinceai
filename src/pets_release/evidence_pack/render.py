@@ -82,7 +82,11 @@ def sections(m):
                             f'after={_score(score, reason)}')))
     utility += [("Product purpose threshold (not a measured value)", str(THRESHOLD)),
                 ("Sacrifices", _json(m["sacrifices"]))]
-    residual = [(r["risk"], _json(r)) for r in m["residualRisks"]]
+    residual = []
+    for r in m["residualRisks"]:
+        residual.append((r["risk"], r["description"]))
+        residual.append((r["risk"] + " measurement", _measurement(r["rate"])))
+        residual.append((r["risk"] + " classification", _json({"kind": r["kind"], "label": r["label"]})))
     integrity = [("Digest notation", "Hex groups separated by /; remove spaces and slashes to reconstruct"),
                  ("Tool revision", _digest(m["bindings"]["toolRevision"])),
                  ("Input digests", _json({k: _digest(v) for k, v in m["bindings"]["inputs"].items()})),

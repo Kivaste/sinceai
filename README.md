@@ -288,7 +288,7 @@ A static HTML file rendered from the manifest alone. No network assets and no ro
 Export content-free HTML and Markdown from the signed manifest only. Set the
 signing release's `PETS_HMAC_KEY`; invalid manifests or signatures refuse the export.
 The seven sections cover purpose, legal basis/DPIA, methods, measured risk, utility,
-residual risks and reproducibility. Missing measurements stay **not measured**;
+verbatim residual risks and reproducibility. Missing measurements stay **not measured**;
 legal basis and DPIA are **To be supplied by the data controller**. This is technical
 evidence, not a permit or a DPIA. It never reads tables and does not replace `verify`.
 The example needs the signed measured release built above; its ledger skip is not a pass.

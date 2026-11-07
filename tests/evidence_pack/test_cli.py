@@ -189,3 +189,19 @@ def test_missing_method_record_and_section_statuses_are_explicit(release, tmp_pa
     for heading in HEADINGS:
         assert heading in result.stdout
     assert "Legal basis and DPIA: to be supplied" in result.stdout
+
+
+def test_residual_risk_prose_is_verbatim_not_json_escaped(release, tmp_path):
+    m = loads_strict((release / "privacy_manifest.json").read_bytes())
+    description = 'A "quoted" risk & limitation'
+    m["residualRisks"][0]["description"] = description
+    m["residualRisks"][0]["rate"] = {"status": "not_measured", "reason": "synthetic rate unavailable"}
+    write_manifest(release, m)
+    out = tmp_path / "pack.html"
+    result = run_pack(release, out)
+    assert result.returncode == 0, result.stderr
+    for path, start, end in ((out, 'id="section-6"', 'id="section-7"'),
+                             (out.with_suffix(".md"), "## 6.", "## 7.")):
+        section = unescape(path.read_text(encoding="utf-8")).split(start)[1].split(end)[0]
+        assert description in section
+        assert "not measured: synthetic rate unavailable" in section
