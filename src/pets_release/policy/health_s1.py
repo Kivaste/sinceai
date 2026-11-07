@@ -23,13 +23,13 @@ _ROWS = [
     _r(E, "attending_physician_name", "identifier", "withheld", True, D),
     _r(E, "date_of_birth", "age", "age_band_5", False, "QI; released only as derived column age_band (H-U6)",
        "age_band_10", {"ref_column": "arrival_ts", "output": "age_band"}, "10-year band, top-coded 90+, serves H-U6 and k"),
-    _r(E, "sex", "categorical", "exact", False, "QI", "exact"),
+    _r(E, "sex", "categorical", "exact", False, "QI", "withheld", {}, "no check needs it; withheld to raise per-person k"),
     _r(E, "postcode", "geo", "withheld", False, "municipality suffices"),
     _r(E, "municipality", "geo", "exact", False, "QI; H-U4 needs the eight largest municipalities",
        "top_n", {"n": 8}, "H-U4 needs the top 8; rest grouped as other to help k"),
     _r(E, "arrival_ts", "timestamp", "exact", False, "QI; H-U8 hour-of-day vs k on arrival week",
        "month_hour", {}, "month+hour keeps the hour-of-day curve, collapses the date"),
-    _r(E, "arrival_mode", "categorical", "exact", False, "no required check; kept low-risk", "exact"),
+    _r(E, "arrival_mode", "categorical", "exact", False, "QI (kit dictionary role); no required check", "withheld", {}, "no check needs it; withheld to raise per-person k"),
     _r(E, "ambulance_unit", "identifier", "pseudonym", False, "technical identifier", "withheld", {}, "no check needs it"),
     _r(E, "triage", "categorical", "exact", False, "H-U2", "exact"),
     _r(E, "chief_complaint", "text", "withheld", False, "free text, no check needs it"),
@@ -80,10 +80,16 @@ POLICY = ScenarioPolicy(
     privacy_targets=(
         {"id": "qi-k", "kind": "k_anonymity", "k": 5, "unit": "persons",
          "over": "every released QI incl. hour and join-derived information"},
-        {"id": "free-text-recall", "kind": "text_recall", "min": 0.95,
-         "labels": ["PERSON", "PHONE", "ADDRESS", "NATIONAL_ID"],
-         "note": "vacuous here: no free text is released; recorded as a residual-risk note"},
     ),
+    residual_notes=(
+        {"id": "free-text-recall", "status": "not_applicable",
+         "note": "scenario text-recall target (PERSON, PHONE, ADDRESS, NATIONAL_ID >= 0.95) is vacuous: no free text is released"},
+    ),
+    suppression={
+        "method": "local_suppression", "unit": "persons", "k": 5, "max_share": 0.10,
+        "order": "record_key_ascending_iterate_to_fixpoint",
+        "then": "full_recheck_of_every_purpose_check_and_privacy_target",
+    },
     floors=FLOORS,
     direct_identifiers=DIRECT,
     qi=(
@@ -91,6 +97,10 @@ POLICY = ScenarioPolicy(
         {"table": "ed_visits", "column": "sex", "derived": "sex"},
         {"table": "ed_visits", "column": "municipality", "derived": "municipality"},
         {"table": "ed_visits", "column": "arrival_ts", "derived": "arrival_ts"},
+        {"table": "ed_visits", "column": "arrival_mode", "derived": "arrival_mode",
+         "note": "conditional QI (kit dictionary role quasi_identifier): counted if released"},
+        {"table": "ed_visits", "column": "ambulance_unit", "derived": "ambulance_unit",
+         "note": "conditional QI (kit dictionary role quasi_identifier): counted if released as a pseudonym"},
         {"table": "ed_visits", "column": "discharge_ts", "derived": "discharge_ts",
          "note": "conditional QI: counted if released; visit timing (arrival + stay)"},
         {"table": "lab_results", "column": "sampled_ts", "derived": "sampled_ts",
@@ -99,9 +109,9 @@ POLICY = ScenarioPolicy(
     ),
     risk_vector=("qi_k_shortfall", "qi_unique_rate", "join_derived_qi", "direct_identifier_leak", "attribute_inference"),
     sacrifices=(
-        {"check": "H-U4", "floor_score": 0.6, "reason": "municipality grouping to top-N to reach k"},
-        {"check": "H-U6", "floor_score": 0.6, "reason": "coarser age band to reach k"},
-        {"check": "H-U8", "floor_score": 0.6, "reason": "coarser arrival time to reach k"},
+        {"check": "H-U4", "floor_score": 0.6, "reason": "municipality grouping to top-N to reach k", "via": [{"table": "ed_visits", "column": "municipality"}]},
+        {"check": "H-U6", "floor_score": 0.6, "reason": "coarser age band to reach k", "via": [{"table": "ed_visits", "column": "date_of_birth"}]},
+        {"check": "H-U8", "floor_score": 0.6, "reason": "coarser arrival time to reach k", "via": [{"table": "ed_visits", "column": "arrival_ts"}]},
     ),
     joint_qi_moves=(
         ({"table": "ed_visits", "column": "date_of_birth", "rung": "age.band10"},
@@ -115,6 +125,7 @@ POLICY = ScenarioPolicy(
          {"table": "ed_visits", "column": "arrival_ts", "rung": "ts.month_hour"}),
     ),
     linked=((("ed_visits", "visit_id"), ("lab_results", "visit_id")),),
+    alt_floors={("ed_visits", "patient_hetu"): "id.pseudonym"},
     param_minimums={("ed_visits", "municipality"): {"rung": "geo.topn", "param": "n", "min": 8}},
 )
 

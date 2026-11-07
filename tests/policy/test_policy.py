@@ -108,7 +108,7 @@ def test_health_hand_plan_matches_spec_table():
 def test_health_policy_contents():
     pol = get_policy("HEALTH-S1")
     assert list(pol.purpose_checks) == ["H-U2", "H-U4", "H-U6", "H-U7", "H-U8"]
-    k = [t for t in pol.privacy_targets if t["kind"] == "k_anonymity"][0]
+    k = next(t for t in pol.privacy_targets if t["kind"] == "k_anonymity")
     assert k["k"] == 5 and k["unit"] == "persons"
     assert {(q["table"], q["column"]) for q in pol.qi} >= {
         ("ed_visits", "date_of_birth"), ("ed_visits", "sex"), ("ed_visits", "municipality"),
@@ -141,7 +141,7 @@ def test_cs_policy_contents():
     assert list(pol.purpose_checks) == ["CS-U1", "CS-U3", "CS-U4", "CS-U5"]
     kinds = {t["kind"] for t in pol.privacy_targets}
     assert {"text_recall", "health_in_text", "timestamp_floor"} <= kinds
-    rec = [t for t in pol.privacy_targets if t["kind"] == "text_recall"][0]
+    rec = next(t for t in pol.privacy_targets if t["kind"] == "text_recall")
     assert rec["min"] == 0.98
     assert set(rec["labels"]) == {"NATIONAL_ID", "PAYMENT_CARD", "IBAN", "SECRET"}
     assert pol.qi == ()
@@ -157,6 +157,8 @@ def test_sacrifices_and_moves_are_enumerated_and_well_formed(sid):
         assert s["check"] in pol.purpose_checks
         assert 0.0 <= s["floor_score"] < 0.9
         assert s["reason"]
+        assert s["via"] and all((v["table"], v["column"]) in pol.floors for v in s["via"])
+        assert any(pol.floors[(v["table"], v["column"])].rung != "withheld" for v in s["via"])
     assert len({s["check"] for s in pol.sacrifices}) == len(pol.sacrifices)
     assert pol.risk_vector and len(set(pol.risk_vector)) == len(pol.risk_vector)
     for move in pol.joint_qi_moves:
@@ -302,6 +304,7 @@ def test_no_row_like_values_in_serialised_artefacts():
 def test_ladders_07_apply_accepts_hand_plans_on_synthetic_frames():
     """Production check: ticket 07's real apply must accept the plan shape (hand-made rows)."""
     import pandas as pd
+
     from pets_release.ladders import apply
 
     class K:
@@ -357,7 +360,7 @@ def test_every_releasable_timing_age_geo_column_is_a_qi_under_a_k_target():
 
 def test_join_derived_qi_declares_join_via():
     pol = get_policy("HEALTH-S1")
-    row = [q for q in pol.qi if (q["table"], q["column"]) == ("lab_results", "sampled_ts")][0]
+    row = next(q for q in pol.qi if (q["table"], q["column"]) == ("lab_results", "sampled_ts"))
     assert row["join_via"] == ["ed_visits", "visit_id"]
     assert ("ed_visits", "visit_id") in pol.floors
     for q in pol.qi:
@@ -380,3 +383,121 @@ def test_validate_rejects_non_finite_params(bad):
     p = _mutated("HEALTH-S1", lambda pl: pl[0].update(params={"nested": [{"y": bad}]}))
     with pytest.raises(PlanError, match="params"):
         validate_plan(p, get_policy("HEALTH-S1"))
+
+DICT_QI_ROLES = {  # kit data dictionary quasi_identifier roles (column names only), health tables
+    "ed_visits": ["date_of_birth", "sex", "postcode", "municipality", "arrival_ts", "arrival_mode",
+                  "ambulance_unit", "discharge_ts"],
+    "lab_results": ["sampled_ts"],
+    "clinical_notes": ["written_ts", "language"],
+    "published_weekly_stats": ["week", "municipality", "age_band", "sex"],
+}
+
+
+def test_every_dictionary_qi_role_releasable_by_floor_is_a_policy_qi():
+    pol = get_policy("HEALTH-S1")
+    qis = {(q["table"], q["column"]) for q in pol.qi}
+    for t, cols in DICT_QI_ROLES.items():
+        for c in cols:
+            assert (t, c) in pol.floors, (t, c)
+            if pol.floors[(t, c)].rung != "withheld":
+                assert (t, c) in qis, (t, c)
+    assert ("ed_visits", "arrival_mode") in qis and ("ed_visits", "ambulance_unit") in qis
+
+
+def test_patient_hetu_has_conditional_pseudonym_alt_floor():
+    pol = get_policy("HEALTH-S1")
+    assert pol.alt_floors[("ed_visits", "patient_hetu")] == "id.pseudonym"
+    plan = hand_plan("HEALTH-S1")
+    for e in plan:
+        if (e["table"], e["column"]) == ("ed_visits", "patient_hetu"):
+            e.update(rung="id.pseudonym", floor="id.pseudonym", params={"label": "PERSON_KEY"})
+    validate_plan(plan, pol)
+
+
+def test_alt_floors_serialised():
+    j = get_policy("CS-S1").to_json()
+    assert j["altFloors"] == [{"table": "turns", "column": "turn_id", "floor": "id.pseudonym"}]
+    assert get_policy("HEALTH-S1").to_json()["altFloors"]
+
+
+def test_alt_branch_rejects_finer_rung_and_still_checks_everything():
+    pol = get_policy("CS-S1")
+    def f(pl):
+        for e in pl:
+            if (e["table"], e["column"]) == ("turns", "turn_id"):
+                e["floor"] = "id.pseudonym"  # alt floor, but rung stays keep (finer)
+    with pytest.raises(PlanError, match="floor"):
+        validate_plan(_mutated("CS-S1", f), pol)
+    def g(pl):
+        for e in pl:
+            if (e["table"], e["column"]) == ("turns", "turn_id"):
+                e.update(rung="id.pseudonym", floor="id.pseudonym", reason="", params={})
+    with pytest.raises(PlanError, match="reason"):
+        validate_plan(_mutated("CS-S1", g), pol)
+    def h(pl):
+        for e in pl:
+            if (e["table"], e["column"]) == ("turns", "turn_id"):
+                e.update(rung="id.pseudonym", floor="id.pseudonym", params={"label": 5})
+    with pytest.raises(PlanError, match="label"):
+        validate_plan(_mutated("CS-S1", h), pol)
+    def w(pl):  # alt floor with an unrelated (non-alt) column is not honoured
+        for e in pl:
+            if (e["table"], e["column"]) == ("turns", "seq"):
+                e.update(floor="id.pseudonym", rung="id.pseudonym")
+    with pytest.raises(PlanError):
+        validate_plan(_mutated("CS-S1", w), pol)
+
+
+def test_cs_has_only_the_cs_u5_sacrifice_and_handle_time_stays_exact():
+    pol = get_policy("CS-S1")
+    assert [s["check"] for s in pol.sacrifices] == ["CS-U5"]
+    assert idx(hand_plan("CS-S1"))[("conversations", "handle_time_s")]["rung"] == "num.exact"
+
+
+def test_health_free_text_recall_is_a_not_applicable_note_not_a_target():
+    pol = get_policy("HEALTH-S1")
+    assert not [t for t in pol.privacy_targets if t["kind"] == "text_recall"]
+    notes = [n for n in pol.residual_notes if n["id"] == "free-text-recall"]
+    assert len(notes) == 1 and notes[0]["status"] == "not_applicable"
+    assert pol.to_json()["residualNotes"]
+    assert get_policy("CS-S1").residual_notes == ()
+
+
+def test_health_suppression_policy_field():
+    pol = get_policy("HEALTH-S1")
+    s = pol.suppression
+    assert set(s) == {"method", "unit", "k", "max_share", "order", "then"}
+    assert s["method"] == "local_suppression" and s["k"] == 5 and s["unit"] == "persons"
+    assert 0 < s["max_share"] <= 0.1
+    assert "recheck" in s["then"]
+    assert pol.to_json()["suppression"] == s
+    assert get_policy("CS-S1").suppression is None
+
+
+def _bad(sid, **kw):
+    import dataclasses
+
+    from pets_release.policy import PolicyError
+    pol = get_policy(sid)
+    with pytest.raises(PolicyError):
+        dataclasses.replace(pol, **kw)
+
+
+def test_policy_subrecords_are_closed():
+    h = get_policy("HEALTH-S1")
+    t0, q0, s0, m0 = h.privacy_targets[0], h.qi[0], h.sacrifices[0], h.joint_qi_moves[0]
+    _bad("HEALTH-S1", privacy_targets=(dict(t0, extra=1),) + h.privacy_targets[1:])
+    _bad("HEALTH-S1", privacy_targets=({k: v for k, v in t0.items() if k != "k"},) + h.privacy_targets[1:])
+    _bad("HEALTH-S1", privacy_targets=({"id": "x", "kind": "mystery"},))
+    _bad("HEALTH-S1", qi=(dict(q0, extra=1),) + h.qi[1:])
+    _bad("HEALTH-S1", qi=({k: v for k, v in q0.items() if k != "derived"},) + h.qi[1:])
+    _bad("HEALTH-S1", qi=(dict(q0, column="nope"),) + h.qi[1:])
+    _bad("HEALTH-S1", sacrifices=(dict(s0, extra=1),) + h.sacrifices[1:])
+    _bad("HEALTH-S1", sacrifices=({k: v for k, v in s0.items() if k != "via"},) + h.sacrifices[1:])
+    _bad("HEALTH-S1", sacrifices=(dict(s0, check="H-U99"),) + h.sacrifices[1:])
+    _bad("HEALTH-S1", joint_qi_moves=((dict(m0[0], extra=1),) + m0[1:],))
+    _bad("HEALTH-S1", joint_qi_moves=((dict(m0[0], rung="nope"),) + m0[1:],))
+    _bad("HEALTH-S1", suppression=dict(h.suppression, extra=1))
+    _bad("HEALTH-S1", residual_notes=({"id": "x"},))
+    c = get_policy("CS-S1")
+    _bad("CS-S1", privacy_targets=(dict(c.privacy_targets[0], extra=1),) + c.privacy_targets[1:])
