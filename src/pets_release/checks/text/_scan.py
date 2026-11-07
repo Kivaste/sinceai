@@ -29,17 +29,77 @@ class TextCheckError(Exception):
 
 # Short multi-token phrases; a regex form accepting any of them can carry free text in short cells.
 _FREE_TEXT_PROBES = ("ab cd", "ab 12", "a1 b2 c3", "call me on")
+# every whitespace code point (all lie below U+3001)
+_WS = tuple(c for c in range(0x3001) if chr(c).isspace())
+_NO_WS_CATEGORIES = frozenset({"CATEGORY_DIGIT", "CATEGORY_WORD", "CATEGORY_NOT_SPACE", "CATEGORY_UNI_DIGIT",
+                               "CATEGORY_UNI_WORD", "CATEGORY_UNI_NOT_SPACE"})
+_NO_CONSUME = frozenset({"AT", "ASSERT", "ASSERT_NOT", "FAILURE"})
+
+
+def _class_item_ws(op, av) -> bool:
+    """One item of a character class may match whitespace (unknown items: yes)."""
+    if op == "LITERAL":
+        return chr(av).isspace()
+    if op == "RANGE":
+        return any(av[0] <= c <= av[1] for c in _WS)
+    if op == "CATEGORY":
+        return str(av) not in _NO_WS_CATEGORIES
+    return True  # NEGATE and anything unknown: fail closed
+
+
+def _shape(items) -> tuple[bool, bool]:
+    """(may match whitespace, has a variable element) over a parsed pattern; unknown nodes: (True, True)."""
+    ws = var = False
+    for op, av in items:
+        name = str(op)
+        if name in _NO_CONSUME:
+            continue
+        if name == "LITERAL":
+            ws = ws or chr(av).isspace()
+            continue
+        if name in ("NOT_LITERAL", "ANY"):
+            ws = var = True
+            continue
+        if name == "IN":
+            var = True
+            ws = ws or any(_class_item_ws(str(o), a) for o, a in av)
+            continue
+        if name == "CATEGORY":
+            var = True
+            ws = ws or str(av) not in _NO_WS_CATEGORIES
+            continue
+        if name in ("MAX_REPEAT", "MIN_REPEAT", "POSSESSIVE_REPEAT"):
+            subs = [av[2]]
+        elif name == "SUBPATTERN":
+            subs = [av[3]]
+        elif name == "ATOMIC_GROUP":
+            subs = [av]
+        elif name == "BRANCH":
+            subs = list(av[1])
+        elif name == "GROUPREF_EXISTS":
+            subs = [p for p in av[1:] if p is not None]
+        else:
+            return True, True  # GROUPREF and anything unknown: fail closed
+        for sub in subs:
+            w, v = _shape(sub)
+            ws, var = ws or w, var or v
+    return ws, var
 
 
 def _free_text_form(form) -> bool:
-    """True for an anchored regex form (not a validator ID) that accepts a short multi-token phrase."""
+    """True for an anchored regex form (not a validator ID) that can carry free words in a short cell: it may
+    accept whitespace and has a variable part (a class, a category, "."). Only a form that cannot accept
+    whitespace, or accepts a closed set of literal phrases, is not text. Unreadable: text (fail closed)."""
     if not isinstance(form, str) or not form.startswith("^"):
         return False
     try:
         rx = re.compile(form)
-    except re.error:
-        return True  # unreadable form: fail closed
-    return any(rx.fullmatch(p) for p in _FREE_TEXT_PROBES)
+        from re import _parser  # the stdlib's own parse of the same pattern
+
+        ws, var = _shape(_parser.parse(form, rx.flags))
+    except Exception:  # noqa: BLE001 - unreadable form or parser unavailable: fail closed
+        return True
+    return (ws and var) or any(rx.fullmatch(p) for p in _FREE_TEXT_PROBES)
 
 
 def text_fields(contract):
