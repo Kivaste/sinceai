@@ -223,7 +223,8 @@ def write_release(candidate: Candidate, out, master_key, kit: Kit, *, context: M
     try:
         digests, lineage = _write_tables(build, candidate)
         # the pinned scenario policy, not the candidate, fixes the k target and the QI set (#62)
-        reasons = [f"policy:{p}" for p in contract_policy_problems(candidate.scenario, candidate.contract)]
+        reasons = [f"policy:{p}" for p in contract_policy_problems(candidate.scenario, candidate.contract,
+                                                                         candidate.narrative.get("fieldJustifications"))]
         gate = run_checks(build, candidate.contract, {**context, "phase": "gate"})
         reasons += _gate_reasons(gate, "gate") + _registry_reasons(gate.records)
         reasons += evidence_for(gate.records, candidate.scenario)[2]

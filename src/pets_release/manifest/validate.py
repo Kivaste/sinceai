@@ -141,7 +141,8 @@ def _cross_field_errors(m: dict) -> list[str]:
     # the pinned scenario policy fixes the k target and the released QI set (#62)
     from pets_release.policy import contract_policy_problems
 
-    errs += [f"$.{p}" for p in contract_policy_problems(m["release"]["scenario"], m["contract"])]
+    errs += [f"$.{p}" for p in contract_policy_problems(m["release"]["scenario"], m["contract"],
+                                                                   m["fieldJustifications"])]
 
     # identifier-shaped text anywhere outside the pinned digest/signature metadata (#61)
     from pets_release.manifest.value_scan import identifier_shape_errors

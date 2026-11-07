@@ -103,3 +103,41 @@ def test_context_k_comes_from_policy_not_contract():
                                scope_id="0" * 16, recipient="default",
                                contract={"k": 2, "files": {}, "qi": [], "tokens": []}, released=None)
     assert ctx["k"] == 5
+
+
+# --- renamed policy QI (round-1 review, DeepSeek): matched through the field justification's outputColumn ----
+
+def _rename_age_band(contract, narrative, new="ab"):
+    c = copy.deepcopy(contract)
+    cols = c["files"]["ed_visits.csv"]["columns"]
+    cols[new] = cols.pop("age_band")
+    req = c["files"]["ed_visits.csv"]["required"]
+    c["files"]["ed_visits.csv"]["required"] = sorted(new if r == "age_band" else r for r in req)
+    c["qi"] = [q for q in c["qi"] if q["column"] != "age_band"]  # the renamed QI is dropped from contract.qi
+    n = copy.deepcopy(dict(narrative))
+    for fj in n["fieldJustifications"]:
+        if fj["outputColumn"] == "age_band":
+            fj["outputColumn"] = new
+    return c, n
+
+
+def test_manifest_with_renamed_policy_qi_dropped_is_invalid(tmp_path):
+    m = _manifest(tmp_path)
+    c, n = _rename_age_band(m["contract"], {"fieldJustifications": m["fieldJustifications"]})
+    m["contract"], m["fieldJustifications"] = c, n["fieldJustifications"]
+    errs = validate_manifest(_rebind(m))
+    assert "$.contract.qi: ed_visits.ab: missing-policy-qi" in errs, errs
+
+
+def test_writer_refuses_renamed_policy_qi_dropped(tmp_path):
+    from pets_release.writer import ProtectedTable
+
+    base = make_candidate()
+    c, n = _rename_age_band(base.contract, base.narrative)
+    tables = tuple(ProtectedTable(name=t.name, frame=t.frame.rename(columns={"age_band": "ab"}), final=t.final,
+                                  suppressed=t.suppressed) if t.name == "ed_visits.csv" else t for t in base.tables)
+    cand = make_candidate(contract=c, narrative=n, tables=tables)
+    kit = make_kit(tmp_path / "kit", cand)
+    res = write_release(cand, tmp_path / "o" / "rel", MASTER, kit, context=producer_context(cand))
+    assert res.status == "refused"
+    assert "policy:contract.qi: ed_visits.ab: missing-policy-qi" in res.reasons, res.reasons

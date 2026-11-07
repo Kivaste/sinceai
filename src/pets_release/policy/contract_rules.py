@@ -23,24 +23,40 @@ def k_target(policy) -> int | None:
     return targets[0]["k"]
 
 
-def released_policy_qis(policy, contract: Mapping) -> list[tuple[str, str]]:
-    """(table, released column) of every policy QI the contract releases (derived name, or source name)."""
+def _justified_outputs(justifications) -> dict:
+    """(table, source column) -> released output column names, from field justifications (decision released)."""
+    out: dict = {}
+    for fj in justifications or ():
+        if isinstance(fj, Mapping) and fj.get("decision") == "released" and isinstance(fj.get("outputColumn"), str):
+            out.setdefault((fj.get("table"), fj.get("column")), set()).add(fj["outputColumn"])
+    return out
+
+
+def released_policy_qis(policy, contract: Mapping, justifications=None) -> list[tuple[str, str]]:
+    """(table, released column) of every policy QI the contract releases.
+
+    A policy QI counts as released under its derived name, its source name, or any output column a field
+    justification gives it (so a renamed QI is still recognised). Limitation: a renamed QI whose justification
+    is also omitted or misattributed is not recognised by name here; the writer's own justification rule
+    (every released contract column justified) and person-k over the contract's QIs remain the backstops.
+    """
     files = contract.get("files") if isinstance(contract, Mapping) else None
     if not isinstance(files, Mapping):
         return []
+    outputs = _justified_outputs(justifications)
     out = set()
     for q in policy.qi:
         spec = files.get(f"{q['table']}.csv")
         cols = spec.get("columns") if isinstance(spec, Mapping) else None
         if not isinstance(cols, Mapping):
             continue
-        for name in {q["derived"], q["column"]}:
+        for name in {q["derived"], q["column"], *outputs.get((q["table"], q["column"]), ())}:
             if name in cols:
                 out.add((q["table"], name))
     return sorted(out)
 
 
-def contract_policy_problems(scenario: str, contract) -> list[str]:
+def contract_policy_problems(scenario: str, contract, justifications=None) -> list[str]:
     """Content-free problem codes (``<field>: <rule>``); ``[]`` means the contract honours the policy."""
     from pets_release.policy import get_policy
 
@@ -64,7 +80,7 @@ def contract_policy_problems(scenario: str, contract) -> list[str]:
         out.append("contract.k: policy-mismatch")
     qi = contract.get("qi")
     listed = {(q.get("table"), q.get("column")) for q in qi if isinstance(q, Mapping)} if isinstance(qi, list) else set()
-    for table, column in released_policy_qis(policy, contract):
+    for table, column in released_policy_qis(policy, contract, justifications):
         if (table, column) not in listed:
             out.append(f"contract.qi: {table}.{column}: missing-policy-qi")
     return sorted(out)
