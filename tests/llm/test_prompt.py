@@ -1,42 +1,20 @@
-"""The LLM call site sees the request text and the data dictionary only (ADR 0002)."""
+﻿"""The LLM call site sees the request text and the data dictionary only (ADR 0002)."""
 from __future__ import annotations
 
 import ast
 import json
+import sys
 from pathlib import Path
 
 import pandas as pd
 import pytest
 
+sys.path.insert(0, str(Path(__file__).parent))
+from helpers import DICT_MD  # noqa: E402
 from pets_release.llm.dictionary import DataDictionary, DictionaryError, parse_dictionary
 from pets_release.llm.prompt import build_messages
 from pets_release.llm.vocabulary import vocabulary_for
 
-DICT_MD = """# Data dictionary
-
-## health
-
-### health / ed_visits
-
-| column | role | subtype | Art. 9 | description |
-|---|---|---|---|---|
-| `visit_id` | record_key | RECORD_ID |  | Visit identifier |
-| `los_minutes` | sensitive_attribute | HEALTH_DATA | yes | Length of stay in minutes |
-
-### health / lab_results
-
-| column | role | subtype | Art. 9 | description |
-|---|---|---|---|---|
-| `lab_id` | record_key | RECORD_ID |  | Lab result identifier |
-
-## other
-
-### other / things
-
-| column | role | subtype | Art. 9 | description |
-|---|---|---|---|---|
-| `thing` | non_sensitive | CATEGORY |  | A thing |
-"""
 
 SRC = Path(__file__).resolve().parents[2] / "src" / "pets_release" / "llm"
 
