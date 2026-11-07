@@ -22,19 +22,22 @@ QI_ROLE = "quasi_identifier"
 
 def _source_of(table: str, column: str, spec) -> tuple[str, str]:
     params = spec.get("params") if isinstance(spec, Mapping) else None
-    df = params.get("derived_from") if isinstance(params, Mapping) else None
-    if isinstance(df, str) and df:
-        t, _, c = df.rpartition(".")
+    declared = params.get("derived_from") if isinstance(params, Mapping) else None
+    if isinstance(declared, str) and declared:
+        t, _, c = declared.rpartition(".")
         return (t or table, c)
     return (table, column)
 
 
 def released_qis(source: Mapping[str, pd.DataFrame], released: Mapping[str, pd.DataFrame],
-                 contract: Mapping) -> list[dict]:
-    """``[{table, column}]`` of every released column that is a detector QI (sorted). Raises on detector failure."""
+                 contract: Mapping, unverified=()) -> list[dict]:
+    """``[{table, column}]`` of every released column that is a detector QI (sorted). Raises on detector failure.
+    ``unverified``: (table, column) pairs whose declared source did not reproduce them (``run.provenance``); with no
+    trusted source they count as QIs (fail closed)."""
     files = (contract or {}).get("files") or {}
     src_qi = {(r["table"], r["column"]) for r in detect_dataset("source", dict(source)) if r["role"] == QI_ROLE}
     out = {(r["table"], r["column"]) for r in detect_dataset("release", dict(released)) if r["role"] == QI_ROLE}
+    out |= {(t, str(c)) for t, c in unverified}
     for t, df in released.items():
         cols = (files.get(f"{t}.csv") or {}).get("columns") or {}
         for c in df.columns:

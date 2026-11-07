@@ -92,10 +92,14 @@ POLICY = ScenarioPolicy(
         {"id": "renamed-age-band-scorecard-blind-spot", "status": "open",
          "note": "D22: age_band is released as a renamed derived column, which the kit scorecard does not recognise as a QI; our per-person k over every released QI is authoritative"},
         {"id": "lab-test-name-qi", "status": "open",
-         "note": "D33 branch A: lab_results.test_name is a QI (ladder full, CRP vs other, withheld) and counts in "
-                 "per-person k if released; withheld, the cap holds, so the justified non-QI fallback is not taken. "
-                 "Open: test_code is released exact for H-U7 and is not a detector QI, yet carries the same test "
-                 "identity, so a person's set of lab tests could single them out to someone who knows their test "
+         "note": "D33 branch A taken: lab_results.test_name is a QI (ladder full, CRP vs other, withheld), counted in "
+                 "per-person k if released. Measured on the real kit with the search plan (#106; below-k share before "
+                 "suppression / suppression share needed, cap 0.10): full 0.536 / 0.663, CRP vs other 0.372 / 0.507, "
+                 "withheld 0.043 / 0.099. The search withholds it and the cap holds, so the justified non-QI "
+                 "fallback is not taken; H-U7 0.983 either way (it selects CRP by test_code)"},
+        {"id": "lab-test-code-identity", "status": "open",
+         "note": "test_code is released exact for H-U7 and is not a detector QI, yet carries the same test identity "
+                 "as test_name: a person's set of lab tests could single them out to someone who knows their test "
                  "history"},
     ),
     suppression={

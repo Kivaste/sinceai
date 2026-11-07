@@ -133,4 +133,5 @@ def test_manifest_records_the_d33_branch(released, tmp_path):
     risks = {r["risk"]: r for r in _manifest(rel)["residualRisks"]}
     assert "lab-test-name-qi" in risks, sorted(risks)
     text = risks["lab-test-name-qi"]["description"]
-    assert "D33" in text and "test_code" in text
+    assert "D33 branch A" in text and "0.507" in text and "fallback is not taken" in text
+    assert "test history" in risks["lab-test-code-identity"]["description"]

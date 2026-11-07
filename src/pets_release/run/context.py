@@ -25,6 +25,7 @@ import pandas as pd
 from pets_release.detect.released import released_qis
 from pets_release.ladders import PseudonymKeys
 from pets_release.policy import k_target
+from pets_release.run.provenance import unreproduced
 from pets_release.pseudonym import (
     RECORD_KEY,
     MasterKey,
@@ -126,7 +127,11 @@ def producer_context(*, scenario_id: str, policy, source: Mapping[str, pd.DataFr
         ctx["rowmaps"] = rowmaps
         # #106 / D33: the detector's QI classification of what is released (values and source columns); person-k
         # refuses on one missing from contract.qi. Computed from the kit and the released tables, never declared.
-        ctx["detected_qi"] = released_qis(source, released, contract)
+        # round 2: a released column its declared mapping does not reproduce from the source has no trusted source,
+        # so it counts as a QI too (run.provenance)
+        unver = unreproduced(policy=policy, source=source, released=released, contract=contract, rowmaps=rowmaps,
+                             keys=keys, spec=spec)
+        ctx["detected_qi"] = released_qis(source, released, contract, unverified=unver)
     return ctx
 
 
