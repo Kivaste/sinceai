@@ -60,8 +60,10 @@ def _checkset(tb, release, outcome=lambda: Outcome(n=1), drop=0):
 def _full(tb, release, kit, checks=None, key=None):
     from pets_release.verify import verify_release
 
+    # The fixture rows are not a run of the kit, so the purpose re-run is stubbed here; tests/run/test_purpose_gate.py
+    # covers it through the real CLI.
     return verify_release(release, full=True, kit=kit, master_key=MasterKey.from_text(key or tb.KEY),
-                          checks=checks)
+                          checks=checks, purpose=lambda *a: [])
 
 
 # --- CLI usage rows ---------------------------------------------------------------------------------------

@@ -58,7 +58,9 @@ def _full_checks(tb, bed, na_name=None):
 def _full(tb, bed, kit, checks):
     from pets_release.verify import verify_release
 
-    return verify_release(bed, full=True, kit=kit, master_key=MasterKey.from_text(tb.KEY), checks=checks)
+    # fixture rows are not a run of the kit: purpose re-run stubbed (real CLI coverage: tests/run/test_purpose_gate.py)
+    return verify_release(bed, full=True, kit=kit, master_key=MasterKey.from_text(tb.KEY), checks=checks,
+                          purpose=lambda *a: [])
 
 
 def _mismatch(rep):
