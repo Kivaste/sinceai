@@ -1,4 +1,4 @@
-"""Deterministic synthetic mini-kit generator (ticket 03).
+﻿"""Deterministic synthetic mini-kit generator (ticket 03).
 
 Writes small health and customer_service tables that use the challenge kit's table and column
 names, sized so the required utility tasks (H-U2/4/6/7/8, CS-U1/3/4/5) run and score.
@@ -63,11 +63,11 @@ TURN_COLUMNS = ["turn_id", "conversation_id", "seq", "speaker", "ts", "text"]
 FIRST_A = ["Ka", "Mi", "To", "Lu", "Ve", "Ni", "Sa", "Ra", "Ju", "Ha", "Pe", "Ol"]
 FIRST_B = ["rin", "lo", "mas", "vi", "ko", "ra", "ten", "mo", "ssa", "ni"]
 LAST_A = ["Kor", "Vael", "Mast", "Ruut", "Pello", "Hark", "Sund", "Tuur", "Lind", "Nyk", "Aal", "Vir"]
-LAST_B = ["ainen", "ola", "mäki", "berg", "nen", "koski", "lund", "ström"]
+LAST_B = ["ainen", "ola", "mÃ¤ki", "berg", "nen", "koski", "lund", "strÃ¶m"]
 STREET_STEM = ["SynthKoivu", "SynthKuusi", "SynthPajan", "SynthMeri", "SynthHarju", "SynthLehto", "SynthNiitty", "SynthRinne", "SynthKallio", "SynthAallon"]
 STREET_END = ["katu", "tie", "kuja", "polku"]
 MUNICIPALITIES = [
-    "Pellonmaa", "Harjuvalli", "Kivilahti", "Rantalinna", "Suvikoski", "Ylikorpi", "Alamäki",
+    "Pellonmaa", "Harjuvalli", "Kivilahti", "Rantalinna", "Suvikoski", "Ylikorpi", "AlamÃ¤ki",
     "Tuulisaari", "Havukoski", "Linnanvuori",
 ]
 POSTCODES = [
@@ -129,7 +129,7 @@ HOUR_WEIGHTS = [2, 1, 1, 1, 1, 2, 3, 5, 7, 9, 10, 10, 9, 8, 8, 8, 8, 7, 6, 5, 4,
 NOTE_LANGS = ["fi", "sv", "en"]
 NOTE_TEXT = {
     "fi": "Potilas {name} tuli vastaanotolle, vointi arvioitu, jatkotoimet sovittu.",
-    "sv": "Patienten {name} kom till mottagningen, tillståndet bedömdes, fortsatt vård överenskommen.",
+    "sv": "Patienten {name} kom till mottagningen, tillstÃ¥ndet bedÃ¶mdes, fortsatt vÃ¥rd Ã¶verenskommen.",
     "en": "Patient {name} arrived for assessment, condition reviewed, follow-up agreed.",
 }
 
@@ -301,13 +301,13 @@ EVAL_INTENT_TEXT = {
 }
 AGENT_OPEN = {
     "en": "Hello and thank you for contacting Testiverkko customer service, how can I help you today",
-    "fi": "Hei ja kiitos yhteydenotostasi Testiverkko asiakaspalvelu, miten voin auttaa tänään",
-    "sv": "Hej och tack för att du kontaktar Testiverkko kundtjänst, hur kan jag hjälpa dig idag",
+    "fi": "Hei ja kiitos yhteydenotostasi Testiverkko asiakaspalvelu, miten voin auttaa tÃ¤nÃ¤Ã¤n",
+    "sv": "Hej och tack fÃ¶r att du kontaktar Testiverkko kundtjÃ¤nst, hur kan jag hjÃ¤lpa dig idag",
 }
 AGENT_CLOSE = {
     "en": "Is there anything else I can help you with today, thank you for contacting us and have a nice day",
-    "fi": "Voinko auttaa vielä jossakin muussa, kiitos yhteydenotostasi ja mukavaa päivää",
-    "sv": "Kan jag hjälpa dig med något annat idag, tack för att du kontaktade oss och ha en fin dag",
+    "fi": "Voinko auttaa vielÃ¤ jossakin muussa, kiitos yhteydenotostasi ja mukavaa pÃ¤ivÃ¤Ã¤",
+    "sv": "Kan jag hjÃ¤lpa dig med nÃ¥got annat idag, tack fÃ¶r att du kontaktade oss och ha en fin dag",
 }
 AGENT_ASK = "Could you please confirm your name and your customer number so I can find your account"
 AGENT_CHECK = "Thank you, I found your account and I am checking the details now"
@@ -722,6 +722,44 @@ def generate_manifest(dest) -> Path:
     return dest
 
 
+REFUSALS_STATIC = frozenset({".gitattributes", "README.md"})  # hand-written, not generator output
+
+
+def _tree(folder: Path, skip=frozenset()) -> dict[str, bytes]:
+    return {
+        p.relative_to(folder).as_posix(): p.read_bytes()
+        for p in sorted(folder.rglob("*"))
+        if p.is_file() and p.relative_to(folder).as_posix() not in skip
+    }
+
+
+def drift(generate_fn, committed, skip=frozenset()) -> list[str]:
+    """Problems between ``committed`` and a fresh ``generate_fn`` run: missing, extra and changed files.
+
+    An empty list means byte-identical. A missing ``committed`` folder is itself a problem.
+    """
+    import tempfile
+
+    committed = Path(committed)
+    if not committed.is_dir():
+        return [f"missing folder: {committed}"]
+    with tempfile.TemporaryDirectory() as tmp:
+        fresh = _tree(generate_fn(Path(tmp) / "fresh"))
+    have = _tree(committed, skip)
+    problems = [f"missing: {n}" for n in sorted(fresh.keys() - have.keys())]
+    problems += [f"extra: {n}" for n in sorted(have.keys() - fresh.keys())]
+    problems += [f"changed: {n}" for n in sorted(fresh.keys() & have.keys()) if fresh[n] != have[n]]
+    return problems
+
+
+def check_refusals(committed=DEFAULT_REFUSALS_OUT) -> list[str]:
+    return drift(generate_refusals, committed, REFUSALS_STATIC)
+
+
+def check_manifest(committed=DEFAULT_MANIFEST_OUT) -> list[str]:
+    return drift(generate_manifest, committed)
+
+
 # --------------------------------------------------------------------------- entry points
 def generate(dest) -> Path:
     """Write the synthetic mini-kit under ``dest`` (health/ and customer_service/). Idempotent."""
@@ -741,7 +779,13 @@ def main(argv: list[str] | None = None) -> int:
                         help="also write the manifest fixture release here")
     parser.add_argument("--all", action="store_true",
                         help="regenerate minikit, refusals and manifest at their committed locations")
+    parser.add_argument("--check", action="store_true",
+                        help="exit 1 if the committed refusals or manifest fixtures differ from a fresh run")
     args = parser.parse_args(argv)
+    if args.check:
+        problems = check_refusals() + check_manifest()
+        print("\n".join(problems))
+        return 1 if problems else 0
     refusals_out = args.refusals_out or (DEFAULT_REFUSALS_OUT if args.all else None)
     manifest_out = args.manifest_out or (DEFAULT_MANIFEST_OUT if args.all else None)
     generate(args.out)

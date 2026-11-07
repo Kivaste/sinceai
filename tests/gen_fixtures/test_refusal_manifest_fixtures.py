@@ -46,27 +46,68 @@ def _tree(folder: Path, skip: set[str] = frozenset()) -> dict[str, bytes]:
     }
 
 
-def test_committed_refusals_match_generator(tmp_path, gen):
-    gen.generate_refusals(tmp_path / "r")
-    assert _tree(tmp_path / "r") == _tree(REFUSALS, REFUSALS_STATIC)
+def test_committed_refusals_match_generator(gen):
+    assert gen.check_refusals(REFUSALS) == []
 
 
-def test_committed_manifest_release_matches_generator(tmp_path, gen):
-    gen.generate_manifest(tmp_path / "m")
-    assert _tree(tmp_path / "m") == _tree(MANIFEST)
+def test_committed_manifest_release_matches_generator(gen):
+    assert gen.check_manifest(MANIFEST) == []
 
 
-def test_drift_is_detected(tmp_path, gen):
-    """The comparison used above fails on a one-byte edit and on a planted extra file."""
-    gen.generate_refusals(tmp_path / "r")
-    fresh = _tree(tmp_path / "r")
-    edited = dict(fresh)
-    key = sorted(edited)[0]
-    edited[key] = edited[key] + b" "
-    assert edited != fresh
-    planted = dict(fresh)
-    planted["planted/extra.csv"] = b"x\n"
-    assert planted != fresh
+@pytest.mark.parametrize("which", ["refusals", "manifest"])
+def test_guard_accepts_a_clean_copy(tmp_path, gen, which):
+    guard, make = _guard(gen, which)
+    make(tmp_path / "t")
+    assert guard(tmp_path / "t") == []
+
+
+@pytest.mark.parametrize("which", ["refusals", "manifest"])
+def test_guard_rejects_byte_drift(tmp_path, gen, which):
+    guard, make = _guard(gen, which)
+    make(tmp_path / "t")
+    victim = sorted(p for p in (tmp_path / "t").rglob("*") if p.is_file() and p.suffix in {".csv", ".json"})[0]
+    victim.write_bytes(victim.read_bytes() + b" ")
+    problems = guard(tmp_path / "t")
+    assert problems == [f"changed: {victim.relative_to(tmp_path / 't').as_posix()}"]
+
+
+@pytest.mark.parametrize("which", ["refusals", "manifest"])
+def test_guard_rejects_a_planted_extra_file(tmp_path, gen, which):
+    guard, make = _guard(gen, which)
+    make(tmp_path / "t")
+    (tmp_path / "t" / "planted").mkdir()
+    (tmp_path / "t" / "planted" / "extra.csv").write_bytes(b"x\n")
+    assert guard(tmp_path / "t") == ["extra: planted/extra.csv"]
+
+
+@pytest.mark.parametrize("which", ["refusals", "manifest"])
+def test_guard_rejects_a_deleted_file_and_a_missing_folder(tmp_path, gen, which):
+    guard, make = _guard(gen, which)
+    make(tmp_path / "t")
+    victim = sorted(p for p in (tmp_path / "t").rglob("*.csv"))[0]
+    victim.unlink()
+    assert guard(tmp_path / "t") == [f"missing: {victim.relative_to(tmp_path / 't').as_posix()}"]
+    assert guard(tmp_path / "absent") != []
+
+
+def test_refusals_static_files_are_tolerated_but_nothing_else(tmp_path, gen):
+    gen.generate_refusals(tmp_path / "t")
+    (tmp_path / "t" / "README.md").write_text("doc", encoding="utf-8")
+    (tmp_path / "t" / ".gitattributes").write_text("* -text\n", encoding="utf-8")
+    assert gen.check_refusals(tmp_path / "t") == []
+    (tmp_path / "t" / "NOTES.md").write_text("x", encoding="utf-8")
+    assert gen.check_refusals(tmp_path / "t") == ["extra: NOTES.md"]
+
+
+def test_check_cli_passes_on_the_committed_tree():
+    env = {**os.environ, "PYTHONUTF8": "1", "PYTHONDONTWRITEBYTECODE": "1", "TZ": "UTC"}
+    out = subprocess.run([sys.executable, str(SCRIPT), "--check"], capture_output=True, text=True, env=env)
+    assert out.returncode == 0, out.stdout + out.stderr
+
+
+def _guard(gen, which):
+    return (gen.check_refusals, gen.generate_refusals) if which == "refusals" else (
+        gen.check_manifest, gen.generate_manifest)
 
 
 def test_refusals_two_runs_are_byte_identical(tmp_path, gen):
