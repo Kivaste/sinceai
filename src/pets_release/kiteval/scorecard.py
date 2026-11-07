@@ -107,6 +107,8 @@ def run_scorecard(original_dir, protected_dir, *, scenario: str, root, rowmaps: 
     prot_files = _tables(protected_dir)
     catalog = kit_io.load_catalog(root)
     catalog = catalog[catalog.dataset == original_dir.name]
+    orig_rows = {name: len(pd.read_csv(f, dtype=str, keep_default_na=False)) for name, f in orig_files.items()}
+    prot_rows_by_table: dict[str, int] = {}
     for name, pfile in prot_files.items():
         if name not in orig_files:
             raise ScorecardRejected("unknown_table")
@@ -119,6 +121,7 @@ def run_scorecard(original_dir, protected_dir, *, scenario: str, root, rowmaps: 
         if key is None:
             raise RowMapRejected("no_source_key")
         prot_rows = len(pd.read_csv(pfile, dtype=str, keep_default_na=False))
+        prot_rows_by_table[name] = prot_rows
         validate_row_map(rowmaps[name], protected_rows=prot_rows, source_keys=orig[key], expected_lineage=lineage[name])
     if set(rowmaps) - set(prot_files):
         raise RowMapRejected("map_without_table")
@@ -142,7 +145,7 @@ def run_scorecard(original_dir, protected_dir, *, scenario: str, root, rowmaps: 
     except (OSError, ValueError):
         raise ScorecardRejected("structure") from None
     return validate_report(report, scenario=scenario, required_tasks=scen.get("utility_requirements", []),
-                           tables=orig_files, expected_sections=_expected_sections(
+                           tables=orig_rows, released=prot_rows_by_table, expected_sections=_expected_sections(
                                root, original_dir.name, scen, catalog, orig_files,
                                {n: pd.read_csv(p, dtype=str, nrows=0).columns for n, p in prot_files.items()}))
 

@@ -1,6 +1,7 @@
 """The out-of-process scorecard, through the real pets-eval CLI, on a tiny synthetic kit."""
 
 import json
+from pathlib import Path
 
 import pandas as pd
 import pytest
@@ -232,3 +233,41 @@ def test_linkage_is_expected_exactly_when_the_kit_has_identity_data_for_the_tabl
     identity.write_text("record_id,person_id\nc1,p1\nc2,\n", encoding="utf-8")
     assert linkage() == {"attacks": [], "no_attack_columns": []}
 
+
+
+# ---- must-fix #64: the evaluator's table status is checked against the real release ----
+
+
+def _evaluator_then(mutate, monkeypatch):
+    """Run the real pets-eval child, then rewrite its report the way a silent skip would look."""
+    import subprocess
+
+    real = subprocess.run
+
+    def run(cmd, *a, **k):
+        proc = real(cmd, *a, **k)
+        out = Path(cmd[cmd.index("--out") + 1])
+        report = json.loads((out / "scorecard.json").read_text(encoding="utf-8"))
+        mutate(report)
+        (out / "scorecard.json").write_text(json.dumps(report), encoding="utf-8")
+        return proc
+
+    monkeypatch.setattr(subprocess, "run", run)
+
+
+def test_released_table_reported_as_withheld_is_refused_through_the_adapter(kit, release, monkeypatch):
+    def skip(report):
+        report["tables"]["conversations"] = {"table": "conversations", "status": "withheld", "rows_original": 4}
+        report["risk_components"] = {}
+
+    _evaluator_then(skip, monkeypatch)
+    with pytest.raises(ScorecardRejected) as caught:
+        _run(kit, release)
+    assert caught.value.reason == "status_mismatch"
+
+
+def test_protected_row_count_disagreeing_with_the_release_is_refused_through_the_adapter(kit, release, monkeypatch):
+    _evaluator_then(lambda r: r["tables"]["conversations"].update(rows_protected=3), monkeypatch)
+    with pytest.raises(ScorecardRejected) as caught:
+        _run(kit, release)
+    assert caught.value.reason == "row_count_mismatch"
