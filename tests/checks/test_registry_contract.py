@@ -41,6 +41,14 @@ def test_assertions_owned_by_this_package_bind_to_registered_checks():
     assert [a for a in OWNED_HERE if ASSERTION_CHECKS[a] not in names] == []
 
 
+def test_mapped_names_exist_once_their_family_is_registered():
+    # e.g. once any producer.* check is registered, every producer.* name in the map must be registered
+    names = {c.name for c in all_checks()}
+    families = {n.split(".", 1)[0] for n in names}
+    dangling = [v for v in ASSERTION_CHECKS.values() if v not in names and v.split(".", 1)[0] in families]
+    assert dangling == []
+
+
 def _run_with_planted(tmp_path, files):
     plant = tmp_path / "plant"
     plant.mkdir()
@@ -52,7 +60,8 @@ def _run_with_planted(tmp_path, files):
         "import json, sys, pets_release.checks as c\n"
         "c.__path__.append(sys.argv[1])\n"
         "r = c.run_checks(sys.argv[2], json.load(open(sys.argv[3], encoding='utf-8')), {'phase': 'gate'})\n"
-        "print(json.dumps({'refused': r.refused, 'n': len(r.records), 'err': r.registry_error}))\n"
+        "print(json.dumps({'refused': r.refused, 'n': len(r.records), 'err': r.registry_error,\n"
+        "                  'status': {x.check: x.status for x in r.records}}))\n"
     )
     env = dict(os.environ, PYTHONPATH=str(SRC), PYTHONUTF8="1", PYTHONDONTWRITEBYTECODE="1")
     p = subprocess.run([sys.executable, "-c", code, str(plant), str(rel), str(FIX / "contract.json")],
@@ -80,8 +89,35 @@ def test_planted_submodule_that_registers_is_discovered_and_run(tmp_path):
             "def run(release, contract, context):\n"
             "    return Outcome(n=len(release.entries))\n")
     res = _run_with_planted(tmp_path, {"planted_ok.py": body})
-    assert res["err"] is None and res["refused"] is False
+    assert res["err"] is None
+    assert res["status"]["planted.ok"] == "pass"
     assert res["n"] == len(all_checks()) + 1
+
+
+def test_full_registry_refuses_when_a_registered_check_cannot_run(tmp_path):
+    # production rule: the gate runs every registered check; an unavailable producer input refuses
+    body = ("from pets_release.checks import register, Outcome\n"
+            "@register(name='planted.needs-source', version='1.0.0', scope='producer', unit='rows')\n"
+            "def run(release, contract, context):\n"
+            "    return Outcome.not_run() if context.get('source_tables') is None else Outcome(n=1)\n")
+    res = _run_with_planted(tmp_path, {"planted_needs.py": body})
+    assert res["err"] is None
+    assert res["status"]["planted.needs-source"] == "not_run"
+    assert res["refused"] is True
+
+
+OWN_NAMES = sorted([
+    "contract.columns", "contract.files", "contract.forms", "release.empty-tables", "release.file-digests",
+    "release.row-maps", "release.token-hex64", "rescan.account-numbers", "rescan.device-ids", "rescan.emails",
+    "rescan.ibans", "rescan.ip-addresses", "rescan.national-ids", "rescan.payment-cards", "rescan.phones",
+    "rescan.plates", "rescan.property-ids", "rescan.raw-timestamps", "rescan.secrets", "rescan.urls-with-tokens",
+    "rescan.usernames"])
+
+
+def test_cell_check_modules_register_exactly_this_tickets_checks():
+    own = sorted(c.name for c in all_checks() if c.run.__module__.startswith("pets_release.checks.cells."))
+    assert own == OWN_NAMES
+    assert all(c.scope == "release" for c in all_checks() if c.name in OWN_NAMES)
 
 
 def _producer(release, contract, context):

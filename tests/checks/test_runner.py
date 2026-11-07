@@ -75,8 +75,13 @@ def test_empty_selection_refuses(tmp_path):
     assert run_checks(_valid(tmp_path), CONTRACT, GATE, checks=[]).refused
 
 
+def _own():
+    return [c for c in all_checks() if c.run.__module__.startswith("pets_release.checks.cells.")]
+
+
 def test_every_record_has_non_zero_denominator_on_valid_release(tmp_path):
-    res = run_checks(_valid(tmp_path), CONTRACT, GATE)
+    res = run_checks(_valid(tmp_path), CONTRACT, GATE, checks=_own())
+    assert res.records and all(r.status == "pass" for r in res.records)
     assert all(r.denominator["n"] > 0 for r in res.records)
     assert all(r.denominator["unit"] in {"cells", "turns", "persons", "files", "rows"} for r in res.records)
 
@@ -126,7 +131,30 @@ def test_cli_refuses_planted_card_and_passes_valid(tmp_path):
     assert "4111" not in r.stdout
     good = tmp_path / "good"
     shutil.copytree(FIX / "valid" / "release", good)
-    assert _cli("--contract", str(c), "--phase", "gate", str(good)).returncode == 0
+    sel = [a for ch in _own() for a in ("--check", ch.name)]
+    ok = _cli("--contract", str(c), "--phase", "gate", *sel, str(good))
+    assert ok.returncode == 0, ok.stdout
+    assert {x["check"] for x in json.loads(ok.stdout)["records"]} == {ch.name for ch in _own()}
+
+
+def test_cli_without_selection_runs_every_registered_check(tmp_path):
+    c = tmp_path / "contract.json"
+    shutil.copy(FIX / "contract.json", c)
+    good = tmp_path / "good"
+    shutil.copytree(FIX / "valid" / "release", good)
+    r = _cli("--contract", str(c), "--phase", "gate", str(good))
+    summary = json.loads(r.stdout)
+    assert {x["check"] for x in summary["records"]} == {ch.name for ch in all_checks()}
+    # exit code follows the records: 0 only if every registered check passed
+    assert r.returncode == (1 if any(x["status"] != "pass" for x in summary["records"]) else 0)
+
+
+def test_cli_unknown_check_name_is_usage_error(tmp_path):
+    c = tmp_path / "contract.json"
+    shutil.copy(FIX / "contract.json", c)
+    good = tmp_path / "good"
+    shutil.copytree(FIX / "valid" / "release", good)
+    assert _cli("--contract", str(c), "--check", "no.such-check", str(good)).returncode == 2
 
 
 def test_cli_usage_error_exits_2(tmp_path):

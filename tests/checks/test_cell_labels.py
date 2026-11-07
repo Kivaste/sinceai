@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from pets_release.checks import run_checks
+from pets_release.checks import all_checks, run_checks
 
 FIX = Path(__file__).resolve().parents[1] / "fixtures" / "refusals"
 CONTRACT = json.loads((FIX / "contract.json").read_text(encoding="utf-8"))
@@ -69,6 +69,16 @@ CASES = [
     ("rescan.raw-timestamps", "seen 2025-03-01T14:00:00.250 at desk", 1),  # non-zero fraction
     ("rescan.raw-timestamps", "seen 2025-03-01T14:00:00,5 at desk", 1),
     ("rescan.raw-timestamps", "seen 2025-03-01T14:00:00.000 at desk", 0),
+    # review r2 (87bc8c8): every format, any non-zero sub-hour component is a hit
+    ("rescan.raw-timestamps", "seen 2025-03-01 14:00:30 at desk", 1),
+    ("rescan.raw-timestamps", "seen 2025-03-01 14:00:00.5 at desk", 1),
+    ("rescan.raw-timestamps", "seen 1.3.2025 klo 14.00.30 at desk", 1),
+    ("rescan.raw-timestamps", "seen 1.3.2025 14:00:30 at desk", 1),
+    ("rescan.raw-timestamps", "seen 1.3.2025 14:00:00,250 at desk", 1),
+    ("rescan.raw-timestamps", "seen 1.3.2025 14.00.00.5 at desk", 1),
+    ("rescan.raw-timestamps", "seen 1.3.2025 klo 14.00 at desk", 0),
+    ("rescan.raw-timestamps", "seen 1.3.2025 14:00:00 at desk", 0),
+    ("rescan.raw-timestamps", "seen 1.3.2025 14:00:00.000 at desk", 0),
 ]
 
 
@@ -94,7 +104,9 @@ def test_private_ip_is_low_severity_not_refusal(tmp_path):
 
 
 def test_placeholders_are_not_hits(tmp_path):
-    res = run_checks(_plant(tmp_path, "[PHONE_1] [EMAIL_1] [PAYMENT_CARD_1] [SECRET_1]"), CONTRACT, GATE)
+    own = [c for c in all_checks() if c.run.__module__.startswith("pets_release.checks.cells.")]
+    res = run_checks(_plant(tmp_path, "[PHONE_1] [EMAIL_1] [PAYMENT_CARD_1] [SECRET_1]"), CONTRACT, GATE, checks=own)
+    assert {r.check: r.status for r in res.records if r.status != "pass"} == {}
     assert not res.refused
 
 
