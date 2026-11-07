@@ -9,6 +9,7 @@ import pandas as pd
 
 from pets_attacker.cli import main
 from pets_attacker.personas import AGGREGATE_KEYS
+from pets_attacker.redteam import LINK_KEYS
 
 RUNGS = {"ed_visits": {"arrival_ts": "ts.exact", "municipality": "keep"}}
 
@@ -46,11 +47,16 @@ def test_cli_emits_aggregates_only(tmp_path: Path):
     out = tmp_path / "out.json"
     assert main(["--kit", str(kit), "--release", str(tmp_path / "rel"), "--label", "t", "--out", str(out)] + _rungs_file(tmp_path)) == 0
     res = json.loads(out.read_text(encoding="utf-8"))
-    assert set(res) == {"label", "broker", "insider"}
+    assert set(res) == {"label", "broker", "insider", "red_team"}  # #139 adds the red team block
     assert set(res["broker"]) == {"news_clips_health"}
     for block in [res["broker"]["news_clips_health"], res["insider"]]:
         assert set(block) == set(AGGREGATE_KEYS)
         assert all(v is None or isinstance(v, (bool, int, float)) for v in block.values())
+    red = res["red_team"]
+    assert set(red) == {"cross_dataset", "range_aware", "attribute_inference"}
+    for block in (red["cross_dataset"], red["range_aware"]):
+        assert set(block) == set(LINK_KEYS)
+        assert all(v is None or isinstance(v, (bool, int, float)) or k == "reason" for k, v in block.items())
     text = out.read_text(encoding="utf-8")
     for leaked in ("Anna", "Virtanen", "Turku", "v0", "p0"):
         assert leaked not in text
