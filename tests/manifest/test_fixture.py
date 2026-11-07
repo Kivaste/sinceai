@@ -7,9 +7,11 @@ import re
 from pathlib import Path
 
 import pandas as pd
+import pytest
 from jsonschema import Draft202012Validator
 
 from pets_release.manifest import (
+    ALL_ASSERTIONS,
     MANIFEST_FILENAME,
     MANIFEST_SCHEMA,
     compute_signature,
@@ -18,6 +20,54 @@ from pets_release.manifest import (
 )
 
 RELEASE_DIR = Path(__file__).resolve().parents[1] / "fixtures" / "manifest" / "release"
+
+
+# Written-out copy of ticket 04's ASSERTION_CHECKS (src/pets_release/checks/registry.py at origin/ticket/04-gate
+# 87bc8c8). Once 04 merges, test_matches_ticket_04_registry_when_merged compares against the real constant.
+TICKET_04_ASSERTION_CHECKS = {
+    "accountNumbers": "rescan.account-numbers",
+    "deviceIds": "rescan.device-ids",
+    "emails": "rescan.emails",
+    "healthInText": "text.health",
+    "ibans": "rescan.ibans",
+    "ipAddresses": "rescan.ip-addresses",
+    "keyMaterial": "producer.key-material",
+    "nationalIds": "rescan.national-ids",
+    "paymentCards": "rescan.payment-cards",
+    "phones": "rescan.phones",
+    "plates": "rescan.plates",
+    "propertyIds": "rescan.property-ids",
+    "quasiIdentifiersBelowK": "producer.person-k",
+    "rawTimestamps": "rescan.raw-timestamps",
+    "reversibleHashes": "producer.unkeyed-hashes",
+    "rowMaps": "release.row-maps",
+    "secrets": "rescan.secrets",
+    "urlsWithTokens": "rescan.urls-with-tokens",
+    "usernames": "rescan.usernames",
+}
+
+
+def test_fixture_evidence_uses_ticket_04_check_names_and_versions():
+    m = manifest()
+    names = {a: ev["check"] for a, ev in m["assertionEvidence"].items()}
+    assert names == {a: TICKET_04_ASSERTION_CHECKS[a] for a in m["exportAssertions"]}
+    assert {ev["version"] for ev in m["assertionEvidence"].values()} == {"1.0.0"}
+    assert set(TICKET_04_ASSERTION_CHECKS) == set(ALL_ASSERTIONS)
+
+
+def test_fixture_gate_uses_ticket_11_registered_names():
+    # origin/ticket/11-producer-checks 26de63b: (name, scope, unit)
+    gate = {c["check"]: (c["scope"], c["denominator"]["unit"]) for c in manifest()["gate"]["checks"]}
+    assert gate["producer.row-k"] == ("release", "rows")
+    assert gate["producer.original-values"] == ("producer", "cells")
+    assert "release.row-k" not in gate
+
+
+def test_matches_ticket_04_registry_when_merged():
+    checks = pytest.importorskip("pets_release.checks", reason="ticket 04 not merged: not run, not a pass")
+    ASSERTION_CHECKS = checks.ASSERTION_CHECKS
+
+    assert ASSERTION_CHECKS == TICKET_04_ASSERTION_CHECKS
 
 
 def test_schema_is_a_valid_2020_12_schema():

@@ -158,21 +158,31 @@ _RESIDUAL_RISK = _obj({
 })
 
 
+def _assertion_maps(names) -> dict:
+    """Closed exportAssertions / assertionEvidence maps over exactly ``names`` (all required)."""
+    return {
+        "exportAssertions": {"type": "object", "properties": {n: {"const": False} for n in names},
+                             "required": list(names), "additionalProperties": False},
+        "assertionEvidence": {"type": "object", "properties": {
+            n: {"allOf": [_ref("evidence"), {"properties": {"scope": {"const": ASSERTION_SCOPES[n]}}}]}
+            for n in names}, "required": list(names), "additionalProperties": False},
+    }
+
+
 def _scenario_rule(scenario: str) -> dict:
-    names = required_assertions(scenario)
+    then = {"properties": _assertion_maps(required_assertions(scenario))}
+    if scenario == "CS-S1":  # healthInText is checked against the lexicon version bound in the manifest
+        then["properties"]["bindings"] = {"properties": {"lexiconDigests": {"minProperties": 1}}}
     return {
         "if": {"properties": {"release": {"properties": {"scenario": {"const": scenario}},
                                           "required": ["scenario"]}},
                "required": ["release"]},
-        "then": {"properties": {
-            "exportAssertions": {"type": "object", "properties": {n: {"const": False} for n in names},
-                                 "required": list(names), "additionalProperties": False},
-            "assertionEvidence": {"type": "object", "properties": {
-                n: {"allOf": [_ref("evidence"), {"properties": {"scope": {"const": ASSERTION_SCOPES[n]}}}]}
-                for n in names},
-                                  "required": list(names), "additionalProperties": False},
-        }},
+        "then": then,
     }
+
+
+# Locally closed over the union of all assertion names, independent of the per-scenario rules.
+_UNION_MAPS = {k: {**v, "required": []} for k, v in _assertion_maps(ALL_ASSERTIONS).items()}
 
 
 MANIFEST_SCHEMA: dict = {
@@ -216,8 +226,7 @@ MANIFEST_SCHEMA: dict = {
             "tokens": _arr(_obj({"table": _ref("name"), "column": _ref("name"),
                                  "scope": {"enum": ["conversation", "recipient", "release"]}})),
         }),
-        "exportAssertions": {"type": "object"},
-        "assertionEvidence": {"type": "object"},
+        **_UNION_MAPS,
         "gate": _obj({"status": _status("pass"), "checks": _arr(_ref("gateCheck"), 1)}),
         "measured": _MEASURED,
         "sacrifices": _arr(_obj({
