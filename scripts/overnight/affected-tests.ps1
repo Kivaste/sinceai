@@ -2,6 +2,9 @@
 .SYNOPSIS
   Pick the tests affected by the current branch's changes, so agents don't run the whole suite every time.
   Rules (src/pets_release/<pkg>/ maps to tests/<pkg>/):
+    - any src/** change                        -> fixed repo-wide guards + test modules marked '# affected-tests: src-guard'
+                                                     (branch-specific absent guards are explicitly reported)
+    - affected-tests.ps1 or its test harness    -> tests/overnight/test_affected_tests.py
     - changed test files                         -> themselves
     - src/pets_release/<pkg>/**                  -> tests/<pkg> (checks -> checks, checks_producer, checks_text;
                                                     _offline_hook -> offline; package-root files -> scaffold, offline)
@@ -28,7 +31,23 @@ $whole = $false
 $core = 'checks', 'contract', 'manifest', 'writer', 'verify', 'run', 'pseudonym', 'ladders', 'policy', 'measure', 'kiteval', 'redactor', 'minimiser', 'recipient', 'detect', 'dashboard'
 $coreHit = $false
 function AddIf([string]$p) { if (Test-Path (Join-Path $Worktree $p)) { [void]$sel.Add($p) } }
+# Legacy whole-source guards. Keep this fixed list in sync with test-affected-tests.ps1.
+# New whole-source guard modules must include a standalone '# affected-tests: src-guard' comment.
+# Discover markers in the selected worktree (not the helper's checkout); read errors fail closed.
+$repoWideGuards = @('tests/policy', 'tests/offline/test_entrypoints.py', 'tests/run/test_context_keys.py', 'tests/pets_attacker/test_boundary.py')
+if ($changed -match '^src/') {
+  $absentGuards = @($repoWideGuards | Where-Object { -not (Test-Path -LiteralPath (Join-Path $Worktree $_)) })
+  if ($absentGuards.Count) { "repo-wide guards absent in checkout: $($absentGuards -join ' ')" }
+  foreach ($guard in $repoWideGuards) { AddIf $guard }
+  $testRoot = (Get-Item -LiteralPath (Join-Path $Worktree 'tests')).FullName
+  foreach ($test in Get-ChildItem -LiteralPath $testRoot -Recurse -File -Filter 'test_*.py') {
+    if (Select-String -LiteralPath $test.FullName -Pattern '^# affected-tests: src-guard\s*$' -Quiet) {
+      AddIf ('tests/' + $test.FullName.Substring($testRoot.TrimEnd('\', '/').Length + 1).Replace('\', '/'))
+    }
+  }
+}
 foreach ($f in $changed) {
+  if ($f -in @('scripts/overnight/affected-tests.ps1', 'scripts/overnight/test-affected-tests.ps1')) { AddIf 'tests/overnight/test_affected_tests.py'; continue }
   if ($f -eq 'tests/conftest.py' -or $f -eq 'conftest.py' -or $f -eq 'pyproject.toml' -or $f -match '^tests/(fixtures|gen_fixtures)/') { $whole = $true; continue }
   if ($f -match '^(tests/.+)/conftest\.py$') { AddIf $matches[1]; continue }          # nested conftest: its directory
   if ($f -match '^tests/.+\.py$') { AddIf $f; continue }
