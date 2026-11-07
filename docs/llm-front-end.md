@@ -1,8 +1,9 @@
-# LLM front end (optional stretch, ticket 31)
+# LLM front end (optional draft policy)
 
 `pets-release draft-policy` turns a plain-language data request into a **DRAFT** scenario policy for a human
-to approve. It never runs a release and is not on the `run` path. It ships only if the Sat 14:00 go/no-go passes
-(ADR 0002).
+to approve: a validated draft policy for human review, not a release. Feeding the draft into the search is
+future work (D51); it is not on the `run` path. D47 replaces the earlier two-release/time-boxed go/no-go with
+HEALTH-S1 passing gate and verify on integration, and permits the Mistral API for the optional sender.
 
 ```
 pets-release draft-policy --request "A university group wants length of stay and revisit rates" \

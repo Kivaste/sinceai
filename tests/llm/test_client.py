@@ -58,7 +58,12 @@ def test_endpoint_already_ending_in_chat_completions_is_kept():
     assert t.calls[0][0] == "https://api.example.test/v1/chat/completions"
 
 
-@pytest.mark.parametrize("reply", [b"not json", {"choices": []}, {"x": 1}, _chat(None), _chat(5), _chat("")])
+# #131: a duplicate "choices" (first value empty, last a good draft) is an ambiguous record, never last-wins
+DUP_CHOICES = b'{"choices": [], ' + json.dumps(_chat(json.dumps(GOOD))).encode()[1:]
+
+
+@pytest.mark.parametrize("reply", [b"not json", {"choices": []}, {"x": 1}, _chat(None), _chat(5), _chat(""),
+                                   DUP_CHOICES])
 def test_malformed_provider_reply_fails_closed(reply):
     with pytest.raises(LlmError):
         _run(FakeTransport(reply))

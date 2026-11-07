@@ -1,4 +1,4 @@
-﻿"""Wire the measurer (19) into the HEALTH-S1 ``run`` (21) without editing ``run/``.
+"""Wire the measurer (19) into the HEALTH-S1 ``run`` (21) without editing ``run/``.
 
     python -m pets_release.measure.wire <the same arguments as `pets-release run`>
 
@@ -18,7 +18,7 @@ import sys
 from pathlib import Path
 
 from pets_release.cli import UsageError, resolve_run_context
-from pets_release.measure import MeasureRejected, measure, person_k_components
+from pets_release.measure import MeasureRejected, attackers, diagnosis_k, measure, person_k_components
 from pets_release.offline import entry_point
 from pets_release.recipient import RecipientError, validate_recipient_id
 from pets_release.run import pipeline
@@ -46,21 +46,27 @@ def run_measured(*, kit, scenario: dict, created: str, key_text: str, out, plan_
         return first
     sc = first.scoring
     spec = SCENARIO_SPEC[scid]
-    rowmaps = {p.stem[len("rowmap_"):]: p for p in sorted(sc.glob("rowmap_*.csv"))}
     lineage = load_lineage(sc)
+    rowmaps = _rowmaps_by_identity(sc, lineage, scratch)
     dataset = scenario["dataset"]
     person = _person_k_from_release(kit=kit, key_text=key_text, scratch=scratch)
     block = measure(scid, root=kit.root, original_dir=kit.root / "data" / dataset, protected_dir=scratch,
                     rowmaps=rowmaps, lineage=lineage, record_keys=spec["record_keys"], out_dir=work / "scorecards",
                     person_k=person_k_components(person, k=first.suppression["k"]))
+    attack, why = _attack(kit.root, scratch, rowmaps, work / "attack")
+    dx_k = diagnosis_k.risk_entry(kit=kit, key_text=key_text, release=scratch)  # #143: aggregates only
     original = pipeline.build_narrative
 
     def with_measured(**kw):
         n = original(**kw)
+        n["residualRisks"] = attackers.merge(n["residualRisks"], attack, why)  # #138: both personas' rates
+        n["residualRisks"] = sorted([*n["residualRisks"], dx_k], key=lambda r: r["risk"])
         own = n["measured"]["search"]
+        kw_sets = n["measured"]["kSets"]
         n["measured"] = dict(block)
         if own.get("status") == "measured":  # ticket 25: a search run's own measured.search (from its log) stays
             n["measured"]["search"] = own
+        n["measured"]["kSets"] = kw_sets  # #146: the run's own k sets (verify --full re-measures them)
         return n
 
     pipeline.build_narrative = with_measured
@@ -84,6 +90,31 @@ def run_measured(*, kit, scenario: dict, created: str, key_text: str, out, plan_
                                     "AND cleanup failed: a mismatched release was left behind, delete it by hand")
         raise pipeline.RunError("measured release tables differ from the scored scratch release")
     return final
+
+
+def _attack(kit_root, release: Path, rowmaps: dict, work: Path):
+    """(per-persona residualRisks entries, None), or (None, content-free reason) when the attacker cannot run."""
+    try:
+        return attackers.attacker_risks(kit_root=kit_root, release=release, rowmaps=rowmaps, work=work), None
+    except attackers.AttackUnavailable as e:
+        print(f"measure.wire: attacker rates not measured: {e}", file=sys.stderr)
+        return None, str(e)
+
+
+def _rowmaps_by_identity(sc: Path, lineage: dict, release: Path) -> dict:
+    """``{stem: path}`` for exactly the tables in the run's own lineage, which must be exactly the release's
+    tables (#113). The path is the writer's ``rowmap_<stem>.csv``; its content is checked against the lineage
+    by the scorecard adapter. Any other row-map-like file in the scoring folder is refused, never picked up."""
+    tables = sorted(p.stem for p in release.iterdir() if p.is_file() and p.suffix == ".csv")
+    if sorted(lineage) != tables:
+        raise pipeline.RunError("scoring lineage does not name exactly the release tables")
+    rowmaps = {stem: sc / f"rowmap_{stem}.csv" for stem in sorted(lineage)}
+    expected = {p.name for p in rowmaps.values()}
+    if any(p.name.lower().startswith("rowmap_") and p.name not in expected for p in sc.iterdir()):
+        raise pipeline.RunError("unexpected row map in the scoring folder")
+    if not all(p.is_file() for p in rowmaps.values()):
+        raise pipeline.RunError("row map missing for a released table")
+    return rowmaps
 
 
 def _person_k_from_release(*, kit, key_text, scratch):

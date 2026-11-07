@@ -151,16 +151,17 @@ def _assertion_problems(manifest: dict, records, scopes: set) -> list[str]:
 def _residual_problems(manifest: dict, records, scopes: set) -> list[str]:
     """Low-severity residual risks re-derived from the fresh records (writer's ``low_severity_risks``) must equal
     the signed ``gate_low_severity`` entries of every check in scope."""
-    from pets_release.writer.assemble import LOW_SEVERITY_KIND, low_severity_risks
+    from pets_release.writer.assemble import LOW_SEVERITY_KIND, low_severity_risks, low_severity_source
 
-    attested_scope = {c["check"]: c["scope"] for c in manifest["gate"]["checks"]}
+    attested_scope = {low_severity_source(c["check"], c["version"], c["scope"]): c["scope"]
+                      for c in manifest["gate"]["checks"]}
     fresh = {r["risk"]: r for r in low_severity_risks(r for r in records if r.scope in scopes)}
     signed = {}
     for r in manifest["residualRisks"]:
         if r["kind"] != LOW_SEVERITY_KIND:
             continue
-        check = r["risk"].split(":")[1] if r["risk"].count(":") >= 2 else None
-        if attested_scope.get(check, "release") in scopes:  # unknown check: in scope, so it must match
+        source = r["rate"].get("source")
+        if attested_scope.get(source, "release") in scopes:  # unknown provenance: must match the re-run
             signed[r["risk"]] = r
     return [f"residualRisks: {risk}: low-severity count differs from the re-run"
             for risk in sorted(set(fresh) | set(signed)) if fresh.get(risk) != signed.get(risk)]
@@ -262,6 +263,17 @@ def rung_step_problems(manifest: dict, source: dict, master_key) -> list[str]:
     return out
 
 
+def k_sets_problems(manifest: dict, source: dict, master_key, release_dir) -> list[str]:
+    """Producer-scope re-measure (``--full``) of ``measured.kSets`` (#146) with the run's own ``run.ksets``; the
+    released figures are measured on the published tables in ``release_dir``."""
+    from pets_release.run.ksets import k_sets_problems as problems
+
+    try:
+        return problems(manifest, source, master_key, release_dir)
+    except Exception:  # noqa: BLE001 - unknown state fails closed, content-free
+        return ["measured.kSets: re-measure failed"]
+
+
 def verify_release(release_dir, *, full: bool = False, kit=None, master_key=None, checks=None,
                    context: dict | None = None, purpose=None) -> VerifyReport:
     """Verify ``release_dir``. Recipient mode by default; ``full=True`` needs ``kit`` and ``master_key``.
@@ -361,6 +373,7 @@ def verify_release(release_dir, *, full: bool = False, kit=None, master_key=None
         else:
             problems += (purpose or purpose_problems)(manifest, release, kit, run_ctx["source"])
             problems += rung_step_problems(manifest, run_ctx["source"], master_key)
+            problems += k_sets_problems(manifest, run_ctx["source"], master_key, release)
     if result.refused and not problems:  # the runner's own verdict is a floor, never overridden
         problems.append("checks: runner refused")
 

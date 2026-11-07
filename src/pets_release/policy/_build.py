@@ -13,6 +13,7 @@ _SHORT = {
     "identifier": {"pseudonym": "id.pseudonym"},
     "text": {"redacted": "text.redacted"},
     "categorical": {"exact": "keep"},
+    "lab_test": {"exact": "lab.full", "crp_other": "lab.crp_other"},
 }
 
 

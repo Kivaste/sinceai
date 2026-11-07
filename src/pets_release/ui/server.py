@@ -12,6 +12,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from socketserver import TCPServer
 from urllib.parse import parse_qs, urlsplit
 
+from pets_release.manifest.canonical import loads_strict
 from pets_release.manifest.value_scan import identifier_shape_counts
 from pets_release.offline import install
 from pets_release.ui.jobs import SCENARIOS, Jobs, scenarios
@@ -67,8 +68,9 @@ class Handler(BaseHTTPRequestHandler):
     def respond(self, status, body, content_type="text/html", *, verified_rows=False):
         shapes = identifier_shape_counts(body)
         if verified_rows:
-            # The manifest-value scanner has no column contract. Fresh limited verify
-            # already ran release.token-hex64, which permits these ONLY in token columns.
+            # The manifest-value scanner has no column contract. A fresh verify --full on these
+            # exact bytes (signature included) already ran release.token-hex64, which permits
+            # these ONLY in token columns.
             # No aggregate or unverified response gets this narrowly typed exception.
             shapes.pop("HEX64_OUTSIDE_TOKEN", None)
         if shapes:
@@ -101,9 +103,10 @@ class Handler(BaseHTTPRequestHandler):
         if self.command == "GET" and path == "/api/scenarios":
             self.respond(200, scenarios())
         elif self.command == "GET" and path == "/api/result":
-            self.respond(200, jobs.snapshot())
+            # Proof-bearing: shown only while the live bytes equal the run-time verified snapshot.
+            self.respond(200, jobs.proof_view())
         elif self.command == "GET" and path.startswith("/demo/") and path[6:] in DEMONSTRATIONS:
-            self.respond(200, demonstration_page(jobs.snapshot(), path[6:], self.server.banner))
+            self.respond(200, demonstration_page(jobs.proof_view(), path[6:], self.server.banner))
         elif self.command == "GET" and path in ("/rows", "/api/rows"):
             try:
                 query = parse_qs(urlsplit(self.path).query, keep_blank_values=True)
@@ -126,7 +129,7 @@ class Handler(BaseHTTPRequestHandler):
                 length = int(self.headers.get("Content-Length", "0"))
                 if not 0 < length <= 1024:
                     raise ValueError
-                node = json.loads(self.rfile.read(length))
+                node = loads_strict(self.rfile.read(length))  # #131: duplicate keys / NaN refuse (400)
                 if set(node) != {"scenario"} or node["scenario"] not in SCENARIOS:
                     raise ValueError
             except (ValueError, TypeError):
@@ -140,7 +143,7 @@ class Handler(BaseHTTPRequestHandler):
         elif self.command == "GET" and path == "/":
             self.respond(200, choose_page(scenarios(), self.server.banner))
         elif self.command == "GET" and path == "/result":
-            self.respond(200, result_page(jobs.snapshot(), self.server.banner))
+            self.respond(200, result_page(jobs.proof_view(), self.server.banner))
         else:
             self.respond(404, "Not found")
 

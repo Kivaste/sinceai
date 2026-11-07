@@ -210,6 +210,8 @@ def measure(scenario, *, root, original_dir, protected_dir, rowmaps: dict, linea
         "baselines": {"status": "measured", "source": "kit results/benchmark.json (published)",
                       "rows": baseline_rows(root, scenario, original_dir.name)},
         "redaction": redaction if redaction is not None else not_measured("redaction evaluation not run"),
+        # #146: the run measures the k sets itself (run.ksets); the wire keeps the run's own section
+        "kSets": not_measured("k sets are measured by the run, not by the scorecard measurer"),
     }
     errors = measured_errors(block)
     if errors:

@@ -7,6 +7,10 @@ A contract cannot set its own privacy target:
   (``table`` + ``column`` -> ``outputColumn``) and/or the column's ``params.derived_from`` (``col`` or
   ``table.col``). No source -> ``no-provenance``; two different sources -> ``provenance-conflict``; a malformed
   reference or one naming a column outside the pinned source schema (the policy's columns) -> ``unknown-provenance``;
+* that provenance must be a policy-supported mapping (``mapping_problems``, #106): same table, rung on the
+  source's ladder at or above its floor (or its alternative floor), the ladder's output name, one output per source;
+  else ``unsupported-provenance``. Values are reconstructed against the source under the gate and ``verify --full``
+  (``run.provenance``);
 * the mandatory QI set is derived from that provenance: any released column whose source is a policy QI is a
   QI whatever its name (also a column named like a policy QI's derived or source name), and must be listed in
   ``contract.qi``.
@@ -85,6 +89,39 @@ def provenance(contract, justifications, source_schema) -> tuple[dict, list[str]
     return out, problems
 
 
+def mapping_problems(policy, contract, prov: Mapping) -> list[str]:
+    """Policy-supported source/output/rung mappings (#106 round 2, the #62 escape): a declared source is never
+    trusted on its own. For every released column with resolved provenance: the source is a policy column of the same
+    table; the contract's ``params.rung`` is on that source's ladder at or coarser than its floor, or is exactly the
+    policy's alternative floor; the output name is what the ladder gives that source (the source name, or the policy
+    QI's derived name for an age rung); and no source is released twice. Anything else is ``unsupported-provenance``."""
+    from pets_release.ladders import DEFAULT_AGE_COLUMN, LADDERS, WITHHELD, at_least_as_coarse
+
+    derived = {(q["table"], q["column"]): q["derived"] for q in policy.qi}
+    by_source: dict = {}
+    out = []
+    for stem, col, spec in _columns(contract):
+        src = prov.get((stem, col))
+        if src is None:
+            continue  # provenance itself is already a problem
+        by_source.setdefault(src, []).append((stem, col))
+        params = spec.get("params")
+        rung = params.get("rung") if isinstance(params, Mapping) else None
+        fl = policy.floors.get(src)
+        ok = src[0] == stem and fl is not None and isinstance(rung, str) and rung != WITHHELD
+        if ok:
+            alt = (policy.alt_floors or {}).get(src)
+            on_ladder = rung in LADDERS[fl.family] and at_least_as_coarse(rung, fl.rung)
+            want = derived.get(src, DEFAULT_AGE_COLUMN) if rung in LADDERS["age"] else src[1]
+            ok = (on_ladder or rung == alt) and col == want
+        if not ok:
+            out.append(f"contract.files: {_masked(stem)}.{_masked(col)}: unsupported-provenance")
+    for outs in by_source.values():
+        if len(outs) > 1:
+            out += [f"contract.files: {_masked(t)}.{_masked(c)}: unsupported-provenance" for t, c in outs]
+    return out
+
+
 def released_policy_qis(policy, contract: Mapping, justifications=None) -> list[tuple[str, str]]:
     """(table, released column) of every released column that is a policy QI: by provenance (its source is a
     policy QI) or by name (it carries a policy QI's derived or source name)."""
@@ -120,7 +157,9 @@ def contract_policy_problems(scenario: str, contract, justifications=None) -> li
         out.append("contract.k: missing")
     elif not _valid_k(contract["k"]) or contract["k"] != want:
         out.append("contract.k: policy-mismatch")
-    out += provenance(contract, justifications, policy.floors)[1]
+    prov, prov_problems = provenance(contract, justifications, policy.floors)
+    out += prov_problems
+    out += mapping_problems(policy, contract, prov)
     qi = contract.get("qi")
     listed = {(q.get("table"), q.get("column")) for q in qi if isinstance(q, Mapping)} if isinstance(qi, list) else set()
     for table, column in released_policy_qis(policy, contract, justifications):

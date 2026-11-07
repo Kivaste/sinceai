@@ -19,6 +19,8 @@ from pathlib import Path
 from pets_release.manifest.canonical import loads_strict
 from pets_release.offline import entry_point
 
+from .personas import MAX_SAMPLE, SEED
+
 _ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:+-]{0,63}$")
 _METHODS = {
     "linkage": ("reidentification_rate", "linkage",
@@ -30,6 +32,14 @@ _METHODS = {
 
 class BridgeError(ValueError):
     """Attacker output is malformed; no entries are produced."""
+
+
+_FRAMES = {  # sampling frame of each persona's targets (the denominator), content-free
+    "insider": (f"targets: released visits, a seeded random sample (seed {SEED}) of at most {MAX_SAMPLE} when the "
+                "release holds more; not a whole-release measurement when capped"),
+    "broker": (f"targets: adversary records whose person is in the release; the adversary file is a seeded random "
+               f"sample (seed {SEED}) of at most {MAX_SAMPLE} records when it holds more"),
+}
 
 
 def _entry(persona: str, method: str, agg: dict, source: str) -> dict:
@@ -48,11 +58,12 @@ def _entry(persona: str, method: str, agg: dict, source: str) -> dict:
         r = {"status": "measured", "value": float(rate), "denominator": {"unit": "rows", "n": n}, "source": source}
     else:
         r = {"status": "not_measured", "reason": f"{source}: persona not evaluated or rate unavailable"[:500]}
-    return {"risk": risk, "kind": kind, "label": None, "rate": r, "description": f"{source}: {what}"[:500]}
+    frame = _FRAMES["insider" if persona == "insider" else "broker"]
+    return {"risk": risk, "kind": kind, "label": None, "rate": r, "description": f"{source}: {what}; {frame}"[:500]}
 
 
 def residual_risks(attack: dict) -> list:
-    """Manifest residualRisks entries (sorted by risk id) for both personas."""
+    """Manifest residualRisks entries (sorted by risk id) for both personas and the red team (#139)."""
     if not isinstance(attack, dict) or not isinstance(attack.get("broker"), dict) or not attack["broker"] \
             or not isinstance(attack.get("insider"), dict):
         raise BridgeError("attacker output needs broker and insider aggregates")
@@ -62,7 +73,112 @@ def residual_risks(attack: dict) -> list:
             out.append(_entry(f"broker-{adv}", method, agg,
                               f"pets_attacker.broker_attack[{adv}]/{_METHODS[method][0]}"))
         out.append(_entry("insider", method, attack["insider"], f"pets_attacker.insider_attack/{_METHODS[method][0]}"))
+    out += red_team_risks(attack.get("red_team"))
     return sorted(out, key=lambda r: r["risk"])
+
+
+# --- #139 red team -------------------------------------------------------------------------------------------------
+_REASONS = {  # attacker reason code -> manifest text (the attacker's codes only; anything else is refused)
+    "no-aux-table": "no auxiliary person table in the kit",
+    "aux-table-malformed": "an auxiliary person table lacks its expected columns",
+    "no-field-catalog": "no field catalog to name the sensitive attributes",
+    "no-sensitive-released": "no released sensitive attribute",
+    "no-target": "no attacker target in the release",
+    "no-attack-spec": "no attack spec for the released table",
+    "no-link-to-target-table": "the table shares no visit pseudonym with the released visits",
+    "no-register": "no person register (national-ID-keyed table) in the kit",
+}
+_ERROR = re.compile(r"^error:[A-Za-z][A-Za-z0-9_]{0,63}$")
+_RED_FRAME = (f"targets: the adversary records of the scenario's attack specs whose person is in the release, each "
+              f"source a seeded random sample (seed {SEED}) of at most {MAX_SAMPLE} records")
+_AUX = ("auxiliary knowledge: the kit's other-domain person tables and sports rosters joined on full name (worst "
+        "case: as if public)")
+_LINK = {
+    "cross_dataset": ("linkage-redteam-cross-dataset", f"cross-dataset enrichment ({_AUX}), then Fellegi-Sunter "
+                                                       "scoring of interval overlaps"),
+    "range_aware": ("linkage-redteam-range-aware", "Fellegi-Sunter scoring of interval overlaps (a disagreeing "
+                                                   "field lowers a row's score instead of vetoing it)"),
+    "release_join": ("linkage-redteam-release-join", "the kit's person register (other-domain tables keyed by "
+                                                     "national ID: birth date, place, sex) joined to the released "
+                                                     "rows on the released age band, municipality and sex "
+                                                     "(Fellegi-Sunter)"),
+}
+_JOIN_FRAME = (f"targets: register persons with a visit in the release, a seeded random sample (seed {SEED}) of at "
+               f"most {MAX_SAMPLE}")
+_LINK_RATES = (("reidentification_rate", "", "share of targets whose single best-scoring row is theirs"),
+               ("guess_rate", "-guess", "1-in-k guess success: expected share of targets found by guessing one of "
+                                        "the best-scoring rows"))
+_ATTR_FRAME = (f"targets: released visits with a value, a seeded random sample (seed {SEED}) of at most {MAX_SAMPLE}; "
+               "the attacker knows each target's exact QIs")
+_RED_ATTR = "attribute-inference-redteam"
+
+
+def _reason(agg) -> str:
+    code = agg.get("reason") if isinstance(agg, dict) else None
+    if code in _REASONS:
+        return _REASONS[code]
+    if isinstance(code, str) and _ERROR.match(code):
+        return f"attack failed ({code[6:]})"
+    raise BridgeError("red team reason is not a known code")
+
+
+def _red(risk: str, kind: str, agg: dict, metric: str, source: str, what: str) -> dict:
+    if not _ID.match(risk):
+        raise BridgeError("red team risk id is not valid")
+    if not isinstance(agg, dict) or not isinstance(agg.get("evaluated"), bool):
+        raise BridgeError("red team aggregate malformed")
+    if agg["evaluated"]:
+        rate, n = agg.get(metric), agg.get("n_targets")
+        if (isinstance(rate, bool) or not isinstance(rate, (int, float)) or not 0 <= rate <= 1
+                or type(n) is not int or n < 1):
+            raise BridgeError("red team aggregate malformed")
+        r = {"status": "measured", "value": float(rate), "denominator": {"unit": "rows", "n": n}, "source": source}
+    else:
+        r = {"status": "not_measured", "reason": f"{source}: {_reason(agg)}"[:500]}
+    return {"risk": risk, "kind": kind, "label": None, "rate": r, "description": f"{source}: {what}"[:500]}
+
+
+def red_team_risks(red) -> list:
+    """Entries for the red-team block; a missing block gives not_measured entries, never a rate."""
+    if red is None:
+        red = {name: {"evaluated": False, "reason": "error:RedTeamDidNotRun"} for name in _LINK}
+        red["attribute_inference"] = {"evaluated": False, "reason": "error:RedTeamDidNotRun", "columns": {}}
+    if not isinstance(red, dict) or set(red) != {*_LINK, "attribute_inference"}:
+        raise BridgeError("red team block malformed")
+    out = []
+    for name, (risk, how) in _LINK.items():
+        frame = _JOIN_FRAME if name == "release_join" else _RED_FRAME
+        for metric, suffix, what in _LINK_RATES:
+            out.append(_red(risk + suffix, "linkage", red[name], metric, f"pets_attacker.redteam.{name}/{metric}",
+                            f"{what}; {how}; {frame}"))
+    rj = red["release_join"]
+    if isinstance(rj, dict) and rj.get("evaluated") is True and rj.get("linked_table") is not None:
+        lt = rj["linked_table"]
+        if not isinstance(lt, str):
+            raise BridgeError("red team aggregate malformed")
+        src = f"pets_attacker.redteam.release_join[{lt}]/linked_reidentification_rate"
+        out.append(_red(f"linkage-redteam-release-join-{lt}", "linkage",
+                        {"evaluated": True, "n_targets": rj.get("linked_n_targets"),
+                         "rate": rj.get("linked_reidentification_rate")}, "rate", src,
+                        f"share of the targets' released {lt} rows that sit on a correctly singled-out visit "
+                        f"(linked by the visit pseudonym); {how}; {_JOIN_FRAME}"))
+    ai = red["attribute_inference"]
+    if not isinstance(ai, dict) or not isinstance(ai.get("columns"), dict) or not isinstance(ai.get("evaluated"), bool):
+        raise BridgeError("red team block malformed")
+    if not ai["evaluated"] or not ai["columns"]:
+        out.append(_red(_RED_ATTR, "attribute_inference", {"evaluated": False, "reason": ai.get("reason")},
+                        "inference_rate", "pets_attacker.redteam.attribute_inference",
+                        "attribute inference by an attacker who knows a target's QIs"))
+        return out
+    for col, agg in sorted(ai["columns"].items()):
+        src = f"pets_attacker.redteam.attribute_inference[{col}]"
+        out.append(_red(f"{_RED_ATTR}-{col}", "attribute_inference", agg, "inference_rate", src + "/inference_rate",
+                        "share of targets whose released value the attacker infers right by majority over the "
+                        f"best-scoring rows; compare the -baseline entry; {_ATTR_FRAME}"))
+        out.append(_red(f"{_RED_ATTR}-{col}-baseline", "attribute_inference", agg, "baseline_rate",
+                        src + "/baseline_rate", "population base rate: share of the same targets right by always "
+                        f"guessing the release's most common value; {_ATTR_FRAME}"))
+    return out
 
 
 @entry_point

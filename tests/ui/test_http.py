@@ -70,7 +70,8 @@ with response:
 
 @contextmanager
 def running(tmp_path, *, extra_env=None, edit=coarse_qis, probe=False, verifier_unavailable=False,
-            remove_refusal_report=False, record_commands=False, launch_extra=(), measured_kit=False):
+            remove_refusal_report=False, record_commands=False, launch_extra=(), measured_kit=False,
+            swap_during_verify=False):
     kit = build_kit(tmp_path / "kit", edit)
     if measured_kit:
         prepare_measured_kit(kit)
@@ -100,19 +101,35 @@ sys.argv = {command[2:]!r}
 runpy.run_module("pets_release.ui", run_name="__main__")
 '''
         command = [sys.executable, "-c", code]
-    if verifier_unavailable or remove_refusal_report or record_commands:
+    if verifier_unavailable or remove_refusal_report or record_commands or swap_during_verify:
         # Fault only at the external-process boundary, after a real successful run.
         # Never replace a production check with a passing stub.
         code = f'''
 import json, pathlib, runpy, subprocess, sys
 original = subprocess.run
+manifest_path = pathlib.Path({str(tmp_path / 'out' / 'run-1' / 'privacy_manifest.json')!r})
+swap = {{}}
 def external_process(command, *args, **kwargs):
     if {record_commands!r}:
         with pathlib.Path({str(tmp_path / 'commands.jsonl')!r}).open("a") as handle:
             handle.write(json.dumps(command) + "\\n")
     if {verifier_unavailable!r} and len(command) > 3 and command[3] == "verify" and pathlib.Path({str(tmp_path / 'verifier-unavailable')!r}).exists():
         raise FileNotFoundError("synthetic unavailable executable")
+    if swap and len(command) > 3 and command[3] == "verify":
+        # A concurrent writer restores the signed manifest A only while a verifier runs.
+        manifest_path.write_bytes(swap["A"])
+        try:
+            return original(command, *args, **kwargs)
+        finally:
+            manifest_path.write_bytes(swap["B"])
     result = original(command, *args, **kwargs)
+    if {swap_during_verify!r} and len(command) > 3 and command[3] == "run" and result.returncode == 0:
+        from pets_release.manifest import canonical_bytes
+        swap["A"] = manifest_path.read_bytes()
+        planted = json.loads(swap["A"])
+        planted["residualRisks"][0]["description"] = "Synthetic planted claim"
+        swap["B"] = canonical_bytes(planted)
+        manifest_path.write_bytes(swap["B"])
     if {remove_refusal_report!r} and len(command) > 3 and command[3] == "run" and result.returncode == 1:
         pathlib.Path({str(tmp_path / 'out' / 'run-1.scoring' / 'refusal_report.json')!r}).unlink()
     return result
@@ -209,8 +226,14 @@ def test_health_release_matches_cli_bytes_and_rechecks_both_tiers(tmp_path):
         assert [(s["name"], s["exit"]) for s in report["steps"]] == [
             ("run", 0), ("verify (limited)", 0), ("verify --full", 0)]
         assert report["gate"]["total"] > 0
-        assert report["gate"]["passed"] == report["gate"]["total"]
-        assert report["personK"]["belowK"] == 0
+        attested = [c["status"] for c in json.loads((out / "run-1" / "privacy_manifest.json").read_bytes())["gate"]["checks"]]
+        assert report["gate"]["passed"] + report["gate"]["notApplicable"] == report["gate"]["total"] == len(attested)
+        signed = json.loads((out / "run-1" / "privacy_manifest.json").read_bytes())
+        person_k = next(c for c in signed["gate"]["checks"] if c["check"] == "producer.person-k")
+        # Only the verified manifest is a source: the plain run has no measured minimum k, and the
+        # unsigned scoring sidecar is never read.
+        assert signed["measured"]["privacy"]["status"] == "not_measured"
+        assert report["personK"] == {"belowK": 0, "persons": person_k["denominator"]["n"], "minK": None, "k": 5}
         assert report["exportAssertions"] and report["assertionEvidence"]
         assert report["measured"]["utility"]
         assert report["measured"]["privacy"]["status"] == "not_measured"
@@ -292,6 +315,21 @@ def test_client_plan_overrides_are_refused_without_starting_a_job(tmp_path):
     with running(tmp_path, record_commands=True) as (_, url, _, out):
         for value in ("measured", "unknown", "hand", None, {"plan": "hand"}):
             assert request(url, "/api/run", data={"scenario": "HEALTH-S1", "plan": value})[0] == 400
+        assert json.loads(request(url, "/api/result")[1])["status"] == "IDLE"
+        assert not (tmp_path / "commands.jsonl").exists()
+        assert not list(out.iterdir())
+
+
+def test_duplicate_key_run_request_is_refused_without_starting_a_job(tmp_path):
+    """#131 (HTTP seam): the run request parses strictly; a duplicate "scenario" whose first value is not a
+    scenario (last value valid) is 400 and starts nothing (was: last value kept, job started)."""
+    with running(tmp_path, record_commands=True) as (_, url, _, out):
+        parts = urlsplit(url)
+        req = Request(f"{parts.scheme}://{parts.netloc}/api/run?{parts.query}", method="POST",
+                      data=b'{"scenario": "NOT-A-SCENARIO", "scenario": "HEALTH-S1"}',
+                      headers={"Content-Type": "application/json"})
+        with urlopen(req, timeout=60) as response:
+            assert response.status == 400
         assert json.loads(request(url, "/api/result")[1])["status"] == "IDLE"
         assert not (tmp_path / "commands.jsonl").exists()
         assert not list(out.iterdir())
@@ -488,8 +526,15 @@ def test_failed_full_verification_is_not_pending(tmp_path):
         report = result(url)
         assert report["status"] == "FAILED"
         assert report["steps"][2]["exit"] != 0
+        # A release that failed a verify tier publishes no proof: no gate, assertions, scores or met targets.
+        for field in ("gate", "exportAssertions", "assertionEvidence", "measured", "personK", "sacrifices"):
+            assert field not in report, field
+        assert all(t["status"] == "not measured" for t in report["targets"])
         page = request(url, "/result")[1]
         assert 'Controller verification</div><div class="value">Failed</div>' in page
+        assert "Export assertions" not in page and "checks passed" not in page
+        assert "Export assertions" not in request(url, "/demo/measurements")[1]
+        assert "Gate " not in request(url, "/demo/limitations")[1]
 
 
 def test_concurrent_run_is_refused_with_a_busy_message(tmp_path):
@@ -559,6 +604,14 @@ def test_protected_rows_require_current_verification_and_manifest_membership(tmp
         # A fresh display must fail too, even though the original run verified successfully.
         if case in {"tampered", "missing", "extra", "rowmap", "truth", "bad-contract"}:
             assert request(url, "/rows")[0] == 422
+            # A changed, missing or extra entry withdraws the run-time proof as well.
+            state = json.loads(request(url, "/api/result")[1])
+            assert state["status"] == "CHANGED"
+            # A prior verify pass is never rendered as current once the bytes changed.
+            assert not any(s["name"].startswith("verify") and s["exit"] == 0 for s in state["steps"])
+            page = request(url, "/result")[1]
+            assert "verify --full · passed" not in page and "Controller verification" not in page
+            assert "passed (full)" not in request(url, "/demo/limitations")[1]
 
 
 def test_targets_show_measured_values_and_never_assume_missing_results_pass(tmp_path):
@@ -569,13 +622,21 @@ def test_targets_show_measured_values_and_never_assume_missing_results_pass(tmp_
         assert report["status"] == "RELEASED"
         targets = {t["name"]: t for t in report["targets"]}
         assert targets["qi-k"]["threshold"] == ">= 5"
-        assert targets["qi-k"]["measured"] >= 5
+        # Plain run: no measured minimum k in the signed manifest; the verified producer.person-k
+        # record (0 persons below the contract k) is the evidence shown.
+        assert targets["qi-k"]["measured"] == "0 persons below k=5"
         assert targets["qi-k"]["status"] == "met"
         assert targets["H-U2"]["threshold"] == ">= 0.9"
         assert targets["H-U2"]["measured"] >= 0.9
         assert targets["ed_visits.patient_name"]["measured"] == "withheld"
         assert targets["ed_visits.patient_name"]["status"] == "met"
         assert targets["H-U4 sacrifice floor"]["threshold"] == ">= 0.6"
+        # The signed manifest records these sacrifices as adopted: a floor is an accepted sacrifice,
+        # never "met" as if it were the original target.
+        assert {s["check"] for s in report["sacrifices"]} >= {"H-U4", "H-U6", "H-U8"}
+        for check in ("H-U4", "H-U6", "H-U8"):
+            assert targets[check + " sacrifice floor"]["status"] == "accepted sacrifice"
+        assert "accepted sacrifice" in request(url, "/demo/measurements")[1]
         assert "Targets met / not met" in request(url, "/result")[1]
         assert request(url, "/api/run", data={"scenario": "CS-S1"})[0] == 202
         failed = result(url)
@@ -650,6 +711,117 @@ def test_planted_release_junction_outside_root_is_refused(tmp_path):
         else:
             release.symlink_to(elsewhere, target_is_directory=True)
         assert request(url, "/api/rows?limit=1")[0] == 422
+
+
+def swap_cells_and_rebind_digest(release, kit):
+    """Plant a contract-valid cell swap, re-bind its digest and leave the signature stale.
+
+    Preconditions use the real CLI so the fixture is not inert: the recipient tier still
+    passes (digests and release checks agree), only the signature-checking tier refuses.
+    """
+    import hashlib
+    import re
+
+    import pandas as pd
+
+    path = release / "ed_visits.csv"
+    frame = pd.read_csv(path, dtype=str, keep_default_na=False, na_filter=False)
+    column = next(c for c in frame.columns
+                  if all(re.fullmatch(r"[0-9a-f]{64}", v) for v in frame[c]) and frame.at[0, c] != frame.at[1, c])
+    frame.loc[[0, 1], column] = [frame.at[1, column], frame.at[0, column]]
+    frame.to_csv(path, index=False, lineterminator="\n")
+    manifest_path = release / "privacy_manifest.json"
+    manifest = json.loads(manifest_path.read_bytes())
+    manifest["bindings"]["files"]["ed_visits.csv"] = hashlib.sha256(path.read_bytes()).hexdigest()
+    manifest_path.write_bytes(canonical_bytes(manifest))
+    assert cli("verify", str(release)).returncode == 0, "fixture must pass the limited tier"
+    assert cli("verify", "--full", "--kit", str(kit), str(release)).returncode == 1, "stale signature must fail full"
+
+
+def test_digest_consistent_cell_swap_with_stale_signature_is_never_served(tmp_path):
+    """HTTP + real CLI seam: rows and dashboard need the signature-checking tier at display time."""
+    with running(tmp_path) as (_, url, kit, out):
+        assert request(url, "/api/run", data={"scenario": "HEALTH-S1"})[0] == 202
+        assert result(url)["status"] == "RELEASED"
+        assert request(url, "/api/rows?limit=2")[0] == 200
+        assert request(url, "/dashboard")[0] == 200
+        page = request(url, "/result")[1]
+        assert "Verified (limited + full) at" in page and "checks passed" in page
+        swap_cells_and_rebind_digest(out / "run-1", kit)
+        for path in ("/api/rows?limit=2", "/api/rows?file=ed_visits.csv", "/rows", "/dashboard"):
+            assert request(url, path)[0] == 422, path
+        # Proof pages never re-run full verify, so they must not reuse the run-time pass for
+        # bytes that changed since: no RELEASED, gate, assertions, person-k or met targets.
+        state = json.loads(request(url, "/api/result")[1])
+        assert state["status"] == "CHANGED"
+        for field in ("gate", "exportAssertions", "assertionEvidence", "personK", "targets", "measured"):
+            assert field not in state, field
+        assert not any(s["name"].startswith("verify") and s["exit"] == 0 for s in state["steps"])
+        page = request(url, "/result")[1]
+        assert "changed since verification" in page
+        for text in ("The gate passed", "checks passed", "Export assertions", "below k", ">met<",
+                     "verify --full · passed", "verify (limited) · passed", "Controller verification"):
+            assert text not in page, text
+        for item in ("risks", "pets", "protected", "measurements", "limitations"):
+            demo = request(url, "/demo/" + item)[1]
+            for text in ("Gate ", ">met<", "accepted sacrifice", "keyed_pseudonym", "age.band10",
+                         "passed (full)", "passed (limited)"):
+                assert text not in demo, (item, text)
+
+
+def test_planted_schema_valid_manifest_claim_is_not_rendered_as_dashboard(tmp_path):
+    """HTTP + real CLI seam: a re-written manifest with a stale signature is not the signed release."""
+    with running(tmp_path) as (_, url, kit, out):
+        assert request(url, "/api/run", data={"scenario": "HEALTH-S1"})[0] == 202
+        assert result(url)["status"] == "RELEASED"
+        release = out / "run-1"
+        manifest = json.loads((release / "privacy_manifest.json").read_bytes())
+        manifest["residualRisks"][0]["description"] = "Synthetic planted claim"
+        (release / "privacy_manifest.json").write_bytes(canonical_bytes(manifest))
+        from pets_release.manifest import validate_manifest_file
+        assert validate_manifest_file(release) == []
+        assert cli("verify", str(release)).returncode == 0, "fixture must pass the limited tier"
+        status, body = request(url, "/dashboard")
+        assert status == 422
+        assert "Synthetic planted claim" not in body
+
+
+def test_manifest_swapped_back_only_while_verifiers_run_publishes_no_proof(tmp_path):
+    """HTTP + real CLI seam: A->B->A writer. The live folder holds an unsigned manifest B except
+    while a verifier subprocess runs (then the signed A). Proof must come only from the bytes
+    that both tiers verified, so B's claims are never published as RELEASED."""
+    with running(tmp_path, swap_during_verify=True) as (_, url, _, out):
+        assert request(url, "/api/run", data={"scenario": "HEALTH-S1"})[0] == 202
+        report = result(url)
+        live = (out / "run-1" / "privacy_manifest.json").read_bytes()
+        assert b"Synthetic planted claim" in live, "fixture must leave B in the live folder"
+        from pets_release.manifest import validate_manifest_file
+        assert validate_manifest_file(out / "run-1") == [], "B must be schema-valid: only the signature differs"
+        assert report["status"] != "RELEASED"
+        assert "gate" not in report and "residualRisks" not in report
+        assert "Synthetic planted claim" not in request(url, "/api/result")[1]
+        assert "Synthetic planted claim" not in request(url, "/demo/limitations")[1]
+
+
+def test_gate_fraction_counts_only_pass_and_shows_not_applicable_separately(tmp_path):
+    """HTTP + real CLI seam: not_applicable is never folded into the gate pass count."""
+    with running(tmp_path) as (_, url, _, out):
+        assert request(url, "/api/run", data={"scenario": "HEALTH-S1"})[0] == 202
+        report = result(url)
+        assert report["status"] == "RELEASED"
+        statuses = [c["status"] for c in
+                    json.loads((out / "run-1" / "privacy_manifest.json").read_bytes())["gate"]["checks"]]
+        # The mini-kit contract declares text-form columns, so no record here is not_applicable;
+        # tests/ui/test_projection.py covers that state at the projection seam.
+        assert report["gate"] == {"passed": statuses.count("pass"),
+                                  "notApplicable": statuses.count("not_applicable"),
+                                  "total": len(statuses)}
+        page = request(url, "/result")[1]
+        fraction = f'{report["gate"]["passed"]}/{report["gate"]["total"]}'
+        assert fraction in page and f'{report["gate"]["notApplicable"]} not applicable' in page
+        limitations = request(url, "/demo/limitations")[1]
+        assert f'Gate {fraction} passed' in limitations
+        assert f'{report["gate"]["notApplicable"]} not applicable' in limitations
 
 
 def test_refused_cli_with_removed_report_keeps_the_explicit_unknown(tmp_path):

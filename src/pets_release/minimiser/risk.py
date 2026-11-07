@@ -16,6 +16,7 @@ import pandas as pd
 
 from pets_release.checks import all_checks, run_checks
 from pets_release.checks.producer.kanon import PERSON_K, ROW_K, person_k_values
+from pets_release.detect.released import released_qis
 from pets_release.ladders import WITHHELD, output_column
 from pets_release.policy.contract_rules import k_target  # noqa: F401  (the one k-target rule; search uses R.k_target)
 from pets_release.pseudonym import RECORD_KEY, normalise
@@ -102,7 +103,12 @@ def gate_k(prot, plan, policy, source, kspec, k) -> dict:
         raise RuntimeError("k checks not registered")
     with tempfile.TemporaryDirectory(prefix="pets-min-") as d:
         rowmaps = _write(Path(d), prot, contract, source, kspec)
-        res = run_checks(d, contract, _context(source, rowmaps, kspec, k), checks=checks)
+        ctx = _context(source, rowmaps, kspec, k)
+        # #106: person-k needs the detector's QIs among what is written here (QI columns only)
+        written = {p.stem: pd.read_csv(p, dtype=str, keep_default_na=False, na_filter=False)
+                   for p in sorted(Path(d).glob("*.csv"))}
+        ctx["detected_qi"] = released_qis(source, written, contract)
+        res = run_checks(d, contract, ctx, checks=checks)
     return res.summary()
 
 

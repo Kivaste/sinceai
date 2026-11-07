@@ -8,7 +8,11 @@ Rule: each field's reason cites the log step it comes from; plan/log disagreemen
   plan rung differs from its adopting step         -> JustificationError
   field off its floor with no adopting step        -> JustificationError
   log without a start step                         -> JustificationError
-  measured.search                                  -> one point per non-final entry; final entry excluded
+  measured.search                                  -> one point per non-final entry; final entry excluded;
+                                                      an unscored rejected entry has utility null (#133;
+                                                      refusals: test_search_summary_unmeasured and, for
+                                                      omitted members (#150), test_search_summary_omitted_members,
+                                                      CLI seam)
 """
 from __future__ import annotations
 
@@ -20,7 +24,7 @@ from pets_release.run.justify import JustificationError, justify, search_summary
 
 FLOORS = {("t", "a"): types.SimpleNamespace(reason="QI"), ("t", "b"): types.SimpleNamespace(reason="H-U1"),
           ("t", "c"): types.SimpleNamespace(reason="direct identifier")}
-POLICY = types.SimpleNamespace(floors=FLOORS)
+POLICY = types.SimpleNamespace(floors=FLOORS, purpose_checks=("H-U1",), risk_vector=("qi_k_shortfall",))
 
 
 def _e(step, moves, accepted, reason, risk=0.5, score=1.0):
@@ -85,8 +89,9 @@ def test_log_without_start_fails():
 
 
 def test_search_summary_points():
-    s = search_summary(LOG, {"bound_reached": False})
+    s = search_summary(LOG, {"bound_reached": False}, POLICY)
     assert s["status"] == "measured" and s["candidates"] == 4 and s["accepted"] == 2
     assert [p["step"] for p in s["points"]] == [0, 1, 2, 3]
-    assert s["points"][1] == {"step": 1, "risk": 0.5, "utility": 0.0, "accepted": False}  # missing score -> 0
+    assert s["points"][1] == {"step": 1, "risk": 0.5, "utility": None, "accepted": False}  # unscored: null (#133)
+    assert s["points"][3]["utility"] == 0.1
     assert s["boundReached"] is False
