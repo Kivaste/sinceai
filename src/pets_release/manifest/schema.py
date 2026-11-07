@@ -127,6 +127,26 @@ def _measured(props: dict) -> dict:
     return {"oneOf": [_ref("notMeasured"), _obj({"status": _status("measured"), "source": _ref("text"), **props})]}
 
 
+_K_SUMMARY = _obj({
+    "persons": {"type": "integer", "minimum": 1},
+    "unidentifiedUnits": {"type": "integer", "minimum": 0},
+    "minK": {"oneOf": [{"type": "integer", "minimum": 1}, {"type": "null"}]},
+    "medianK": {"oneOf": [{"type": "integer", "minimum": 1}, {"type": "null"}]},
+    "belowK": {"type": "integer", "minimum": 0},
+    "belowKShare": {"type": "number", "minimum": 0, "maximum": 1},
+})
+
+
+def _k_set(name: str) -> dict:
+    sid = {"const": name}
+    return {"oneOf": [
+        _obj({"set": sid, "status": _status("not_measured"), "reason": {"$ref": "#/$defs/text"}}),
+        _obj({"set": sid, "status": _status("measured"),
+              "qi": _arr(_obj({"table": {"$ref": "#/$defs/name"}, "column": {"$ref": "#/$defs/name"},
+                               "derived_from": {"$ref": "#/$defs/name"}})),
+              "beforeSuppression": _K_SUMMARY, "released": _K_SUMMARY}),
+    ]}
+
 _MEASURED = _obj({
     "utility": _measured({"tasks": _arr(_obj({
         "task": _ref("id"), "status": {"enum": ["error", "not_answerable", "ok"]}, "before": _SCORE, "after": _SCORE,
@@ -157,6 +177,16 @@ _MEASURED = _obj({
             "precision": _SCORE, "recall": _SCORE,
         }), 1),
         "summary": _arr(_obj({"metric": _ref("id"), "value": _SCORE})),
+    }),
+    # #146 (D58): per-person k on (a) the scenario's suggested QIs and (b) every kept catalogued QI, before local
+    # suppression and on the release; each set measured or not_measured with a reason. Plus every withheld
+    # catalogued QI with its field justification.
+    "kSets": _measured({
+        "k": {"type": "integer", "minimum": 2},
+        # exactly two, in this order: (a) scenario, (b) keptCatalogued
+        "sets": {"type": "array", "prefixItems": [_k_set("scenario"), _k_set("keptCatalogued")],
+                 "items": False, "minItems": 2},
+        "withheld": _arr(_obj({"table": _ref("name"), "column": _ref("name"), "reason": _ref("text")})),
     }),
 })
 
