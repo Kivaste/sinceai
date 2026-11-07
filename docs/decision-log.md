@@ -515,3 +515,10 @@ CS-S1 chain done-report + 4 reviews (23 + #53/#54/#56/#92) -> merge -> #63 -> 25
 - Real-kit runs of both releases on the integration tip.
 - #110 behaviour on a measured release (evidence running).
 - 5 README-ledger skips (named reasons; not passes).
+
+### Sat 14:38 - time-stamp correction
+
+- **When:** Sat 14:38 EET
+- **Decision:** The two entries above headed "14:28-14:52" and "14:52 - STATUS" were written at 14:37 EET. The orchestrator misread the clock. The #120 close comment's "14:50 EET" is also 14:37 EET. The content is unchanged.
+- **Why:** The log is append-only, so the times are corrected in a new entry.
+- **Evidence:** heartbeat timestamp 2026-11-07T12:37:35Z.
