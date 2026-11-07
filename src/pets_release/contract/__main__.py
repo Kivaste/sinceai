@@ -13,6 +13,7 @@ from pathlib import Path
 
 from pets_release.contract.generate import ContractError, digest, generate
 from pets_release.manifest import canonical_bytes
+from pets_release.offline import entry_point
 from pets_release.policy import get_policy, hand_plan
 
 SCENARIOS = ("HEALTH-S1", "CS-S1")
@@ -41,6 +42,7 @@ def render(scenario: str) -> tuple[str, dict]:
     return "\n".join(lines) + "\n", contract
 
 
+@entry_point
 def main(argv: list[str]) -> int:
     out_dir = Path(argv[0]) if argv else None
     chunks: list[str] = []

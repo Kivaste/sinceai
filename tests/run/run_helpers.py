@@ -30,19 +30,33 @@ def build_kit(root: Path, edit=None) -> Path:
 
 
 QI_COLUMNS = ("date_of_birth", "municipality", "arrival_ts")
-UNIQUE_TAIL = 4  # last visits keep their own QI values: below k, so local suppression has work to do
+SHARED_QIS = ("date_of_birth", "municipality")  # same for every visit, so the purpose checks keep their groups
+UNIQUE_TAIL = 4  # last visits keep their own arrival time: below k, so local suppression has work to do
 
 
 def coarse_qis(folder: Path) -> None:
-    """Edit the synthetic copy: every visit but the last UNIQUE_TAIL copies row 0's QI cells (format-preserving),
-    so the hand plan reaches k on the small minikit."""
+    """Edit the synthetic copy so the hand plan reaches k on the small minikit and every purpose check still
+    passes (format-preserving): every visit copies row 0's date of birth and municipality, and every visit but
+    the last UNIQUE_TAIL copies row 0's arrival time."""
     import pandas as pd
 
     p = folder / "ed_visits.csv"
     df = pd.read_csv(p, dtype=str, keep_default_na=False, na_filter=False)
     head = len(df) - UNIQUE_TAIL
-    for c in QI_COLUMNS:
-        df.loc[: head - 1, c] = df.at[0, c]
+    for c in SHARED_QIS:
+        df.loc[:, c] = df.at[0, c]
+    df.loc[: head - 1, "arrival_ts"] = df.at[0, "arrival_ts"]
+    df.to_csv(p, index=False, encoding="utf-8", lineterminator="\n")
+
+
+def blank_columns(folder: Path, table: str, columns) -> None:
+    """Edit the synthetic copy: blank every cell of ``columns`` in ``table``."""
+    import pandas as pd
+
+    p = folder / f"{table}.csv"
+    df = pd.read_csv(p, dtype=str, keep_default_na=False, na_filter=False)
+    for c in columns:
+        df[c] = ""
     df.to_csv(p, index=False, encoding="utf-8", lineterminator="\n")
 
 
