@@ -1,4 +1,4 @@
-"""Producer context for the gate and for ``verify --full``: one function, both paths.
+﻿"""Producer context for the gate and for ``verify --full``: one function, both paths.
 
 The context ticket 11's producer checks read (``source``, ``rowmaps``, ``record_keys``, ``person``, ``joins``,
 ``identifiers``, ``keys``, ``k``) is derived only from the kit, the master key and the released tables:
@@ -22,7 +22,15 @@ from pathlib import Path
 import pandas as pd
 
 from pets_release.ladders import PseudonymKeys
-from pets_release.pseudonym import RECORD_KEY, MasterKey, Scope, manifest_signing_key, normalise, pseudonymiser_for
+from pets_release.pseudonym import (
+    RECORD_KEY,
+    MasterKey,
+    Scope,
+    manifest_signing_key,
+    normalise,
+    pseudonymiser_for,
+    recipient_key,
+)
 
 DEFAULT_RECIPIENT = "default"  # manifest recipient when no --recipient is given (pseudonyms keyed by the master)
 
@@ -97,6 +105,8 @@ def producer_context(*, scenario_id: str, policy, source: Mapping[str, pd.DataFr
         # master and manifest-signing key material (bytes; scanned in every encoding by producer.key-material)
         "keys": [master._k, manifest_signing_key(master)._k],
     }
+    if recipient != DEFAULT_RECIPIENT:  # the recipient-derived token key is key material too
+        ctx["keys"].append(recipient_key(master, recipient)._k)
     if "k" in contract:
         ctx["k"] = contract["k"]
     if released is not None:
