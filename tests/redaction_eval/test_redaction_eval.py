@@ -2,7 +2,8 @@
 from __future__ import annotations
 
 import csv
-import re
+import json
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -19,6 +20,9 @@ from pets_release.redaction_eval import (
     split_by_skeleton,
     whole_turn_predictor,
 )
+from pets_release.redaction_eval.frame import Frame
+from pets_release.redaction_eval.harness import evaluate_frames
+from pets_release.redaction_eval.predictors import regex_predictor
 from pets_release.redaction_eval.scoring import exact_scores
 
 
@@ -150,7 +154,7 @@ def test_split_conversation_held_out_only_if_all_turns_held_out():
 def test_split_assertion_fires_on_planted_overlap():
     from pets_release.redaction_eval.split import assert_zero_overlap
 
-    with pytest.raises(AssertionError):
+    with pytest.raises(ValueError):
         assert_zero_overlap({"a", "b"}, {"b"})
 
 
@@ -174,8 +178,10 @@ def test_precision_floor():
 def test_spot_check_sheet_written_outside_repo(tmp_path):
     fr = make_frame()
     pred = {tid: [] for tid in fr.texts}
-    out = export_spot_check(fr, pred, tmp_path / "sheet.csv", n=2, repo_root=Path(__file__).resolve().parents[2])
-    rows = list(csv.DictReader(open(out, encoding="utf-8-sig", newline="")))
+    out = tmp_path / "sheet.csv"
+    assert export_spot_check(fr, pred, out, n=2, repo_root=Path(__file__).resolve().parents[2]) == 2
+    with open(out, encoding="utf-8-sig", newline="") as f:
+        rows = list(csv.DictReader(f))
     assert len(rows) == 2
     assert {"turn_id", "original", "redacted"} <= set(rows[0])
 
@@ -207,12 +213,6 @@ def test_turn_mode_split_zero_overlap_on_shared_templates():
 
 
 # ---------- review round 1 ----------
-import subprocess  # noqa: E402
-
-from pets_release.redaction_eval.harness import evaluate_frames  # noqa: E402
-from pets_release.redaction_eval.frame import Frame  # noqa: E402
-from pets_release.redaction_eval.predictors import regex_predictor  # noqa: E402
-
 
 def _git_repo(path):
     subprocess.run(["git", "init", "-q", str(path)], check=True)
@@ -233,10 +233,11 @@ def test_spot_check_autodetects_repo_when_root_omitted(tmp_path, monkeypatch):
     # cwd inside a repo, target outside any repo: allowed
     monkeypatch.chdir(repo)
     outside = tmp_path / "out" / "sheet.csv"
-    assert export_spot_check(fr, {}, outside, n=1).exists()
+    assert export_spot_check(fr, {}, outside, n=1) == 1
+    assert outside.exists()
     # git-ignored folder inside repo: allowed
     (repo / ".gitignore").write_text("private/\n")
-    assert export_spot_check(fr, {}, repo / "private" / "s.csv", n=1).exists()
+    assert export_spot_check(fr, {}, repo / "private" / "s.csv", n=1) == 1
 
 
 def test_spot_check_fails_closed_without_git(tmp_path, monkeypatch):
@@ -291,7 +292,9 @@ def test_person_twice_records_named_variants():
 
 def test_precision_floor_not_set_pass_and_fail():
     fr, notes = _tmpl_frames()
-    assert evaluate_frames(fr, notes, lambda d: regex_predictor)["precision_floor"] == {"status": "not_set"}
+    unset = evaluate_frames(fr, notes, lambda d: regex_predictor)
+    assert unset["precision_floor"] == {"status": "not_set"}
+    assert unset["passed"] is None  # unknown is not a pass
     bad = evaluate_frames(fr, notes, lambda d: (lambda t: [sp(0, len(t), "PERSON")]), precision_floor=0.5)
     assert bad["precision_floor"]["status"] == "fail" and bad["passed"] is False
     good = evaluate_frames(fr, notes, lambda d: (lambda t: (
@@ -305,4 +308,43 @@ def test_cli_exit_code_nonzero_below_floor(monkeypatch):
     fr, notes = _tmpl_frames()
     monkeypatch.setattr(m, "load_frames", lambda kit: (fr, notes))
     assert m.main(["--kit", "x", "--precision-floor", "0.5"]) == 1  # regex finds nothing -> precision 0
-    assert m.main(["--kit", "x"]) == 0
+    assert m.main(["--kit", "x"]) == 2  # floor unset = unknown, never 0
+    assert m.main(["--kit", "x", "--report-only"]) == 0  # explicit opt-in, claims no pass
+
+
+# ---------- follow-up #40 ----------
+def _run(tmp_path, name):
+    fr, notes = _tmpl_frames()
+    d = tmp_path / name
+    rep = evaluate_frames(fr, notes, lambda d_: regex_predictor, out_dir=d, sheet_n=5, precision_floor=0.0)
+    return rep, d
+
+
+def test_report_is_aggregate_only_and_deterministic(tmp_path):
+    fr, _ = _tmpl_frames()
+    a, da = _run(tmp_path, "a")
+    _, db = _run(tmp_path, "b")
+    assert (da / "report.json").read_bytes() == (db / "report.json").read_bytes()
+    assert (da / "spot_check.csv").read_bytes() == (db / "spot_check.csv").read_bytes()
+    blob = (da / "report.json").read_text(encoding="utf-8")
+    json.loads(blob)
+    for tid, text in fr.texts.items():  # no turn id or text fragment leaks into the report
+        assert tid not in blob
+        assert text not in blob
+    assert a["spot_check_rows"] == 5
+
+
+def test_spot_check_rows_is_written_count(tmp_path):
+    fr = make_frame()
+    assert export_spot_check(fr, {}, tmp_path / "s.csv", n=99) == 3
+
+
+def test_dropped_gold_for_unknown_notes_is_reported():
+    import pets_release.redaction_eval.frame as fm
+
+    assert fm.count_dropped_gold({"N1": [sp(0, 1, "EMAIL")], "X": [sp(0, 1, "EMAIL"), sp(2, 3, "EMAIL")]},
+                                 {"N1": "t"}) == {"ids": 1, "spans": 2}
+    fr, notes = _tmpl_frames()
+    notes.gold_dropped = {"ids": 1, "spans": 2}
+    rep = evaluate_frames(fr, notes, lambda d: regex_predictor)
+    assert rep["zero_shot_frame"]["gold_dropped"] == {"ids": 1, "spans": 2}

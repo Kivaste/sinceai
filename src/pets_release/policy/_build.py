@@ -5,7 +5,7 @@ from .model import FieldFloor, make_entry
 
 # Authoring shorthand -> ticket 07's canonical rung IDs (pets_release.ladders.LADDERS), per family.
 _SHORT = {
-    "timestamp": {"exact": "ts.exact", "hour": "ts.hour", "month_hour": "ts.month_hour"},
+    "timestamp": {"exact": "ts.exact", "hour": "ts.hour", "month_hour": "ts.month_hour", "hour_of_day": "ts.hour_of_day"},
     "age": {"age_band_5": "age.band5", "age_band_10": "age.band10"},
     "geo": {"exact": "geo.full", "top_n": "geo.topn"},
     "icd10": {"exact": "icd.full", "chars3": "icd.3", "chapter": "icd.chapter"},

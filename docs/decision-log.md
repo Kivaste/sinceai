@@ -103,3 +103,31 @@ Each entry records:
 - **Decision:** (1) Correction: the DNS outage lasted ~2 h (about 03:00–05:10 EET); the previous entry's "03:00–03:40" range is wrong — the merges were ~03:00, the re-dispatch ~05:10. (2) With under 4 h to the Sat 09:00 story kit and 02/04 still in final review, started 16 (writer, Opus), 17 (verify, Opus), 18 (dashboard, Sonnet) and 19 (measurer, Sonnet) now, branched from 02's head (which contains 04) and, for 19, 08's head. They merge only after 02/04 (and 08) merge; implementers merge the final sibling heads before reporting. This bends "Blocked by" to "Merge after" for these four.
 - **Why:** The critical path 04 → 16/17 → 21 → 22 cannot fit in the remaining time if 16/17 wait for two more review rounds on 02/04; both upstream APIs are stable and only final-round changes are pending.
 - **Evidence:** heartbeat timestamp 03:12 UTC; worktrees `ticket/16-writer`, `17-verify`, `18-dashboard`, `19-measurer` based on 67ef441.
+
+### Sat 05:22 — human instruction: six blocked tickets started early
+
+- **When:** Sat 05:22 EET (applied 05:30)
+- **Decision:** Per Kivaste (planning session): started 24 minimiser (Opus), 28 recipient keys (Sonnet), 27 determinism/offline tests (Sonnet; tests needing 21's `run` explicitly marked and listed), 30 README draft (Sonnet), 23 CS-S1 glue + fixture tests (Opus; real-kit e2e after 21), 22 part A story-kit script and numbers template keyed to manifest paths (Sonnet; part B blocked on 18/19/21). Blockers treated as Merge after only; each merges after its blockers close with the full suite green on the merged result. Implementer count ~12, under the cap; `pytest -n 8` (CPU 31–43%).
+- **Why:** Machine headroom and time pressure; pinned contracts make parallel work safe.
+- **Evidence:** worktrees `ticket/{24-minimiser,28-recipient-keys,27-determinism,30-readme,23-cs-s1,22-story-kit}` at 6675731.
+
+### Sat 05:30 — k in the contract; hour-of-day rung; 08 identity-data check
+
+- **When:** Sat 05:30 EET
+- **Decision:** (1) The release contract carries the scenario's k target (`k`, from the policy) so recipient verify can re-run `producer.row-k` from the release alone; 10 emits it, 02's schema accepts it, 11 reads it. CS-S1 (no k target) handling is assigned to ticket 23. (2) Added rung `ts.hour_of_day` (ticket 07b, date-free `HH:00`): ticket 09 measured per-person k on the kit — with existing rungs the best HEALTH-S1 hand plan keeping all required tasks leaves 55% of persons below k=5, and suppression alone would remove 71% and break H-U4; hour-of-day gave ~4.5% below k with all tasks 1.0, within the policy's 10% suppression cap. (3) Ticket 08 decides "linkage expected" via pets-eval's own identity-data loader (in memory, yes/no only, never kept or exported) instead of building a truth/ path; recorded as a scoped exception to "only the attacker reads truth", because it is the kit evaluator's own loader used for the scorecard's coverage check.
+- **Why:** Story-kit release must pass the producer k gate; recipient verify must be re-runnable; the boundary guard must hold on the merged tree.
+- **Evidence:** 09's per-person k table (aggregate, ticket thread on merge); 07b scorecard H-U2…H-U8 all 1.0 with `arrival_ts` at `ts.hour_of_day`.
+
+### Sat 05:35 — D13b lighter reviews applied; merges 03, 07b, 04, 20
+
+- **When:** Sat 05:35–05:45 EET
+- **Decision:** Applied D13b: core tickets reviewed by `xai/grok-4.7#medium` + `opencode-go/gpt-6-luna#medium`, routine tickets by Grok only; round 2+ are delta reviews; max 3 rounds, then only high-severity blocks; ≤ 8 concurrent reviews per provider. Interrupted all 16 in-flight DeepSeek reviews (including core ones; Luna dispatched as the second core reviewer instead, so no core ticket lost its second review). Routine tickets whose current head already had a Grok approval merged at once: 03 (`244e278`) and 07b (`c411162`). 04 merged (`6dcb187`) on Grok r4 + Luna delta (`a4144a2..2781778`, no findings) + earlier GPT r3 approval. 20 merged earlier (`d0b0386`). Follow-ups #45 (20) and #46 (03) filed. Decision for writer/verify: `bindings.inputs` binds every table of the scenario's dataset (withheld included) and `verify --full` requires exact equality.
+- **Why:** Human instruction (planning session, Sat 05:35); DeepSeek reviews took 25+ min and were throttled; the critical path needs merges now.
+- **Evidence:** #4, #5, #21 done-reports; Luna verdicts on 02/04/05/11/12 (APPROVE) and 16/17 (CHANGES, sent back).
+
+### Sat 05:50 — D13c quality recovery applied; merges up to 16 and 22 part A
+
+- **When:** Sat 05:50–06:00 EET
+- **Decision:** (1) Applied D13c (human instruction): must-fix follow-ups #41, #42, #44, #45, #47, #50 before the 20:00 freeze, each delta-reviewed by `xai/grok-4.7#medium` **and** `opencode-go/gemini-4-argon#medium`; numbers tickets 18, 19, 22, 25, 29 get two reviewers. #44 was pulled from the merge queue (Grok-approved, not yet Gemini) — the merger had merged it locally and reset before pushing, so nothing landed. #41 had already merged on Grok alone, so it gets a retroactive Gemini delta review; same for 18, 19 and 22 part A. Gemini dispatched on #41, #42, #44, #45, #47, 18, 19, 22A; #50 fix dispatched (Sonnet). (2) Merged since 05:35: 05 `b148908`, 11 `b48ec2d`, 08 `6422758`, 09 `4c69eb1`, 02 `9914409`, 18 `65e4e37`, 19 `4da22de`, 10 `c26c9ed`, 12 `e1222fd`, 13 `5fae780`, #40 `abf7ad9`, #41 `f23ece7`, 17 `5caec51`, 16 `afd62da`, 22 part A `5f17654` — each with the full suite green on the merged result (last: 1862 passed, 3 skipped). All blockers of ticket 21 are merged. (3) 17's first merge attempt failed 3 tests once 11's producer checks were registered; fixed in tests only, re-reviewed, merged. (4) Follow-ups filed: #47 (05/11), #48 (08/09), #49 (18/19), #50 (12/13/17 incl. 13's lexicon encoding damage and the 02 fixture's unregistered check claim). (5) Ticket 08's leftover worktree has an uncommitted edit to another ticket's file (`redaction_eval/__init__.py`) from an unknown session — left in place, not force-removed; flagged for a human.
+- **Why:** Human instruction (planning session); the critical path 21 → 22 now has every dependency merged.
+- **Evidence:** issue done-reports #2–#21 (closed); `git log --merges origin/integration/pets-release`.
