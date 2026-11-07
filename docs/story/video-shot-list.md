@@ -41,8 +41,12 @@ measured** unless the final manifest actually supplies them.
 - [ ] Use the agreed pinned integration revision and its matching HEALTH-S1 release
   and fresh proof. #103 resolves manifest placeholders before the final capture;
   no old gate totals or recycled success lines. Do not stage a successful outcome.
-- [ ] Start the local server on this machine: `python -m pets_release.ui`. Open
-  the loopback token link it prints. Keep the token and key off camera; no hosted URL.
+- [ ] Start the local server on this machine with the demo click-through wizard
+  (D48), which sets the HMAC key in the server's environment only and passes the
+  kit, output and creation-time arguments the app requires. Pending #117: the
+  exact launch command is the one in the README's web-app section once #117
+  merges; `python -m pets_release.ui` alone exits 2 without them. Open the
+  loopback token link it prints. Keep the token and key off camera; no hosted URL.
 - [ ] Pick **HEALTH-S1**, start the run and **let the run finish** before recording.
   Open the field inventory and rehearse its expansion, so the tool is visibly
   working from the opening shot. Do not spend the video waiting for processing.
