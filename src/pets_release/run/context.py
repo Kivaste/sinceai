@@ -23,8 +23,15 @@ import pandas as pd
 
 from pets_release.ladders import PseudonymKeys
 from pets_release.policy import k_target
-from pets_release.pseudonym import RECORD_KEY, MasterKey, Scope, manifest_signing_key, normalise, pseudonymiser_for
-from pets_release.pseudonym.keys import recipient_key
+from pets_release.pseudonym import (
+    RECORD_KEY,
+    MasterKey,
+    Scope,
+    manifest_signing_key,
+    normalise,
+    pseudonymiser_for,
+    recipient_key,
+)
 
 DEFAULT_RECIPIENT = "default"  # manifest recipient when no --recipient is given (pseudonyms keyed by the master)
 
