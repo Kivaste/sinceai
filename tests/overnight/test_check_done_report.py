@@ -29,7 +29,12 @@ def done_report_cli(tmp_path):
             ["git", "-C", str(repo), *args], check=True, capture_output=True, text=True
         ).stdout.strip()
 
-    git("init", "-q")
+    git("init", "-q", "-b", "main")
+    git(
+        "-c", "user.name=Test", "-c", "user.email=test@example.invalid",
+        "commit", "-q", "--allow-empty", "-m", "synthetic baseline",
+    )
+    baseline = git("rev-parse", "HEAD")
     git(
         "-c", "user.name=Test", "-c", "user.email=test@example.invalid",
         "commit", "-q", "--allow-empty", "-m", "synthetic",
@@ -37,7 +42,9 @@ def done_report_cli(tmp_path):
     head = git("rev-parse", "HEAD")
     git("remote", "add", "origin", str(repo))
     git("update-ref", "refs/remotes/origin/ticket/synthetic", head)
-    git("update-ref", "refs/remotes/origin/integration/pets-release", head)
+    git("update-ref", "refs/remotes/origin/integration/pets-release", baseline)
+    linked = tmp_path / "linked tree"
+    git("worktree", "add", "-q", "-b", "ticket/synthetic", str(linked))
 
     body = f"""## Done-report
 - Issue: #102
@@ -84,7 +91,19 @@ def done_report_cli(tmp_path):
         encoding="ascii",
     )
 
-    def run(report, *, via_gh, unreadable=False, test_mode=True):
+    def run(report, *, via_gh, unreadable=False, location="linked", merged=False, test_mode=True):
+        if location == "main":
+            git("-C", str(linked), "checkout", "-q", "--detach")
+            git("checkout", "-q", "ticket/synthetic")
+        elif location == "absent":
+            git("worktree", "remove", str(linked))
+        elif location == "missing":
+            shutil.rmtree(linked)
+        elif location == "planted-main":
+            (linked / ".git").unlink()  # Git marks this file hidden on Windows.
+            (linked / ".git").write_text(f"gitdir: {repo / '.git'}\n", encoding="utf-8")
+        if merged:
+            git("update-ref", "refs/remotes/origin/integration/pets-release", head)
         body_file = tmp_path / "body.md"
         body_file.write_text(report, encoding="utf-8")
         payload.write_text(
@@ -158,3 +177,34 @@ def test_unreadable_issue_is_unknown_not_a_pass(done_report_cli):
     result = run(body.replace("ARROW", "->"), via_gh=True, unreadable=True)
     assert result.returncode == 2, result.stdout + result.stderr
     assert "UNKNOWN: could not read issue #102" in result.stdout
+
+
+def test_non_ticket_branch_fails_even_with_complete_evidence(done_report_cli):
+    body, run = done_report_cli
+    report = body.replace("ARROW", "->").replace("Branch: ticket/synthetic", "Branch: main")
+    result = run(report, via_gh=False, merged=True)
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "Branch: must match ticket/*" in result.stdout
+
+
+@pytest.mark.parametrize("location,merged", [
+    ("main", False), ("absent", False), ("main", True),
+    ("missing", True), ("planted-main", False),
+])
+def test_active_ticket_requires_a_linked_worktree(done_report_cli, tmp_path, location, merged):
+    body, run = done_report_cli
+    # A planted .git file and complete report are not proof of a branch checkout.
+    planted = tmp_path / "planted-linked-tree"
+    planted.mkdir()
+    shutil.copyfile(tmp_path / "linked tree" / ".git", planted / ".git")
+    result = run(body.replace("ARROW", "->"), via_gh=False, location=location, merged=merged)
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "Branch: ticket/synthetic must be checked out in a linked worktree" in result.stdout
+
+
+def test_merged_ticket_removed_worktree_still_cannot_close_from_substitute(done_report_cli):
+    body, run = done_report_cli
+    result = run(body.replace("ARROW", "->"), via_gh=False, location="absent", merged=True)
+    assert result.returncode == 3, result.stdout + result.stderr
+    assert "SUBSTITUTE-ONLY: evidence complete, not a close pass" in result.stdout
+    assert "PASS #" not in result.stdout
