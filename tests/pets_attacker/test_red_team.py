@@ -89,8 +89,9 @@ def _kit(root: Path, *, catalog: str = CATALOG, finance_cols=("full_name", "birt
     _csv(pd.DataFrame({"adv_row_id": ["n1", "n2"], "person_id": ["p1", "p7"]}),
          kit / "truth/adversary__news_clips_health.csv")
     fin = pd.DataFrame({"customer_id": ["c1", "c2"], "full_name": ["Aino Planted", "Bert Second"],
-                        "birth_date": ["1990-05-01", "1970-01-01"], "city": ["Alpha", "Alpha"]})
-    _csv(fin[["customer_id", *finance_cols]], kit / "data/finance/customers.csv")
+                        "birth_date": ["1990-05-01", "1970-01-01"], "city": ["Alpha", "Alpha"],
+                        "hetu": ["p1", "p2"]})  # national ID: the same person as the visits' patient_hetu
+    _csv(fin[["customer_id", "hetu", *finance_cols]], kit / "data/finance/customers.csv")
     spec = {"attacks": [{"adversary": "news_clips_health", "dataset": "health", "table": "ed_visits",
                          "sensitive": "icd10_primary", "qis": NEWS_QIS}]}
     (kit / "metadata").mkdir(parents=True, exist_ok=True)
@@ -225,3 +226,24 @@ def test_a_released_table_without_a_pseudonym_link_is_not_measured_with_its_reas
     ai = _run(tmp_path, lab="unlinked")["red_team"]["attribute_inference"]
     lab = ai["columns"]["lab_results.value"]
     assert lab["evaluated"] is False and lab["reason"] == "no-link-to-target-table" and lab["inference_rate"] is None
+
+
+def test_release_join_links_released_rows_to_the_kits_person_register_on_the_released_qis(tmp_path):
+    """Round 2 (Spec r1, item 2). The finance customers (national ID, birth date, city) join the RELEASED visits on
+    the released age band and municipality: p1 (35, Alpha) is alone in 30-39 Alpha -> re-identified; p2 (55,
+    Alpha) ties five visits -> 1-in-5. Unique 1/2, guess (1 + 1/5)/2. Through the visit pseudonym, p1's 3 lab rows
+    are re-identified, p2's 2 are not: 3/5 lab rows."""
+    rj = _run(tmp_path, lab=True)["red_team"]["release_join"]
+    assert rj["evaluated"] is True and rj["n_targets"] == 2 and rj["n_register_sources"] == 1
+    assert rj["reidentification_rate"] == 0.5 and rj["guess_rate"] == 0.6
+    assert rj["linked_table"] == "lab_results" and rj["linked_n_targets"] == 5 and rj["linked_reidentification_rate"] == 0.6
+
+
+def test_release_join_without_a_person_register_is_not_measured(tmp_path):
+    kit, rel, rungs = _kit(tmp_path)
+    (kit / "data/finance/customers.csv").unlink()
+    out = tmp_path / "attack.json"
+    assert main(["--kit", str(kit), "--release", str(rel), "--label", "t", "--out", str(out),
+                 "--rungs", str(rungs)]) == 0
+    rj = json.loads(out.read_text(encoding="utf-8"))["red_team"]["release_join"]
+    assert rj["evaluated"] is False and rj["reason"] == "no-register" and rj["reidentification_rate"] is None

@@ -53,9 +53,9 @@ def test_cli_emits_aggregates_only(tmp_path: Path):
         assert set(block) == set(AGGREGATE_KEYS)
         assert all(v is None or isinstance(v, (bool, int, float)) for v in block.values())
     red = res["red_team"]
-    assert set(red) == {"cross_dataset", "range_aware", "attribute_inference"}
-    for block in (red["cross_dataset"], red["range_aware"]):
-        assert set(block) == set(LINK_KEYS)
+    assert set(red) == {"cross_dataset", "range_aware", "release_join", "attribute_inference"}
+    for block in (red["cross_dataset"], red["range_aware"], red["release_join"]):
+        assert set(LINK_KEYS) <= set(block)
         assert all(v is None or isinstance(v, (bool, int, float)) or k == "reason" for k, v in block.items())
     text = out.read_text(encoding="utf-8")
     for leaked in ("Anna", "Virtanen", "Turku", "v0", "p0"):

@@ -24,16 +24,23 @@ from test_wire_attacker_rates import _risks, attack_kit  # noqa: F401  (fixture)
 
 from pets_release.measure import wire
 
-SENSITIVE_ROW = "health,ed_visits,icd10_primary,sensitive_attribute,code,dx\n"
+SENSITIVE_ROW = ("health,ed_visits,icd10_primary,sensitive_attribute,code,dx\n"
+                 "health,lab_results,value,sensitive_attribute,numerical,m\n")
 LINK = ("linkage-redteam-cross-dataset", "linkage-redteam-cross-dataset-guess",
         "linkage-redteam-range-aware", "linkage-redteam-range-aware-guess")
+JOIN = ("linkage-redteam-release-join", "linkage-redteam-release-join-guess", "linkage-redteam-release-join-lab_results")
 
 
 def _aux(kit) -> None:
+    """A finance customer list: one synthetic stranger, plus (r2, release join) the first minikit visit's person
+    by national ID, with its birth date and municipality."""
     p = kit / "data" / "finance"
     p.mkdir(parents=True)
-    pd.DataFrame({"customer_id": ["c1"], "full_name": ["Synthetic Person"], "birth_date": ["1980-01-01"],
-                  "city": ["Nowhere"]}).to_csv(p / "customers.csv", index=False)
+    v = pd.read_csv(kit / "data" / "health" / "ed_visits.csv", dtype=str, keep_default_na=False, na_filter=False)
+    pd.DataFrame({"customer_id": ["c1", "c2"], "full_name": ["Synthetic Person", "Synthetic Patient"],
+                  "birth_date": ["1980-01-01", v.at[0, "date_of_birth"][:10]],
+                  "city": ["Nowhere", v.at[0, "municipality"]], "hetu": ["none-0", v.at[0, "patient_hetu"]]}).to_csv(
+        p / "customers.csv", index=False)
 
 
 def _sensitive(kit) -> None:
@@ -59,6 +66,14 @@ def test_measured_run_records_every_red_team_rate_with_its_denominator(attack_ki
         assert r["kind"] == "attribute_inference" and r["rate"]["status"] == "measured", rid
         assert r["rate"]["denominator"] == {"unit": "rows", "n": n_icd}
     assert "base rate" in risks["attribute-inference-redteam-icd10_primary-baseline"]["description"]
+    # r2 (Spec r1): every released table's sensitive attribute, and the register joined to the released rows
+    for rid in ("attribute-inference-redteam-lab_results.value", "attribute-inference-redteam-lab_results.value-baseline"):
+        assert risks[rid]["rate"]["status"] == "measured", rid
+    for rid in JOIN:
+        r = risks[rid]
+        assert r["kind"] == "linkage" and r["rate"]["status"] == "measured", rid
+        assert 0.0 <= r["rate"]["value"] <= 1.0 and r["rate"]["denominator"]["n"] >= 1
+    assert risks["linkage-redteam-release-join"]["rate"]["denominator"] == {"unit": "rows", "n": 1}
 
 
 @pytest.mark.parametrize("missing", ["aux", "sensitive"])

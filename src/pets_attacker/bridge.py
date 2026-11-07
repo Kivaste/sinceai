@@ -86,6 +86,7 @@ _REASONS = {  # attacker reason code -> manifest text (the attacker's codes only
     "no-target": "no attacker target in the release",
     "no-attack-spec": "no attack spec for the released table",
     "no-link-to-target-table": "the table shares no visit pseudonym with the released visits",
+    "no-register": "no person register (national-ID-keyed table) in the kit",
 }
 _ERROR = re.compile(r"^error:[A-Za-z][A-Za-z0-9_]{0,63}$")
 _RED_FRAME = (f"targets: the adversary records of the scenario's attack specs whose person is in the release, each "
@@ -97,7 +98,13 @@ _LINK = {
                                                        "scoring of interval overlaps"),
     "range_aware": ("linkage-redteam-range-aware", "Fellegi-Sunter scoring of interval overlaps (a disagreeing "
                                                    "field lowers a row's score instead of vetoing it)"),
+    "release_join": ("linkage-redteam-release-join", "the kit's person register (other-domain tables keyed by "
+                                                     "national ID: birth date, place, sex) joined to the released "
+                                                     "rows on the released age band, municipality and sex "
+                                                     "(Fellegi-Sunter)"),
 }
+_JOIN_FRAME = (f"targets: register persons with a visit in the release, a seeded random sample (seed {SEED}) of at "
+               f"most {MAX_SAMPLE}")
 _LINK_RATES = (("reidentification_rate", "", "share of targets whose single best-scoring row is theirs"),
                ("guess_rate", "-guess", "1-in-k guess success: expected share of targets found by guessing one of "
                                         "the best-scoring rows"))
@@ -140,9 +147,21 @@ def red_team_risks(red) -> list:
         raise BridgeError("red team block malformed")
     out = []
     for name, (risk, how) in _LINK.items():
+        frame = _JOIN_FRAME if name == "release_join" else _RED_FRAME
         for metric, suffix, what in _LINK_RATES:
             out.append(_red(risk + suffix, "linkage", red[name], metric, f"pets_attacker.redteam.{name}/{metric}",
-                            f"{what}; {how}; {_RED_FRAME}"))
+                            f"{what}; {how}; {frame}"))
+    rj = red["release_join"]
+    if isinstance(rj, dict) and rj.get("evaluated") is True and rj.get("linked_table") is not None:
+        lt = rj["linked_table"]
+        if not isinstance(lt, str):
+            raise BridgeError("red team aggregate malformed")
+        src = f"pets_attacker.redteam.release_join[{lt}]/linked_reidentification_rate"
+        out.append(_red(f"linkage-redteam-release-join-{lt}", "linkage",
+                        {"evaluated": True, "n_targets": rj.get("linked_n_targets"),
+                         "rate": rj.get("linked_reidentification_rate")}, "rate", src,
+                        f"share of the targets' released {lt} rows that sit on a correctly singled-out visit "
+                        f"(linked by the visit pseudonym); {how}; {_JOIN_FRAME}"))
     ai = red["attribute_inference"]
     if not isinstance(ai, dict) or not isinstance(ai.get("columns"), dict) or not isinstance(ai.get("evaluated"), bool):
         raise BridgeError("red team block malformed")

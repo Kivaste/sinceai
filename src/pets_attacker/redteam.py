@@ -43,7 +43,7 @@ AUX_SOURCES = (
 )
 AGE_COLS = ["date_of_birth", "age", "age_band"]
 REASONS = frozenset({"no-aux-table", "aux-table-malformed", "no-field-catalog", "no-sensitive-released",
-                     "no-target", "no-attack-spec", "no-link-to-target-table"})
+                     "no-target", "no-attack-spec", "no-link-to-target-table", "no-register"})
 LINK_KEYS = ("evaluated", "reason", "n_targets", "n_unique_claims", "reidentification_rate", "guess_rate",
              "median_top_set", "n_enriched", "n_aux_sources")
 ATTR_KEYS = ("evaluated", "reason", "n_targets", "inference_rate", "baseline_rate")
@@ -346,3 +346,105 @@ def attribute_inference(kit: Path, dataset: str, table: str, world: _World, prot
             cells = _cells(df, c)
             out[f"{t}.{c}"] = _score(cells, linked, lab_top, _mode(cells))
     return {"evaluated": True, "reason": None, "columns": out}
+
+
+# --- release join (#139 r2): the kit's person register joined to the RELEASED rows on the released QIs ------------
+# (file under the kit root, national-ID column, birth column, place column, sex column)
+REGISTER_SOURCES = (
+    ("data/finance/customers.csv", "hetu", "birth_date", "city", None),
+    ("data/energy/customers.csv", "hetu", "birth_date", "municipality", None),
+    ("data/education/students.csv", "hetu", "birth_date", "municipality", "sex"),
+)
+REGISTER_QIS = [{"kind": "age", "adversary": ["_age"], "protected": AGE_COLS, "tol": 1},
+                {"kind": "exact", "adversary": ["_place"], "protected": ["municipality"]},
+                {"kind": "sex", "adversary": ["_sex"], "protected": ["sex"]}]
+MID_YEAR = pd.Timestamp("2025-07-01")  # the release year: the register gives no visit date, so age is +-0.5 y
+JOIN_KEYS = LINK_KEYS + ("n_register_sources", "linked_table", "linked_n_targets", "linked_reidentification_rate")
+
+
+def _register(kit: Path) -> tuple:
+    """National ID -> {birth, place, sex}, first source with a value wins (fixed source order)."""
+    reg: dict = {}
+    n = 0
+    for rel, nid, birth, place, sex in REGISTER_SOURCES:
+        p = Path(kit) / rel
+        if not p.is_file():
+            continue
+        df = _read(p)
+        if not {c for c in (nid, birth, place, sex) if c} <= set(df.columns):
+            raise RedTeamError("aux-table-malformed")
+        n += 1
+        for r in df.to_dict("records"):
+            k = str(r[nid]).strip()
+            if not k:
+                continue
+            e = reg.setdefault(k, {"_birth": None, "_place": "", "_sex": ""})
+            if e["_birth"] is None:
+                e["_birth"] = _birth(r[birth], False)
+            if not e["_place"] and not _blank(r[place]):
+                e["_place"] = str(r[place]).strip()
+            if sex and not e["_sex"]:
+                e["_sex"] = _SEX.get(str(r[sex]).strip().lower(), "")
+    if n == 0:
+        raise RedTeamError("no-register")
+    return reg, n
+
+
+def release_join(kit: Path, table: str, world: _World, protected: pd.DataFrame, original: pd.DataFrame,
+                 record_key: str, rungs: dict, others: dict | None = None, id_col: str = "patient_hetu") -> dict:
+    """Targets: register persons (national ID) with a visit in the release, a seeded sample of at most MAX_SAMPLE.
+    Each is scored against the released visits on the released age band, municipality and sex (Fellegi-Sunter).
+    Unique re-identification and 1-in-k guess success per person; through the visit pseudonym, the share of the
+    targets' released rows of each other released table that sit on a correctly singled-out visit."""
+    reg, n_src = _register(kit)
+    if id_col not in original.columns:
+        raise RedTeamError("no-register")
+    person_of = {}
+    for rid, nid in zip(original[record_key].astype(str), original[id_col].astype(str)):
+        pid = world.id_map.get(rid)
+        if pid is not None and nid.strip():
+            person_of[nid.strip()] = pid
+    ids = sorted(k for k in reg if person_of.get(k) in world.persons)
+    if not ids:
+        raise RedTeamError("no-target")
+    ids = [ids[i] for i in _sample(len(ids))]
+    prot = protected.reset_index(drop=True)
+    matcher = Matcher(prot, qis_from_spec(REGISTER_QIS, prot.columns), rungs.get(table, {}))
+    # the other released table linked to the visits (first by name, deterministic), if any
+    link = next(((t, c) for t in sorted(others or {})
+                 for c in [_link_column(rungs, t, table, prot.columns, others[t].columns)] if c), None)
+    if link:
+        lt, lc = link
+        visit_key = _cells(prot, lc)
+        rows_per_key: dict = {}
+        for k in _cells(others[lt].reset_index(drop=True), lc):
+            rows_per_key[k] = rows_per_key.get(k, 0) + 1
+    n = claims = correct = linked_n = linked_ok = 0
+    guess = 0.0
+    sizes: list = []
+    for nid in ids:
+        e, pid = reg[nid], person_of[nid]
+        age = _age_at(e["_birth"], MID_YEAR) if e["_birth"] is not None else None
+        top, used = fs_top(matcher, {"_age": "" if age is None else f"{age:.4f}", "_place": e["_place"],
+                                     "_sex": e["_sex"]})
+        n += 1
+        hits = int((world.person[top] == pid).sum())
+        sizes.append(len(top))
+        guess += hits / len(top)
+        won = len(top) == 1 and used > 0 and hits == 1
+        claims += len(top) == 1 and used > 0
+        correct += won
+        if link:
+            own = np.flatnonzero(world.person == pid)
+            linked_n += sum(rows_per_key.get(visit_key[v], 0) for v in own if visit_key[v])
+            if won and visit_key[top[0]]:
+                linked_ok += rows_per_key.get(visit_key[top[0]], 0)
+    out = {"evaluated": True, "reason": None, "n_targets": n, "n_unique_claims": claims,
+           "reidentification_rate": round(correct / n, 4), "guess_rate": round(guess / n, 4),
+           "median_top_set": float(np.median(sizes)), "n_enriched": None, "n_aux_sources": None,
+           "n_register_sources": n_src, "linked_table": None, "linked_n_targets": None,
+           "linked_reidentification_rate": None}
+    if link and linked_n:
+        out.update(linked_table=link[0], linked_n_targets=linked_n,
+                   linked_reidentification_rate=round(linked_ok / linked_n, 4))
+    return out

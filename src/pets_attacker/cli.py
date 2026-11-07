@@ -73,12 +73,24 @@ def run(kit: Path, release: Path, label: str, scoring_dir: Path | None = None, r
                                         enrich=enrich)
         except (ValueError, KeyError, IndexError) as e:  # RedTeamError, RungError, MappingError included
             red[name] = redteam.failed(e)
-    try:
-        # #139 r2: every other table the release contract names (rungs) is read from the release by that name
+    others, others_error = None, None
+    try:  # #139 r2: every other table the release contract names (rungs) is read from the release by that name
         others = {t: _csv(release / f"{t}.csv") for t in sorted(all_rungs) if t != TABLE and isinstance(all_rungs[t], dict)}
+    except (OSError, ValueError) as e:  # never a silently smaller table set
+        others_error = e
+    try:
+        if others_error is not None:
+            raise others_error
+        red["release_join"] = redteam.release_join(kit, TABLE, world, protected, original, RECORD_KEY, all_rungs,
+                                                   others)
+    except (ValueError, KeyError, IndexError, OSError) as e:
+        red["release_join"] = redteam.failed(e, redteam.JOIN_KEYS)
+    try:
+        if others_error is not None:
+            raise others_error
         red["attribute_inference"] = redteam.attribute_inference(kit, DOMAIN, TABLE, world, protected, original,
                                                                  RECORD_KEY, all_rungs, others)
-    except (ValueError, KeyError, IndexError) as e:
+    except (ValueError, KeyError, IndexError, OSError) as e:
         red["attribute_inference"] = {**{k: v for k, v in redteam.failed(e).items() if k in ("evaluated", "reason")},
                                       "columns": {}}
     return {"label": label, "broker": broker, "insider": insider, "red_team": red}

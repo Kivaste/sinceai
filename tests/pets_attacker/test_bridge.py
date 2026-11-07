@@ -61,7 +61,7 @@ def test_cli_writes_json_and_fails_closed(tmp_path):
     src.write_text(json.dumps(ATTACK), encoding="utf-8")
     out = tmp_path / "residual.json"
     assert bridge.main(["--attack", str(src), "--out", str(out)]) == 0
-    assert len(json.loads(out.read_text(encoding="utf-8"))["residualRisks"]) == 6 + 5  # #139: + 5 red-team entries (not measured: no block)
+    assert len(json.loads(out.read_text(encoding="utf-8"))["residualRisks"]) == 6 + 7  # #139: + 7 red-team entries (not measured: no block)
     src.write_text("{}", encoding="utf-8")
     assert bridge.main(["--attack", str(src), "--out", str(tmp_path / "no.json")]) == 2
     assert not (tmp_path / "no.json").exists()
@@ -83,6 +83,9 @@ def test_entries_validate_inside_the_real_manifest_schema():
 RED = {"cross_dataset": {"evaluated": True, "reason": None, "n_targets": 1662, "reidentification_rate": 0.01,
                          "guess_rate": 0.02},
        "range_aware": {"evaluated": False, "reason": "error:RungError"},
+       "release_join": {"evaluated": True, "reason": None, "n_targets": 2900, "reidentification_rate": 0.0,
+                        "guess_rate": 0.001, "linked_table": "lab_results", "linked_n_targets": 5000,
+                        "linked_reidentification_rate": 0.0},
        "attribute_inference": {"evaluated": True, "reason": None, "columns": {
            "icd10_primary": {"evaluated": True, "reason": None, "n_targets": 3000, "inference_rate": 0.3,
                              "baseline_rate": 0.1}}}}
@@ -98,6 +101,8 @@ def test_red_team_block_becomes_closed_entries_and_validates_in_the_manifest_sch
     assert by["linkage-redteam-cross-dataset"]["rate"]["value"] == 0.01
     assert by["linkage-redteam-cross-dataset-guess"]["rate"]["denominator"] == {"unit": "rows", "n": 1662}
     assert by["linkage-redteam-range-aware"]["rate"]["status"] == "not_measured"
+    assert by["linkage-redteam-release-join"]["rate"]["denominator"]["n"] == 2900
+    assert by["linkage-redteam-release-join-lab_results"]["rate"]["denominator"] == {"unit": "rows", "n": 5000}
     assert "attack failed (RungError)" in by["linkage-redteam-range-aware-guess"]["rate"]["reason"]
     assert by["attribute-inference-redteam-icd10_primary"]["rate"]["value"] == 0.3
     assert by["attribute-inference-redteam-icd10_primary-baseline"]["rate"]["value"] == 0.1
@@ -112,8 +117,14 @@ def test_red_team_block_becomes_closed_entries_and_validates_in_the_manifest_sch
 def test_missing_red_team_block_is_not_measured_and_an_unknown_reason_refuses():
     by = {r["risk"]: r["rate"] for r in bridge.residual_risks(ATTACK)}
     red_ids = [k for k in by if "redteam" in k]
-    assert len(red_ids) == 5 and all(by[k]["status"] == "not_measured" for k in red_ids)
+    assert len(red_ids) == 7 and all(by[k]["status"] == "not_measured" for k in red_ids)
     bad = json.loads(json.dumps(RED))
     bad["range_aware"]["reason"] = "Some Free Text"  # only the attacker's own codes reach the manifest
     with pytest.raises(bridge.BridgeError):
         bridge.residual_risks(dict(ATTACK, red_team=bad))
+
+
+def test_every_red_team_reason_code_is_known_to_the_bridge():
+    """r2: a code the bridge cannot render refuses the whole attacker output (fail closed); keep them in step."""
+    from pets_attacker import redteam
+    assert set(redteam.REASONS) <= set(bridge._REASONS)
