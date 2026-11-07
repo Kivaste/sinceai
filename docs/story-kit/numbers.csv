@@ -29,8 +29,8 @@ beat,label,manifest_key_path,unit,value
 6,Our per-person k - persons counted,measured.privacy.after.person_k.persons,count,24204
 6,Our per-person k - minimum k,measured.privacy.after.person_k.min,count,5
 6,Our per-person k - share of PERSONS with k below 5,measured.privacy.after.person_k.below_k_share,share_of_persons,0.0000
-6,Scorecard - share of ROWS with k below 5 (row-weighted across all tables) (before),measured.privacy.before.k_below_5_share,share_of_rows,1.0000
-6,Scorecard - share of ROWS with k below 5 (row-weighted across all tables) (after; blind to age_band),measured.privacy.after.k_below_5_share,share_of_rows,0.0000
+6,Scorecard - share of ROWS with k below 5 (row-weighted over the tables scored for k) (before),measured.privacy.before.k_below_5_share,share_of_rows,1.0000
+6,Scorecard - share of ROWS with k below 5 (row-weighted over the tables scored for k) (after; blind to age_band),measured.privacy.after.k_below_5_share,share_of_rows,0.0000
 6,Scorecard - linkage re-identification (worst table) (before),measured.privacy.before.linkage_reid,score_0_1,0.5697
 6,Scorecard - linkage re-identification (worst table) (after),measured.privacy.after.linkage_reid,score_0_1,0.0000
 6,Baseline B0 - scenario utility,measured.baselines.B0.utility_mean,score_0_1,1.0000

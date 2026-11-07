@@ -220,13 +220,31 @@ def test_k_below_5_share_fails_closed_when_a_rate_has_no_table_row_count(args, m
     assert caught.value.reason == "risk_rows"
 
 
-def test_k_below_5_share_fails_closed_when_a_released_table_has_no_rate(args, monkeypatch):
+def test_a_released_table_with_no_k_rate_is_excluded_and_the_weighted_tables_are_listed(args, monkeypatch):
+    # b is released but not scored for k (no rate): excluded from the weighting, not an error
+    _patched(monkeypatch, _two_tables({"a": 0.5, "c": 0.1}, {"a": 10, "b": 500, "c": 30}))
+    block = measure(SCENARIO, **args)
+    share = _component(block, "k_below_5_share")
+    assert share["after"] == pytest.approx((5 + 3) / 40) and share["before"] == pytest.approx((5 + 3) / 40)
+    assert _component(block, "k_below_5_worst_table")["after"] == 0.5
+    assert "row-weighted over the tables scored for k: before=a,c after=a,c" in block["privacy"]["source"]
+
+
+def test_a_rate_for_a_withheld_table_fails_closed(args, monkeypatch):
     def bad(s):
-        _two_tables({"a": 0.5}, {"a": 10, "b": 90})(s)  # b is released but reports no k<5 rate
+        _two_tables({"a": 0.5, "b": 0.2}, {"a": 10, "b": 90})(s)
+        s["tables"][1]["status"] = "withheld"
+        s["tables"][1]["rows_protected"] = None
     _patched(monkeypatch, bad)
     with pytest.raises(MeasureRejected) as caught:
         measure(SCENARIO, **args)
     assert caught.value.reason == "risk_rows"
+
+
+def test_no_k_rate_anywhere_means_not_measured_and_no_table_note(args):
+    block = measure(SCENARIO, **args)  # the synthetic kit reports no k<5 rate
+    ids = {c["component"] for c in block["privacy"]["components"]}
+    assert "k_below_5_share" not in ids and "row-weighted" not in block["privacy"]["source"]
 
 
 def test_task_without_an_id_is_a_measure_rejection_not_a_keyerror(args, monkeypatch):

@@ -59,7 +59,7 @@ Utility, per purpose check, before and after (a score of 1 = same answer as the 
 Risk, before and after. Mind the denominators: they differ.
 
 - Our per-person k (authoritative, D22), over every released quasi-identifier: `{{measured.privacy.after.person_k.persons}}` persons counted, minimum k `{{measured.privacy.after.person_k.min}}`, share of PERSONS with k below 5: `{{measured.privacy.after.person_k.below_k_share}}`. There is no "before" for this: the original has no released form to take a k of.
-- Kit scorecard, share of ROWS with k below 5, row-weighted across all tables: `{{measured.privacy.before.k_below_5_share}}` before, `{{measured.privacy.after.k_below_5_share}}` after. Rows, not persons, and see the disclosure below.
+- Kit scorecard, share of ROWS with k below 5, row-weighted over the tables scored for k: `{{measured.privacy.before.k_below_5_share}}` before, `{{measured.privacy.after.k_below_5_share}}` after. Rows, not persons, and see the disclosure below.
 - Kit scorecard, linkage re-identification, worst table: `{{measured.privacy.before.linkage_reid}}` before, `{{measured.privacy.after.linkage_reid}}` after.
 
 Against the published baselines (scenario utility, and the published dataset-level worst re-identification, the maximum across tables; not the HEALTH-S1 scenario figure):
