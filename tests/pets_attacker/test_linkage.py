@@ -1,4 +1,4 @@
-﻿"""Linkage primitives on tiny hand-made synthetic tables.
+"""Linkage primitives on tiny hand-made synthetic tables.
 
 Seam: Matcher over a protected DataFrame plus explicit per-column rungs; no truth involved.
 """
@@ -10,7 +10,7 @@ import pytest
 
 from pets_attacker.linkage import QI, Matcher, RungError, edit_le1, parse_interval
 
-RUNGS = {"municipality": "keep", "arrival_ts": "ts.exact", "date_of_birth": "dob.year"}
+RUNGS = {"municipality": "keep", "arrival_ts": "ts.exact", "date_of_birth": "dob.year", "patient_name": "keep", "sex": "keep", "postcode": "keep"}
 
 
 def _prot():
@@ -146,7 +146,7 @@ def test_single_target_release_in_ladder_forms_links_with_certainty():
     prot = pd.DataFrame({"arrival_ts": ["2025-03-01T10:00"], "municipality": ["other"], "age_band": ["30-34"], "sex": ["F"]})
     qis = [QI("time", ("t",), ("arrival_ts",), window=(0, 0)), QI("exact", ("p",), ("municipality",)),
            QI("age", ("a",), ("age_band",), tol=0), QI("sex", ("s",), ("sex",))]
-    rungs = {"arrival_ts": "ts.month_hour", "municipality": "geo.topn", "age_band": "age.band5"}
+    rungs = {"arrival_ts": "ts.month_hour", "municipality": "geo.topn", "age_band": "age.band5", "sex": "keep"}
     rows, used = Matcher(prot, qis, rungs).candidates({"t": "2025-03-20T10:10:00", "p": "Kaarina", "a": "32", "s": "F"})
     assert list(rows) == [0] and used == 4
 

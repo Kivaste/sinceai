@@ -13,8 +13,8 @@ from __future__ import annotations
 
 import argparse
 import csv
-import unicodedata
 import random
+import unicodedata
 from collections import Counter
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -213,6 +213,85 @@ INTENT_TEXT = {
         ["your data request is registered and answered within the legal time", "the privacy team will send the data export to you"],
     ),
 }
+# Eval-split phrasing: disjoint from INTENT_TEXT so the eval split never repeats a train phrase
+# (CS-U1 must generalise, so utility loss from a release shows up as a lower score).
+EVAL_INTENT_TEXT = {
+    "billing_question": (
+        ["could someone check the charges on my bill", "the last bill looks wrong to me"],
+        ["there is a line on the bill I never ordered", "this bill is more than I expected to pay"],
+        ["each bill item is now clarified and the wrong charge is refunded", "the bill is reviewed and the difference is credited"],
+    ),
+    "payment_extension": (
+        ["I cannot pay the invoice by the due date", "is it possible to delay my payment a little"],
+        ["my salary comes late this month", "could the payment be divided into smaller instalments"],
+        ["your new due date is two weeks later", "an instalment plan for the payment is created"],
+    ),
+    "invoice_copy": (
+        ["I would like the invoice sent to me again", "could you resend my invoice please"],
+        ["the invoice never reached my inbox", "my bookkeeper asks for the invoice document"],
+        ["the invoice has been resent to your address", "I am forwarding the invoice copy right now"],
+    ),
+    "plan_change": (
+        ["I would like to switch to another mobile plan", "can I get a bigger data subscription"],
+        ["my plan runs out of data every month", "I would like a plan with more data included"],
+        ["the subscription switch is done for the next period", "your plan is updated and the new data allowance applies"],
+    ),
+    "roaming_activation": (
+        ["I will be travelling soon and want roaming switched on", "can you enable roaming for my holiday"],
+        ["I fly to Asia on Monday", "I need to use my phone abroad for two weeks"],
+        ["roaming has been activated for the whole trip", "your roaming is enabled and stays on until you are back"],
+    ),
+    "sim_replacement": (
+        ["I need a new SIM because mine stopped working", "my phone was stolen so I need another SIM card"],
+        ["the SIM card shows no network at all", "please lock the missing SIM and order a fresh one"],
+        ["a new SIM card is being posted to you", "the missing SIM card is locked and a fresh one is sent"],
+    ),
+    "network_outage": (
+        ["I have no coverage at home today", "the mobile network has stopped working here"],
+        ["I cannot make calls since early morning", "the whole street seems to be without signal"],
+        ["we see an outage in your region and technicians are repairing it", "the outage has been noted and a repair crew is on site"],
+    ),
+    "slow_internet": (
+        ["my home internet is crawling", "the broadband is much slower than promised"],
+        ["streaming buffers all the time at night", "the speed test result is far below my subscription"],
+        ["the line has been restarted and the speed should be better", "after the line test the broadband speed is normal again"],
+    ),
+    "router_setup": (
+        ["can you help me install my new router", "the router does not connect since I plugged it in"],
+        ["there is a red blinking light on the router", "I do not know the wifi password of the router"],
+        ["the router settings are done and the wifi name is chosen", "a router reset has brought the connection back"],
+    ),
+    "contract_cancellation": (
+        ["please end my contract", "I wish to cancel my subscription"],
+        ["I am switching to another operator", "I do not use the service any longer"],
+        ["your contract is cancelled and ends after the notice time", "the termination is recorded and the notice period starts today"],
+    ),
+    "address_change": (
+        ["I moved house and my address needs changing", "could you update the delivery address of my account"],
+        ["the new address is valid from next week", "please send the invoices to my new home"],
+        ["your account now shows the new address", "the new address is stored for all invoices"],
+    ),
+    "electricity_contract": (
+        ["I would like to change my electricity contract", "I have a question about the electricity price"],
+        ["a fixed electricity price would suit me", "my electricity contract expires shortly"],
+        ["the new electricity agreement begins next month", "I have booked a fixed price electricity deal for you"],
+    ),
+    "price_increase": (
+        ["my subscription became more expensive and I want to know why", "there was a letter about a higher price"],
+        ["the monthly fee went up without warning", "nobody informed me about the new price"],
+        ["the higher price is explained and a loyalty discount is added", "I have applied a discount to cover the price increase"],
+    ),
+    "device_warranty": (
+        ["my device broke while it is still under warranty", "the screen on my phone died after a few months"],
+        ["the phone is less than half a year old", "the battery drains fast and the phone swells"],
+        ["a warranty repair is booked and a courier picks up the device", "your warranty claim is accepted and a new device ships today"],
+    ),
+    "data_privacy_request": (
+        ["I would like to know which personal data you store about me", "please erase my personal data"],
+        ["I want a copy of the data you keep on me", "I take back my marketing consent"],
+        ["your data request is logged and will be answered in the legal time", "the privacy team will deliver your data export"],
+    ),
+}
 AGENT_OPEN = {
     "en": "Hello and thank you for contacting Testiverkko customer service, how can I help you today",
     "fi": "Hei ja kiitos yhteydenotostasi Testiverkko asiakaspalvelu, miten voin auttaa tänään",
@@ -229,7 +308,7 @@ CUSTOMER_THANKS = "Thank you very much for your help, that solves my problem"
 CHANNELS = ["chat", "phone", "email"]
 LANGUAGES = ["en", "fi", "sv"]
 SENTIMENTS = ["negative", "neutral", "positive"]
-PRODUCTS = ["mobile", "broadband", "electricity", "tv", "mobile;broadband", "mobile;electricity", "broadband;tv"]
+PRODUCTS = ["mobile", "broadband", "electricity", "tv", "mobile|broadband", "mobile|electricity", "broadband|tv"]
 PAYMENT_METHODS = ["invoice", "direct_debit", "card"]
 ACCESSIBILITY = ["", "", "", "", "", "", "hearing", "visual"]
 
@@ -341,7 +420,7 @@ def _health(dest: Path, rng: random.Random, used_hetu: set[str]) -> None:
 
     visits, labs, notes = [], [], []
     stats: Counter = Counter()
-    lab_n = note_n = 0
+    lab_n = 0
     for n, (arrival, p, code_i) in enumerate(raw, start=1):
         pat = patients[p]
         code, group, phrases = ICD_GROUPS[code_i]
@@ -357,6 +436,9 @@ def _health(dest: Path, rng: random.Random, used_hetu: set[str]) -> None:
         later = [t for t in last_seen[p] if t > arrival and (t - arrival) <= timedelta(days=30)]
         phys_id, phys_name = rng.choice(PHYSICIANS)
         secondary = rng.choice(ICD_GROUPS)[0] if rng.random() < 0.12 else ""
+        if secondary and rng.random() < 0.35:  # the kit lists secondary diagnoses pipe-separated
+            other = rng.choice([c for c, _, _ in ICD_GROUPS if c not in (secondary, code)])
+            secondary = f"{secondary}|{other}"
         visits.append([
             visit_id, pat["hetu"], pat["name"], pat["dob"].strftime("%Y-%m-%d"), pat["sex"], pat["phone"],
             pat["address"], pat["postcode"], pat["municipality"], arrival.strftime(TS), mode,
@@ -378,9 +460,8 @@ def _health(dest: Path, rng: random.Random, used_hetu: set[str]) -> None:
             labs.append([f"SYNL-{lab_n:06d}", visit_id, test_code, test_name, value, unit, ref, flag, sampled])
         lang = rng.choice(NOTE_LANGS)
         author_id, author_name = rng.choice(NURSES if n % 2 else PHYSICIANS)
-        note_n += 1
         notes.append([
-            f"SYNN-{note_n:06d}", visit_id, "nurse_triage" if n % 2 else "physician", author_id, author_name,
+            f"SYNN-{n:06d}", visit_id, "nurse_triage" if n % 2 else "physician", author_id, author_name,
             (arrival + timedelta(minutes=10)).strftime(TS), lang, NOTE_TEXT[lang].format(name=pat["name"]),
         ])
         if disposition != "cancelled_duplicate":
@@ -436,7 +517,7 @@ def _customer_service(dest: Path, rng: random.Random, used_hetu: set[str]) -> No
         channel = rng.choice(CHANNELS)
         language = rng.choices(LANGUAGES, [6, 3, 1])[0]
         started = datetime(2025, 1, 1) + timedelta(days=rng.randrange(365), hours=rng.randint(7, 20), minutes=rng.randrange(60))
-        openers, details, fixes = INTENT_TEXT[intent]
+        openers, details, fixes = (EVAL_INTENT_TEXT if split == "eval" else INTENT_TEXT)[intent]
         contact = f"my name is {cust['name']} and my customer number is {cust['number']}"
         extras = [
             f"you can reach me at {cust['phone']}", f"my email is {cust['email']}",
