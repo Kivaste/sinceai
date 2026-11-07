@@ -71,42 +71,64 @@ def split_by_skeleton(frame, fraction: float = HELD_OUT_FRACTION, seed: str = "p
         return _split_turns(frame, fraction, seed)
     if mode != "conversation":
         raise ValueError(mode)
-    """Hold out `fraction` of skeleton hashes. A conversation is held out only if all its turns'
-    span-bearing skeletons are held out (turns without gold spans carry no template and would make every
-    conversation ineligible because of shared boilerplate; they travel with their conversation); held-out hashes that also appear in development are returned to
-    development until stable, so the overlap is zero by construction and then asserted."""
+    return _split_conversations(frame, fraction, seed)
+
+
+def _components(sk: dict, conversation_of: dict) -> list:
+    """Connected components of the conversation <-> skeleton graph: conversations that share any
+    skeleton (any turn, gold-absent included) must land on the same side."""
+    parent: dict = {}
+
+    def find(x):
+        while parent.setdefault(x, x) != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    for t in sorted(sk):
+        a, b = find(("c", conversation_of[t])), find(("h", sk[t]))
+        if a != b:
+            parent[max(a, b)] = min(a, b)
+    comps: dict = {}
+    for t in sorted(sk):
+        r = find(("c", conversation_of[t]))
+        convs, hashes = comps.setdefault(r, (set(), set()))
+        convs.add(conversation_of[t])
+        hashes.add(sk[t])
+    return [(sorted(c), h) for c, h in comps.values()]
+
+
+def _split_conversations(frame, fraction: float, seed: str) -> Split:
+    """Spec rule: a conversation is held out only if all its turns' skeletons are held out, and no held-out
+    skeleton occurs in development. Hash-by-hash sampling holds out nothing when templates are shared
+    widely, so whole skeleton components are held out instead: components in a seeded order, each taken
+    while the held-out share of skeleton hashes stays <= `fraction`. Empty when no component fits."""
     sk = {tid: skeleton_hash(skeleton(frame.texts[tid], frame.gold.get(tid, []))) for tid in sorted(frame.texts)}
-    by_conv: dict = {}
-    for tid in sorted(sk):
-        by_conv.setdefault(frame.conversation_of[tid], []).append(tid)
-    has_span = {t for t in sk if frame.gold.get(t)}
-    key = {c: [t for t in ts if t in has_span] for c, ts in by_conv.items()}
-    held = {h for h in {sk[t] for t in has_span} if _is_held_hash(h, fraction, seed)}
-    while True:
-        dev_hashes = {sk[t] for c, ts in key.items() if not (ts and all(sk[t] in held for t in ts)) for t in ts}
-        shrunk = held - dev_hashes
-        if shrunk == held:
-            break
-        held = shrunk
-    held_convs = sorted(c for c, ts in key.items() if ts and all(sk[t] in held for t in ts))
-    held_set = set(held_convs)
-    dev_convs = sorted(c for c in by_conv if c not in held_set)
-    held_turns = tuple(t for c in held_convs for t in by_conv[c])
-    dev_turns = tuple(t for c in dev_convs for t in by_conv[c])
-    held_sk = frozenset(sk[t] for t in held_turns if t in has_span)
-    dev_sk = frozenset(sk[t] for t in dev_turns if t in has_span)
+    n_hash = len(set(sk.values()))
+    comps = sorted(_components(sk, frame.conversation_of),
+                   key=lambda ch: (hashlib.sha256((seed + ch[0][0]).encode("utf-8")).hexdigest(), ch[0][0]))
+    held_convs: set = set()
+    held_hashes: set = set()
+    for convs, hashes in comps:
+        if (len(held_hashes) + len(hashes)) <= fraction * n_hash:
+            held_convs.update(convs)
+            held_hashes.update(hashes)
+    held_turns = tuple(t for t in sorted(sk) if frame.conversation_of[t] in held_convs)
+    dev_turns = tuple(t for t in sorted(sk) if frame.conversation_of[t] not in held_convs)
+    held_sk = frozenset(sk[t] for t in held_turns)
+    dev_sk = frozenset(sk[t] for t in dev_turns)
     assert_zero_overlap(held_sk, dev_sk)
-    dev_all = {sk[t] for t in dev_turns}
-    unseen = sum(1 for t in held_turns if sk[t] not in dev_all)
+    if set(frame.conversation_of[t] for t in held_turns) & set(frame.conversation_of[t] for t in dev_turns):
+        raise ValueError("a conversation straddles held-out and development")
     return Split(
-        held_out_conversations=tuple(held_convs),
-        dev_conversations=tuple(dev_convs),
+        held_out_conversations=tuple(sorted(held_convs)),
+        dev_conversations=tuple(sorted({frame.conversation_of[t] for t in dev_turns})),
         held_out_turns=held_turns,
         dev_turns=dev_turns,
         held_out_skeletons=held_sk,
         dev_skeletons=dev_sk,
-        unseen_skeleton_share=(unseen / len(held_turns)) if held_turns else 0.0,
-        unseen_span_skeleton_share=1.0 if held_sk else 0.0,
+        unseen_skeleton_share=1.0 if held_turns else 0.0,  # by construction: no held-out skeleton is in dev
+        unseen_span_skeleton_share=1.0 if held_turns else 0.0,
         held_out_turn_share=len(held_turns) / len(sk) if sk else 0.0,
     )
 
