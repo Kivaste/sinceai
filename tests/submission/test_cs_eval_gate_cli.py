@@ -15,6 +15,8 @@ Failure rows (trigger -> result):
   rescan.raw-timestamps, producer.unkeyed-hashes, release.token-hex64, producer.original-values) (#148)
                                                                             -> that turn masked whole, typed
   an original value as a turn id (producer.original-values) (#148)          -> exit 1 cs_eval_id_flagged
+  a USERNAME span (raw JSON line looks like a username to the cell rescan)  -> built, not refused: the cell
+                                                                               checks read decoded values
   an identifier in an exported turn id (CSV turn_id / JSON record_id)       -> exit 1 cs_eval_id_flagged
   the same, hidden by JSON escaping (tab -> \\t, U+001F -> \\u001f) (#148)    -> exit 1 cs_eval_id_flagged
   a text check missing from the registry                                    -> refused cs_eval_checks_unavailable
@@ -118,6 +120,16 @@ def test_a_cell_check_hit_in_a_turn_is_masked_whole(world, tmp_path, text, label
     assert spans["t6"] == [{"start": 0, "end": len(text), "label": label}]
     assert idx["customerServiceEval"]["maskedTurns"] == 1
     assert texts["t2"] == "Thanks for contacting us"
+
+
+def test_the_cell_checks_read_decoded_span_values_not_json_syntax(world, tmp_path):
+    # a redacted USERNAME span: its raw JSON line ("label":"USERNAME","start":...) reads as a username to the
+    # cell-level rescan; the decoded values (turn id, labels) are what the export carries, and they are clean
+    kit, rel = _kit_with_turn(world, tmp_path, "t6", "my username is zorb_77 thanks")
+    _p, texts, spans, idx = _bundle(kit, rel, tmp_path / "pets_submission")
+    assert texts["t6"] == "my username is [USERNAME_1] thanks"
+    assert [s["label"] for s in spans["t6"]] == ["USERNAME"]
+    assert idx["customerServiceEval"]["maskedTurns"] == 0
 
 
 def test_an_original_value_as_a_turn_id_refuses(world, tmp_path):

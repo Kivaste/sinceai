@@ -303,14 +303,19 @@ def _scan(redacted: bytes, spans: bytes, order: dict, checks: tuple, context: di
         id_rows = [[t] for t in ids] + [[d[0]] for d in decoded]
         _write_csv(stage / _IDS_FILE, ["id"], id_rows)
         # The raw spans lines and every decoded string value in them.
-        span_rows = [[x] for x in lines] + [[s] for d in decoded for s in d[1]]
-        _write_csv(stage / _SPANS_FILE, ["line"], span_rows)
+        values = [[s] for d in decoded for s in d[1]]
+        _write_csv(stage / _SPANS_FILE, ["line"], [[x] for x in lines] + values)
         found = _run(stage, _CONTRACT, {"phase": "gate"}, text_checks)
-        # The cell-level production checks (#148) on the redacted file's exact bytes and the same ID/spans views;
-        # a turn-text hit is reported against the turns file so one masking path handles both.
-        (cells / _EXPORT_FILE).write_bytes(redacted)
+        # The cell-level production checks (#148) on the redacted file's exact bytes and the same ID view. They are
+        # per-value validators, so they read the spans file's decoded string values, never its JSON syntax (a raw
+        # '"label":"USERNAME","start":' reads as a username). A turn-text hit is reported against the turns file
+        # so one masking path handles both stages. Placeholders are masked the way the gate's text normaliser masks
+        # them (they are the fixed placeholder table, not content: "username is [USERNAME_1]" is no username).
+        from pets_release.checks.text._normalise import MASK as GATE_MASK
+        from pets_release.checks.text._normalise import PLACEHOLDER_RE
+        _write_csv(cells / _EXPORT_FILE, EXPORT_HEADER, [[t, PLACEHOLDER_RE.sub(GATE_MASK, x)] for t, x in rows])
         _write_csv(cells / _IDS_FILE, ["id"], id_rows)
-        _write_csv(cells / _SPANS_FILE, ["line"], span_rows)
+        _write_csv(cells / _SPANS_FILE, ["line"], values)
         for v in _run(cells, _CELL_CONTRACT, {"phase": "gate", **context}, cell_checks):
             if v.file == _EXPORT_FILE:
                 v = replace(v, file=_TURNS_FILE if v.column == "text" else _IDS_FILE)
