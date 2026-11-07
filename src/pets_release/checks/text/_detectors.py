@@ -418,6 +418,7 @@ def _cue_end(kind, lo, hi, text, pos):
     other function words and non-value words disarm; separator runs are skipped; a masked placeholder
     is the redacted value (skipped, disarms) unless a value is glued to it."""
     armed = False
+    words = 0
     for _ in range(_cues.WINDOW):
         m = _CTOK.match(text, pos)
         if not m:
@@ -443,6 +444,8 @@ def _cue_end(kind, lo, hi, text, pos):
                 return None
             armed = armed or arms_after
             continue
+        first_word = words == 0
+        words += 1
         if low in _cues.COPULAS:
             armed = True
             continue
@@ -456,7 +459,12 @@ def _cue_end(kind, lo, hi, text, pos):
                 return None
             continue
         value, end, single = _collapse(text, m)
-        if _value_ok(kind, lo, hi, value, single, armed):
+        nxt = _CTOK.match(text, end)
+        nxt = nxt.group(1) if nxt else ""
+        # a plain word directly before a placeholder is not the value: the placeholder is
+        before_ph = nxt == _MASKED or _cues.is_placeholder(nxt.rstrip(_TRAIL))
+        plain = (armed or (kind == "username" and first_word)) and not before_ph
+        if _value_ok(kind, lo, hi, value, single, armed, plain):
             return end
         pos = max(pos, end)  # a rejected collapsed value ("4321 0000 0000 99") is not re-read in parts
         if ends:
@@ -465,7 +473,19 @@ def _cue_end(kind, lo, hi, text, pos):
     return None
 
 
-def _value_ok(kind, lo, hi, value, single, copula=True):
+_USERNAME_VALUE = re.compile(r"[A-Za-z0-9._@-]+")
+
+
+def _value_ok(kind, lo, hi, value, single, copula=True, plain=None):
+    """``copula``: armed by a copula; ``plain``: a plain word may be the value (default: ``copula``)."""
+    plain = copula if plain is None else plain
+    if kind == "username":
+        v = value.strip("[]()<>\"'").rstrip(_TAIL_PUNCT + ":")
+        if not (lo <= len(v) <= hi and _USERNAME_VALUE.fullmatch(v)):
+            return False
+        if _secret_like(v.strip("._-")):  # digit, inner symbol or mixed case: a handle
+            return True
+        return plain and v.lower().strip("._-") not in _cues.PROSE_WORDS | _USER_STOP
     if kind != "secret":
         value = value.rstrip(_TAIL_PUNCT)
     if kind == "digits":
@@ -479,12 +499,12 @@ def _value_ok(kind, lo, hi, value, single, copula=True):
     if not lo <= len(value) <= hi:
         return False
     if _cues.DATE_OR_TIME.fullmatch(value.rstrip(_TAIL_PUNCT)):
-        return copula  # a date counts only right after a copula, as in the cell rescan
+        return plain  # a date counts only right after a copula, as in the cell rescan
     if _secret_like(value) or single:
         return True
     # cue + copula/colon + a word that is not everyday prose ("salasana on kissakala")
     word = value.rstrip(_TAIL_PUNCT).lower()
-    return copula and any(c.isalpha() for c in word) and word not in _cues.PROSE_WORDS
+    return plain and any(c.isalpha() for c in word) and word not in _cues.PROSE_WORDS
 
 
 def secrets(text):
@@ -534,7 +554,7 @@ def urls_with_tokens(text):
 
 _USER_CUE = re.compile(
     r"(?i)\b(?:username|user\s*name|user\s*id|login|käyttäjätunnu\w*|käyttäjänim\w*|"
-    r"användarnamn\w*|användar-id)\b(?:[ \t]*(?:[:=]|is|was|on|oli|är|var))*[ \t]*[\[(\"']?([A-Za-z0-9._-]{3,})"
+    r"användarnamn\w*|användar-id)\b"
 )
 _HANDLE_RE = re.compile(r"(?<![\w.@])@[A-Za-z][A-Za-z0-9_.]{2,29}")
 _USER_STOP = {"the", "same", "your", "my", "not", "and", "that", "this", "is", "was", "please",
@@ -544,8 +564,11 @@ _USER_STOP = {"the", "same", "your", "my", "not", "and", "that", "this", "is", "
 def usernames(text):
     hits = [(m.start(), m.end()) for m in _HANDLE_RE.finditer(text)]
     for m in _USER_CUE.finditer(text):
-        if m.group(1).lower().strip("._-") not in _USER_STOP:
-            hits.append(m.span())
+        # the shared cue rule (``_cue_end``): a handle-shaped token anywhere in the clause, or a plain
+        # word right after the cue or after a copula, unless it is prose
+        end = _cue_end("username", 3, 64, text, m.end())
+        if end is not None:
+            hits.append((m.start(), end))
     return hits
 
 

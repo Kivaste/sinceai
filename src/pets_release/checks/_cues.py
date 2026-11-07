@@ -53,6 +53,8 @@ unohtunut kadonnut estetty jotain mikä mitä tämä tuo hyvä huono ja tai mutt
 kaikki kaikissa kaikkiin palveluille palveluun tunnus tunnukset lukittu lukittuna toimi toimii sivu
 sivulla ongelma fel rätt gammal gamla ny nya samma annan fär mycket bara glömt ändrat borta läst
 spärrat något vad detta det bra dålig och eller men
+down up off offline online slow fast available unavailable required needed missing ready same
+hidas nopea rikki poikki pois päällä katki tarvitaan puuttuu valmis nere uppe av långsam saknas klar
 """.split())
 # Tokens scanned after a cue, up to the sentence end. Generous on purpose (the redactor scans 6):
 # skipped words and separator runs must not push a value out of reach.

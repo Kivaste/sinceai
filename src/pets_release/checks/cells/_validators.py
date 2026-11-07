@@ -189,6 +189,8 @@ def device_ids(s):
 # * separator/punctuation runs ("-", "--", "/", "#", "·") are skipped;
 # * an exact redactor placeholder is the (already redacted) value: skipped, and it disarms, unless a
 #   value is glued to it ("[SECRET_1]hunterxyz");
+# * a plain word directly before a placeholder is not the value (the placeholder is); after a bare
+#   wifi/wlan cue a plain word counts only at the clause end;
 # * a cue inside a placeholder ("[USERNAME_1]") is no cue; a cue glued to a longer word ("pinta") is no cue.
 # Brackets are value characters ("[Hunter2!]"), not a placeholder.
 _CUE_TOKEN = re.compile(_cues.PLACEHOLDER_SRC + r"|(?:(?!" + _cues.PLACEHOLDER_SRC + r")\S)+")
@@ -208,22 +210,33 @@ def _credential_shaped(v: str) -> bool:
     return has_d or (inner_sym and has_l) or mixed or (len(core) >= 20 and core.isalnum())
 
 
+# a bare network cue (no key/password suffix) is about the network; its plain-word "value" mid-clause is
+# prose ("wifi is terrible today"); credential-shaped tokens and a clause-final word still count
+_BARE_NETWORK_CUE = re.compile(r"(?i)wi-?fi|wlan")
+
+
 def _cued_values(cue, s: str, *, alpha_without_copula: bool) -> int:
     """Cue matches in ``s`` followed by a value; a cue inside a placeholder ("[USERNAME_1]") is no cue."""
     ph = [m.span() for m in _cues.PLACEHOLDER_RE.finditer(s)]
     return sum(1 for m in cue.finditer(s)
                if not any(a <= m.start() < b for a, b in ph)
-               and _cued_value_counts(s, m.end(), alpha_without_copula=alpha_without_copula))
+               and _cued_value_counts(s, m.end(), alpha_without_copula=alpha_without_copula,
+                                      plain_mid_clause_is_prose=bool(_BARE_NETWORK_CUE.fullmatch(m.group(0)))))
 
 
-def _cued_value_counts(s: str, pos: int, *, alpha_without_copula: bool) -> bool:
+def _cued_value_counts(s: str, pos: int, *, alpha_without_copula: bool,
+                       plain_mid_clause_is_prose: bool = False) -> bool:
     """True when a value follows the cue ending at ``pos``. ``alpha_without_copula``: a plain word right
     after the cue counts too (usernames: "username mattikoski")."""
     armed = False  # a copula, followed by nothing but hedges, separators or a glued placeholder
     words = 0
-    for i, m in enumerate(_CUE_TOKEN.finditer(s, pos)):
-        if i >= _cues.WINDOW:
+    toks = []
+    for m in _CUE_TOKEN.finditer(s, pos):
+        toks.append(m)
+        if len(toks) > _cues.WINDOW:
             break
+    for i, m in enumerate(toks[:_cues.WINDOW]):
+        nxt = toks[i + 1].group(0) if i + 1 < len(toks) else None
         tok = m.group(0)
         if i == 0 and m.start() == pos and tok[0].isalpha():
             return False  # the cue is the start of another word ("pinta", "passwordless")
@@ -261,7 +274,13 @@ def _cued_value_counts(s: str, pos: int, *, alpha_without_copula: bool) -> bool:
             continue
         if _credential_shaped(val):
             return True
-        if (armed or (alpha_without_copula and first_word)) and low not in _cues.PROSE_WORDS and (
+        plain_ok = (
+            # (b) a plain word directly before a placeholder is not the value: the placeholder is
+            not (nxt is not None and _cues.is_placeholder(nxt))
+            # (c) after a bare wifi/wlan cue a plain word counts only at the clause end ("wifi: x")
+            and not (plain_mid_clause_is_prose and not ends and nxt is not None
+                     and not _cues.is_punct(nxt)))
+        if plain_ok and (armed or (alpha_without_copula and first_word)) and low not in _cues.PROSE_WORDS and (
                 (len(word) >= 3 and any(c.isalpha() for c in word))
                 or (armed and _DATE_OR_TIME.fullmatch(word))):
             return True
