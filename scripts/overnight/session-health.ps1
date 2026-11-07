@@ -10,7 +10,7 @@ function Get-WaitPattern([string]$Command) {
     $argsText = $call.Extent.Text
     if ($name -ieq 'Start-Sleep') {
       if ($argsText -match '(?i)\s-(?:Milliseconds|m)\s+(\d+(?:\.\d+)?)' -and [double]$matches[1] -gt 120000) { return 'long-sleep' }
-      if ($argsText -match '(?i)\s(?:-(?:Seconds|s)\s+)?(\d+(?:\.\d+)?)' -and [double]$matches[1] -gt 120) { return 'long-sleep' }
+      if ($argsText -match '(?i)\bStart-Sleep\s+(?:-(?:Seconds|s)\s+)?(\d+(?:\.\d+)?)' -and [double]$matches[1] -gt 120) { return 'long-sleep' }
     }
     if ($name -ieq 'waitany.ps1' -or $name -ieq 'waitany') {
       if ($argsText -notmatch '(?i)-Minutes\s+(\d+(?:\.\d+)?)' -or [double]$matches[1] -gt 2) { return 'waitany' }

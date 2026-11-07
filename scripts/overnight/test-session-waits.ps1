@@ -217,6 +217,9 @@ exit `$LASTEXITCODE
     Tool 'Start-Sleep -Seconds 120' 30
     $bounded = Check
     Assert ($bounded.code -eq 0) 'a bounded two-minute wait must not be flagged'
+    Tool 'Start-Sleep -Milliseconds 1000' 30
+    $milliseconds = Check
+    Assert ($milliseconds.code -eq 0) 'millisecond values must not be interpreted as seconds'
     Write-Output 'PASS workers: lost worker flagged; live pytest descendants and bounded sleep healthy'
     exit 0
   }
