@@ -101,8 +101,8 @@ def _order(errs: list[str], path: str, items: list, key) -> None:
 
 # #132: anchored regexes proven (by inspection, under the ``fullmatch`` the contract.forms check applies) to
 # accept only strings the validator ID already accepts. Regex inclusion is not checked in general: any regex
-# not listed here must equal the rung's form exactly. ``text`` accepts every string, so every anchored regex
-# narrows it.
+# not listed here must equal the rung's form exactly. ``text`` has no entry on purpose (#132 r2): the text
+# checks scan only ``text``-form columns, so a regex substitute would hide the column from them.
 _NARROWING_REGEXES: dict[str, frozenset[str]] = {
     "hex64": frozenset({"^[0-9a-f]{64}$"}),  # the hex64 validator's own pattern
     "decimal": frozenset({"^[0-9]+$"}),  # [0-9]+ is within -?\d+(?:\.\d+)?
@@ -110,9 +110,8 @@ _NARROWING_REGEXES: dict[str, frozenset[str]] = {
 
 
 def _narrows(form: str, validator: str) -> bool:
-    """True only if ``form`` provably accepts no string the validator ID ``validator`` rejects."""
-    if validator == "text":
-        return form.startswith("^") and form.endswith("$")
+    """True only if ``form`` provably accepts no string the validator ID ``validator`` rejects and the swap
+    leaves every check's scope unchanged."""
     return form in _NARROWING_REGEXES.get(validator, frozenset())
 
 
