@@ -1,0 +1,13 @@
+{
+  "failing": {
+    "contract.columns": [
+      {
+        "column": "unlisted-column#5",
+        "count": 1,
+        "file": "visits.csv",
+        "locations": []
+      }
+    ]
+  },
+  "refused": true
+}
