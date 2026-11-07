@@ -44,7 +44,7 @@ def _expected_sections(root: Path, dataset: str, scen: dict, catalog, tables: di
                        release: dict) -> dict:
     """Result sections the kit should produce for each table, from the kit's own metadata:
     free-text leakage for catalogued free-text columns with gold spans; the linkage attacks its
-    spec/adversary selection runs when identity truth exists; trajectory unicity per spec; and
+    spec/adversary selection runs when the kit ships identity data for the table; trajectory unicity per spec; and
     the release's columns, used to prove an input was really removed."""
     all_specs = kit_io.load_attack_specs(root)
     spec_file = root / "metadata" / "attack_specs.json"
@@ -55,7 +55,8 @@ def _expected_sections(root: Path, dataset: str, scen: dict, catalog, tables: di
         text = catalog[(catalog.table == name) & (catalog.privacy_role == "free_text")].column
         specs = [s for s in all_specs if s["dataset"] == dataset and s["table"] == name]
         linkage = None
-        if (root / "truth" / f"{dataset}__{name}.csv").exists():
+        identity = kit_io.load_identity_truth(root, dataset, name)  # pets-eval locates it, not us
+        if identity is not None and identity.iloc[:, 1].astype(str).str.len().gt(0).any():  # as the kit does
             adversaries = kit_scorecard._adversaries_for(root, dataset, scen)
             if not specs and any(s["dataset"] == dataset for s in all_specs):
                 attacks = []
@@ -138,6 +139,7 @@ def run_scorecard(original_dir, protected_dir, *, scenario: str, root, rowmaps: 
                            tables=orig_files, expected_sections=_expected_sections(
                                root, original_dir.name, scen, catalog, orig_files,
                                {n: pd.read_csv(p, dtype=str, nrows=0).columns for n, p in prot_files.items()}))
+
 
 
 

@@ -260,7 +260,7 @@ def validate_report(report: dict, *, scenario: str, required_tasks: Iterable[str
 
     `expected_sections` (table -> {"free_text": [columns that must be evaluated], "linkage": bool})
     names the result sections this scenario requires beyond the baseline ones; the caller derives it
-    from the kit (catalog, gold spans, truth). Unavailable evaluations pass only with a BENIGN_REASONS
+    from the kit (catalog, gold spans, identity data). Unavailable evaluations pass only with a BENIGN_REASONS
     reason, and are exported as `not_applicable` with their code."""
     if not isinstance(report, dict):
         raise ScorecardRejected("structure")
@@ -303,6 +303,7 @@ def validate_report(report: dict, *, scenario: str, required_tasks: Iterable[str
         "tables": exported_tables,
         "not_applicable": found,
     }
+
 
 
 

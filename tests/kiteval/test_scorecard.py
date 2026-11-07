@@ -169,7 +169,7 @@ def test_row_map_inside_the_release_folder_is_rejected(kit, release):
 
 
 def test_required_result_sections_come_from_the_kit_for_this_scenario(kit, release):
-    # the synthetic kit has no truth/spans, so no linkage or free-text section is required of the report
+    # the synthetic kit has no identity data or spans, so no linkage or free-text section is required of the report
     summary = _run(kit, release)
     # no catalogued quasi-identifier in the synthetic kit: recorded, with its code, not hidden
     assert summary["not_applicable"] == [
@@ -210,3 +210,25 @@ def test_underscore_and_other_files_the_evaluator_ignores_are_still_refused(kit,
     (release[0] / name).write_text("a,b\n1,2\n", encoding="utf-8")
     with pytest.raises((ScorecardRejected, RowMapRejected)):
         _run(kit, release)
+
+
+def test_linkage_is_expected_exactly_when_the_kit_has_identity_data_for_the_table(kit):
+    import pandas as pd
+
+    from pets_release.kiteval.scorecard import _expected_sections
+
+    scen = {"id": "TEST-S1", "dataset": "customer_service"}
+    catalog = pd.read_csv(kit / "metadata" / "field_catalog.csv", dtype=str)
+    tables = {"conversations": kit / "data" / "customer_service" / "conversations.csv"}
+
+    def linkage():
+        return _expected_sections(kit, "customer_service", scen, catalog, tables, {})["conversations"]["linkage"]
+
+    assert linkage() is None
+    (kit / "truth").mkdir()
+    identity = kit / "truth" / "customer_service__conversations.csv"
+    identity.write_text("record_id,person_id\nc1,\nc2,\n", encoding="utf-8")
+    assert linkage() is None  # the kit itself skips linkage when no record maps to a person
+    identity.write_text("record_id,person_id\nc1,p1\nc2,\n", encoding="utf-8")
+    assert linkage() == {"attacks": []}
+
