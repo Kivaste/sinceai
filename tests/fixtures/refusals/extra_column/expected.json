@@ -1,0 +1,13 @@
+{
+  "failing": {
+    "contractColumns": [
+      {
+        "column": "postcode",
+        "count": 1,
+        "file": "visits.csv",
+        "locations": []
+      }
+    ]
+  },
+  "refused": true
+}

@@ -1,0 +1,13 @@
+{
+  "failing": {
+    "emptyTables": [
+      {
+        "column": null,
+        "count": 1,
+        "file": "notes.csv",
+        "locations": []
+      }
+    ]
+  },
+  "refused": true
+}

@@ -1,0 +1,16 @@
+{
+  "failing": {
+    "tokenHex64": [
+      {
+        "column": "note_text",
+        "count": 1,
+        "file": "notes.csv",
+        "locations": [
+          0
+        ]
+      }
+    ]
+  },
+  "planted": "9393f686aecfd69f08d63f8b81be86cd43f0019c1f1e608cebdf9fc62cf03c42",
+  "refused": true
+}

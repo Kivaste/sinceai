@@ -1,0 +1,16 @@
+{
+  "failing": {
+    "paymentCards": [
+      {
+        "column": "note_text",
+        "count": 1,
+        "file": "notes.csv",
+        "locations": [
+          1
+        ]
+      }
+    ]
+  },
+  "planted": "4111 1111 1111 1111",
+  "refused": true
+}
