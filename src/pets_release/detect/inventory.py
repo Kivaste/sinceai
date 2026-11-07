@@ -344,7 +344,8 @@ def detect_table(df: pd.DataFrame, dataset: str, table: str, links: dict[str, st
     for col in df.columns:
         profile = _Col(str(col), df[col])
         role, sub, ev = _classify(profile, links.get(str(col)))
-        assert role in ROLES
+        if role not in ROLES:
+            raise ValueError("classifier produced an unknown role")
         rows.append({"dataset": dataset, "table": table, "column": str(col), "role": role, "subtype": sub,
                      "evidence": ev})
     return rows
