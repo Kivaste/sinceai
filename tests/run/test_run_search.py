@@ -117,7 +117,7 @@ def test_released_plan_is_the_logged_search_plan(searched):
     for key, rung in state.items():
         assert fj[key]["rung"] == rung
     released = {f["outputColumn"] for f in fj.values() if f["table"] == "ed_visits" and f["decision"] == "released"}
-    cols = set(pd.read_csv(out / "ed_visits.csv", dtype=str, nrows=0).columns)
+    cols = set(pd.read_csv(out / "ed_visits.csv", dtype=str, keep_default_na=False, na_filter=False, nrows=0).columns)
     assert cols == released
 
 
