@@ -58,6 +58,52 @@ The supported release demo is HEALTH-S1 (ED visits to a university research grou
 with live detection on the `unseen` export. CS-S1 releases are not supported in
 this version (D46); they are future work, not a runnable release demo.
 
+### Local web app
+
+Set `PETS_KIT` and `PETS_HMAC_KEY` in the server's environment as above. The key is never
+entered in, returned to, or logged by the browser. Choose a **new** output directory for
+each server launch; existing directories are refused rather than reused.
+
+<!-- docs-test: skip reason=starts-a-long-running-server -->
+```powershell
+.\.venv\Scripts\python.exe -m pets_release.ui --kit "$env:PETS_KIT" --out ..\sinceai-out\ui-demo --created 2026-11-07T08:00:00Z
+```
+
+Open the token-bearing URL printed at startup. The server binds only `127.0.0.1`
+(`--port 8765` by default; `--port 0` chooses a free port). Every request needs that
+launch's random token. Stop with Ctrl+C. Treat the URL as a capability: share it only
+with intended demo viewers. The hosted demo uses the same loopback listener behind
+a forwarder; the app makes no assumptions about the host.
+
+Choose HEALTH-S1 to run the unchanged production CLI, see gate counts, both verification
+tiers, purpose scores, sacrifices and residual risks, then open the manifest-only dashboard.
+Five separate demonstration views cover data types and risks, PETs and why, protected
+output, measured privacy and utility, and scenario and limitations. The targets table
+keeps strict utility thresholds separate from allowed sacrifice floors. Missing scores
+are **not measured**, never assumed met.
+
+The protected-rows view shows the first 10 released rows per table (`--preview-rows N`,
+1–25). Every display re-runs limited verification on the release and an exact-byte
+snapshot, and checks manifest-listed file digests. No raw input, row maps, `truth/`,
+unlisted files or paths outside the release are served. Before/after comparisons are
+field-level only. Agents must not read or screenshot real-kit row pages. The production
+identifier scanner still guards responses; only verified row responses permit the
+64-hex keyed-pseudonym shape, whose column placement the production release checks enforce.
+
+Set `PETS_UI_DEMO_BANNER` or pass `--demo-banner "Demo — synthetic kit data"` for an
+optional banner. Only one run can be active; another start returns HTTP 409 with
+"Busy, run in progress". Refusals show available check names and counts, or explicitly
+say that no refusal report is available.
+
+The UI has no external assets, raw previews, table downloads, or row-map routes. The offline
+guard blocks new sockets in the server and its CLI children; only the pre-bound loopback
+listener accepts incoming connections. Release bytes match the CLI for the same inputs,
+key, creation time, plan and tool revision.
+
+CS-S1's policy is selectable, but this integration revision's production `run` pipeline
+supports only HEALTH-S1. A CS-S1 attempt is shown as **FAILED**, never as a release.
+The UI cannot bypass the production pipeline's refusal or an unavailable check.
+
 ### 1. Live detection on `unseen`
 
 <!-- docs-test: run -->
@@ -186,10 +232,17 @@ A static HTML file rendered from the manifest alone. No network assets and no ro
 
 ### 5. Submission bundle
 
-<!-- docs-test: skip reason=submission-needs-ticket-30 -->
+The bundle goes to `..\sinceai-out\pets_submission`, outside every repo. A complete bundle is the default. Under D46 it holds a verified HEALTH-S1 release (tables, validated row maps, manifest), the unseen labels and the gated CS eval redactions and spans (D37). CS-S1 is out of scope (deferred, D46). `submission_index.json` records that in `outOfScope`, and the packager neither needs nor accepts a CS-S1 release.
+
+Until #128 lands, the default search plan can drop a table's record key, and the packager then refuses (`REFUSED: rowmap_unverifiable`). Build the release you feed to the packager with `--plan hand`:
+
+<!-- docs-test: run -->
 ```powershell
-.\.venv\Scripts\pets-release.exe submission --out ..\pets_submission --kit "$env:PETS_KIT"
+.\.venv\Scripts\pets-release.exe run --scenario HEALTH-S1 --plan hand --out ..\sinceai-out\health-s1-hand --created 2026-11-07T08:00:00Z --kit "$env:PETS_KIT"
+.\.venv\Scripts\pets-release.exe submission --out ..\sinceai-out\pets_submission --release ..\sinceai-out\health-s1-hand --kit "$env:PETS_KIT"
 ```
+
+It prints `SUBMISSION BUILT (COMPLETE)`. Without a HEALTH-S1 release (`REFUSED: incomplete`), or without the kit's unseen or CS eval exports, it refuses and writes nothing. `--partial` must be passed explicitly to build without a missing target dataset; such a build prints `SUBMISSION BUILT (PARTIAL)` and lists the missing datasets in `submission_index.json`. With HEALTH-S1 as the only target, `--partial` with no release still refuses (`REFUSED: no_release`).
 
 ## Where row maps go
 
