@@ -10,6 +10,7 @@ from pets_release.checks import RegistryError, all_checks, run_checks
 from pets_release.checks.records import STATUSES
 from pets_release.kit import Kit, KitError
 from pets_release.manifest import (
+    ASSERTION_EVIDENCE,
     MANIFEST_FILENAME,
     compute_signature,
     loads_strict,
@@ -128,6 +129,25 @@ def _input_problems(manifest: dict, kit: Kit) -> tuple[list[str], dict | None, d
     return out, scenario, dataset
 
 
+def _assertion_problems(manifest: dict, records, scopes: set) -> list[str]:
+    """Every in-scope export assertion re-proved from its fresh record by the writer's own rule
+    (``assertion_reason``): a ``pass`` with low-severity hits is not absence. Denominators are not compared with
+    the attested evidence: some legitimately differ between gate and verify (e.g. ``release.row-maps`` counts the
+    manifest file, which does not exist yet at gate time)."""
+    from pets_release.writer.assemble import assertion_reason
+
+    fresh = {r.check: r for r in records}
+    out = []
+    for name in sorted(manifest["exportAssertions"]):
+        want = ASSERTION_EVIDENCE[name]
+        if want["scope"] not in scopes:
+            continue
+        reason = assertion_reason(name, fresh.get(want["check"]))
+        if reason is not None:
+            out.append(f"{reason} (re-run of {want['check']})")
+    return out
+
+
 def verify_release(release_dir, *, full: bool = False, kit=None, master_key=None, checks=None,
                    context: dict | None = None) -> VerifyReport:
     """Verify ``release_dir``. Recipient mode by default; ``full=True`` needs ``kit`` and ``master_key``.
@@ -216,6 +236,7 @@ def verify_release(release_dir, *, full: bool = False, kit=None, master_key=None
         if r.check in attested and r.status != attested[r.check]:
             problems.append(f"check {r.check} [{r.scope}]: status mismatch "
                             f"(manifest {attested[r.check]}, re-run {r.status})")
+    problems += _assertion_problems(manifest, result.records, scopes)
     if result.refused and not problems:  # the runner's own verdict is a floor, never overridden
         problems.append("checks: runner refused")
 

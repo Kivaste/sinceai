@@ -29,29 +29,34 @@ def gate_entry(record) -> dict:
             "hits": record.hits}
 
 
+def assertion_reason(name: str, rec) -> str | None:
+    """The one assertion-evidence rule (writer and verify): None when ``rec`` (a CheckRecord or None) can back
+    export assertion ``name``; otherwise a content-free reason code."""
+    want = ASSERTION_EVIDENCE[name]
+    if rec is None or rec.check != want["check"]:
+        return f"assertion:{name}:missing"
+    if rec.status != "pass":
+        return f"assertion:{name}:status:{rec.status}"
+    if rec.scope != want["scope"] or rec.denominator.get("unit") != want["unit"]:
+        return f"assertion:{name}:shape"
+    if type(rec.hits) is not int or rec.hits != 0 or rec.violations:
+        return f"assertion:{name}:hits"
+    n = rec.denominator.get("n")
+    if type(n) is not int or n < 1:
+        return f"assertion:{name}:denominator"
+    return None
+
+
 def evidence_for(records, scenario: str):
     """``(assertions, evidence, reasons)``. ``assertions``/``evidence`` are None unless ``reasons`` is empty."""
     by_check = {r.check: r for r in records}
     reasons: list[str] = []
     evidence: dict = {}
     for name in required_assertions(scenario):
-        want = ASSERTION_EVIDENCE[name]
-        rec = by_check.get(want["check"])
-        if rec is None:
-            reasons.append(f"assertion:{name}:missing")
-            continue
-        if rec.status != "pass":
-            reasons.append(f"assertion:{name}:status:{rec.status}")
-            continue
-        if rec.scope != want["scope"] or rec.denominator.get("unit") != want["unit"]:
-            reasons.append(f"assertion:{name}:shape")
-            continue
-        if type(rec.hits) is not int or rec.hits != 0 or rec.violations:
-            reasons.append(f"assertion:{name}:hits")
-            continue
-        n = rec.denominator.get("n")
-        if type(n) is not int or n < 1:
-            reasons.append(f"assertion:{name}:denominator")
+        rec = by_check.get(ASSERTION_EVIDENCE[name]["check"])
+        reason = assertion_reason(name, rec)
+        if reason is not None:
+            reasons.append(reason)
             continue
         evidence[name] = gate_entry(rec)
     if reasons:
