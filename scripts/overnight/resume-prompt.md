@@ -83,7 +83,7 @@ Every implementer and fixer uses **templates.md §1** and reports with **§4**. 
 - **20:00:** feature freeze; only fixes and docs after that.
 
 ## 4. Finish with fresh proof, then learn
-- **Final review on the exact final integration SHA:** `code-review` over the whole branch since `main` (two axes, cross-map, plus the AGENTS.md rule audit).
+- **Final review on the exact final integration SHA:** `code-review` over the whole product since `c309db6` (the last commit before product code). Three counting reviewers [D32]: Standards = Grok high, and Spec twice, by Sol high and Gemini 4 Argon (separate sub-agents), plus the AGENTS.md rule audit. If opencode-go is down, run with Sol + Grok and log the gap.
 - **Fresh real-kit runs on that SHA:**
   - `run` for HEALTH-S1 and CS-S1;
   - `verify` (limited) and `verify --full` for each;
