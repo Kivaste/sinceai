@@ -50,8 +50,9 @@ def main(argv: list[str]) -> int:
     for rel, digest in res.files.items():
         print(f"  {digest}  {rel}")
     for d in res.datasets:
-        s = d["scorecard"].get("summary", {})
-        print(f"scorecard {d['dataset']} ({d['scenario']}): " + " ".join(f"{k}={s[k]}" for k in sorted(s)))
+        s = d["scorecard"]
+        print(f"scorecard {d['dataset']} ({d['scenario']}): privacy={s['privacy']} utility={s['utility']} "
+              f"composite={s['composite']} tasks={len(s['tasks'])} tables={len(s['tables'])}")
     cs = res.index["customerServiceEval"]
     print(f"cs-eval: conversations={cs['conversations']} turns={cs['turns']} spans={cs['spans']}; "
           f"unseen columns={res.index['unseen']['columns']}")

@@ -48,7 +48,7 @@ class FakeScorecard:
         Path(out_dir).mkdir(parents=True, exist_ok=True)
         (Path(out_dir) / "scorecard.json").write_text("{}", encoding="utf-8")
         return {"scenario": scenario, "dataset": Path(original_dir).name,
-                "summary": {"privacy": 1.0, "utility": 1.0, "composite": 1.0}}
+                "privacy": 1.0, "utility": 1.0, "composite": 1.0, "tasks": [], "tables": []}
 
 
 def build(pair, out, *, scorecard=None, releases=None, **kw):
@@ -134,7 +134,8 @@ def test_index_lists_every_file_with_its_digest(world, tmp_path):
     idx = json.loads((res.scoring / "submission_index.json").read_text("utf-8"))
     assert idx["files"] == res.files
     assert [d["dataset"] for d in idx["datasets"]] == ["health"]
-    assert idx["datasets"][0]["scorecard"]["summary"] == {"privacy": 1.0, "utility": 1.0, "composite": 1.0}
+    sc = idx["datasets"][0]["scorecard"]
+    assert (sc["privacy"], sc["utility"], sc["composite"]) == (1.0, 1.0, 1.0)
 
 
 # ---------- refusals ----------
