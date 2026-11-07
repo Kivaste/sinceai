@@ -94,13 +94,14 @@ def _as_cs(m):
     m["notFitFor"] = [{"scenario": "HEALTH-S1", "reason": "test variant"}]
     del m["exportAssertions"]["quasiIdentifiersBelowK"]
     old = m["assertionEvidence"].pop("quasiIdentifiersBelowK")["check"]
-    ev = {"check": "rescan-health-text", "version": "0.1.0", "scope": "release", "status": "pass",
+    ev = {"check": "text.health", "version": "1.0.0", "scope": "release", "status": "pass",
           "denominator": {"unit": "turns", "n": 40}, "hits": 0}
     m["exportAssertions"]["healthInText"] = False
     m["assertionEvidence"]["healthInText"] = ev
     m["gate"]["checks"] = sorted([c for c in m["gate"]["checks"] if c["check"] != old] + [dict(ev)],
                                  key=lambda c: c["check"])
     m["bindings"]["checkVersions"] = {c["check"]: c["version"] for c in m["gate"]["checks"]}
+    m["bindings"]["lexiconDigests"] = {"health-lexicon": "a" * 64}
     return m
 
 
@@ -170,8 +171,8 @@ def test_two_assertions_sharing_one_check_is_invalid(m):
 
 
 def test_evidence_check_not_run_by_gate_is_invalid(m):
-    m["gate"]["checks"] = [c for c in m["gate"]["checks"] if c["check"] != "rescan-email"]
-    del m["bindings"]["checkVersions"]["rescan-email"]
+    m["gate"]["checks"] = [c for c in m["gate"]["checks"] if c["check"] != "rescan.emails"]
+    del m["bindings"]["checkVersions"]["rescan.emails"]
     invalid(m, "$.assertionEvidence.emails.check: not-in-gate")
 
 
@@ -181,7 +182,7 @@ def test_evidence_disagreeing_with_gate_record_is_invalid(m):
 
 
 def test_check_version_not_bound_is_invalid(m):
-    m["bindings"]["checkVersions"]["rescan-email"] = "9.9.9"
+    m["bindings"]["checkVersions"]["rescan.emails"] = "9.9.9"
     invalid(m, "$.bindings.checkVersions: gate-mismatch")
 
 
@@ -230,8 +231,11 @@ def _paths(m):
 })))
 def test_unknown_key_at_any_level_is_invalid(m, where):
     _paths(m)[where]["unexpectedKey"] = False
-    errs = validate_manifest(m)
-    assert errs, where
+    # Inside a oneOf (measured.* and residual-risk rate) jsonschema reports at the oneOf node.
+    under_one_of = {"$.measured.utility": "$.measured.utility", "$.measured.utility.tasks[0]": "$.measured.utility",
+                    "$.measured.search": "$.measured.search", "$.residualRisks[0].rate": "$.residualRisks[0].rate"}
+    code = f"{under_one_of[where]}: oneOf" if where in under_one_of else f"{where}: additionalProperties"
+    assert code in validate_manifest(m), where
 
 
 @pytest.mark.parametrize("key", ["schemaVersion", "release", "bindings", "inventory", "pets", "fieldJustifications",
@@ -296,9 +300,44 @@ def test_manifest_cannot_bind_itself_or_non_csv(m):
 
 
 def test_withheld_field_with_output_column_is_invalid(m):
-    fj = next(f for f in m["fieldJustifications"] if f["rung"] == "withheld")
-    fj["outputColumn"] = "x"
-    invalid(m, "$.fieldJustifications[")
+    i = next(i for i, f in enumerate(m["fieldJustifications"]) if f["rung"] == "withheld")
+    m["fieldJustifications"][i]["outputColumn"] = "x"
+    assert f"$.fieldJustifications[{i}].outputColumn: type" in validate_manifest(m)
+
+
+def test_released_field_marked_withheld_rung_is_invalid(m):
+    i = next(i for i, f in enumerate(m["fieldJustifications"]) if f["decision"] == "released")
+    m["fieldJustifications"][i]["rung"] = "withheld"
+    assert f"$.fieldJustifications[{i}].rung: not" in validate_manifest(m)
+
+
+# --- CS-S1 binds its lexicon (healthInText is scoped to the bound lexicon version) --------------------------------
+
+def test_cs_manifest_without_lexicon_digest_is_invalid(m):
+    m = _as_cs(m)
+    m["bindings"]["lexiconDigests"] = {}
+    invalid(m, "$.bindings.lexiconDigests: minProperties")
+
+
+def test_health_manifest_may_bind_no_lexicon(m):
+    assert m["bindings"]["lexiconDigests"] == {} and validate_manifest(m) == []
+
+
+# --- assertion maps are closed even when no scenario rule applies ------------------------------------------------
+
+def test_unknown_assertion_is_rejected_without_a_scenario_rule(m):
+    m["release"]["scenario"] = "CS-S9"
+    m["exportAssertions"]["directIdentifiers"] = False
+    m["assertionEvidence"]["directIdentifiers"] = dict(m["assertionEvidence"]["emails"])
+    errs = validate_manifest(m)
+    assert "$.exportAssertions: additionalProperties" in errs
+    assert "$.assertionEvidence: additionalProperties" in errs
+
+
+def test_true_assertion_is_rejected_without_a_scenario_rule(m):
+    m["release"]["scenario"] = "CS-S9"
+    m["exportAssertions"]["emails"] = True
+    assert "$.exportAssertions.emails: const" in validate_manifest(m)
 
 
 def test_bad_digest_shape_is_invalid(m):

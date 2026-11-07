@@ -76,42 +76,70 @@ def tables() -> dict[str, bytes]:
     }
 
 
+CHECK_VERSION = "1.0.0"
+
+
 def _ev(check: str, scope: str, unit: str, n: int) -> dict:
-    return {"check": check, "version": "0.1.0", "scope": scope, "status": "pass",
+    return {"check": check, "version": CHECK_VERSION, "scope": scope, "status": "pass",
             "denominator": {"unit": unit, "n": n}, "hits": 0}
 
 
-# assertion -> (check, scope, denominator unit, n)
-EVIDENCE = {
-    "accountNumbers": ("rescan-account-number", "release", "cells", 130),
-    "deviceIds": ("rescan-device-id", "release", "cells", 130),
-    "emails": ("rescan-email", "release", "cells", 130),
-    "ibans": ("rescan-iban", "release", "cells", 130),
-    "ipAddresses": ("rescan-ip-address", "release", "cells", 130),
-    "keyMaterial": ("key-material", "producer", "cells", 130),
-    "nationalIds": ("rescan-national-id", "release", "cells", 130),
-    "paymentCards": ("rescan-payment-card", "release", "cells", 130),
-    "phones": ("rescan-phone", "release", "cells", 130),
-    "plates": ("rescan-license-plate", "release", "cells", 130),
-    "propertyIds": ("rescan-property-id", "release", "cells", 130),
-    "quasiIdentifiersBelowK": ("k-per-person", "producer", "persons", 10),
-    "rawTimestamps": ("raw-timestamps", "release", "cells", 10),
-    "reversibleHashes": ("reversible-hashes", "producer", "cells", 30),
-    "rowMaps": ("row-maps", "release", "files", 3),
-    "secrets": ("rescan-secret", "release", "cells", 130),
-    "urlsWithTokens": ("rescan-url-token", "release", "cells", 130),
-    "usernames": ("rescan-username", "release", "cells", 130),
+# Data copy of ticket 04's ASSERTION_CHECKS (origin/ticket/04-gate 87bc8c8); not imported (04 not merged).
+ASSERTION_CHECKS = {
+    "accountNumbers": "rescan.account-numbers",
+    "deviceIds": "rescan.device-ids",
+    "emails": "rescan.emails",
+    "healthInText": "text.health",
+    "ibans": "rescan.ibans",
+    "ipAddresses": "rescan.ip-addresses",
+    "keyMaterial": "producer.key-material",
+    "nationalIds": "rescan.national-ids",
+    "paymentCards": "rescan.payment-cards",
+    "phones": "rescan.phones",
+    "plates": "rescan.plates",
+    "propertyIds": "rescan.property-ids",
+    "quasiIdentifiersBelowK": "producer.person-k",
+    "rawTimestamps": "rescan.raw-timestamps",
+    "reversibleHashes": "producer.unkeyed-hashes",
+    "rowMaps": "release.row-maps",
+    "secrets": "rescan.secrets",
+    "urlsWithTokens": "rescan.urls-with-tokens",
+    "usernames": "rescan.usernames",
 }
-# gate checks that back no assertion (contract, forms, digests, manifest scan, per-row k)
+
+# HEALTH-S1 assertion -> (scope, denominator unit, n); check name from ASSERTION_CHECKS
+_EVIDENCE_SHAPE = {
+    "accountNumbers": ("release", "cells", 130),
+    "deviceIds": ("release", "cells", 130),
+    "emails": ("release", "cells", 130),
+    "ibans": ("release", "cells", 130),
+    "ipAddresses": ("release", "cells", 130),
+    "keyMaterial": ("producer", "cells", 130),
+    "nationalIds": ("release", "cells", 130),
+    "paymentCards": ("release", "cells", 130),
+    "phones": ("release", "cells", 130),
+    "plates": ("release", "cells", 130),
+    "propertyIds": ("release", "cells", 130),
+    "quasiIdentifiersBelowK": ("producer", "persons", 10),
+    "rawTimestamps": ("release", "cells", 10),
+    "reversibleHashes": ("producer", "cells", 30),
+    "rowMaps": ("release", "files", 3),
+    "secrets": ("release", "cells", 130),
+    "urlsWithTokens": ("release", "cells", 130),
+    "usernames": ("release", "cells", 130),
+}
+EVIDENCE = {a: (ASSERTION_CHECKS[a], *shape) for a, shape in _EVIDENCE_SHAPE.items()}
+# Gate checks that back no assertion. The first six are 04's registered names; the last three are not in 04 yet.
 EXTRA_GATE = [
-    _ev("contract-files-columns", "release", "files", 2),
-    _ev("contract-value-forms", "release", "cells", 130),
-    _ev("empty-tables", "release", "files", 2),
-    _ev("file-digests", "release", "files", 2),
-    _ev("hex-hash-outside-tokens", "release", "cells", 130),
-    _ev("k-per-row", "release", "rows", 10),
-    _ev("manifest-value-shapes", "release", "files", 1),
-    _ev("original-value-survival", "producer", "cells", 130),
+    _ev("contract.columns", "release", "files", 2),
+    _ev("contract.files", "release", "files", 2),
+    _ev("contract.forms", "release", "cells", 130),
+    _ev("release.empty-tables", "release", "files", 2),
+    _ev("release.file-digests", "release", "files", 2),
+    _ev("release.token-hex64", "release", "cells", 130),
+    _ev("release.row-k", "release", "rows", 10),
+    _ev("release.manifest-shapes", "release", "files", 1),
+    _ev("producer.original-values", "producer", "cells", 130),
 ]
 
 SHA = "^[0-9a-f]{64}$"
