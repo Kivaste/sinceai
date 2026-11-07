@@ -748,3 +748,21 @@ CS-S1 chain done-report + 4 reviews (23 + #53/#54/#56/#92) -> merge -> #63 -> 25
   8. **Utilization flags:** #121 and #130 have native blocked-by #117 edges, and so does #30 now. The flags come from the #129 defect.
 - **Why:** D49 makes the pin the only priority. One merger at a time. Close only on evidence (D31).
 - **Evidence:** pin worktree `sinceai-wt/pin-117`; logs in `sinceai-out/pin-c0ece5c/`; issue comments on #30, #80, #116, #117, #128 and #130; train 23 session ses_e49aa22e.
+
+### Sat 16:30 - speculative pin c0ece5c RED; #117 must-fix; #106 round 2
+
+- **When:** Sat 16:24-16:30 EET
+- **Decision:**
+  1. Pin train 24 on c0ece5c: fast tier exit 1, 2593 passed, 26 failed, 7 skipped. The guard stopgap was exit 0 (99 passed). The slow tier was not run. All the failures are in #117's own files:
+     - 25 in tests/ui/test_http.py. The offline guard blocks the tests' own loopback urllib calls in the whole-suite run, a test-isolation defect. #117's own affected run at -n 2 passed.
+     - 1 in tests/test_tiers.py. slow_tests.txt has stale README block ids.
+     - I discarded the merge and removed the pin worktree. Nothing was pushed.
+  2. I unfroze the #117 fixer (ses_e49cc60d) for exactly these two must-fixes. It works red first and reruns the full fast tier at -n 16 on its merged head. Then come a fast-track delta review, a new speculative pin and both tiers.
+  3. Planning-session steer, handled: PID 45904 (`pytest -n 2 ... tests`) was #132's affected-tests run, not the pin, so I left it alone. The pin did run at -n 16.
+  4. The merge slot is held for #117. #30 is not merged into the gap: it also edits README.md and would shift the block ids again under #117's fix.
+  5. #106 r1:
+     - Grok: Standards and Spec both APPROVE.
+     - Sol: Standards and Spec both CHANGES REQUIRED, high and reproduced. A forged `derived_from` hides a QI from detected_qi, and `verify --full` still exits 0. This is the #62 provenance class.
+     - Round 2 is with the Opus implementer (ses_e4a0a4c1).
+- **Why:** D49 (a review or test failure discards the speculative merge). Fail closed.
+- **Evidence:** `sinceai-out/pin-c0ece5c/fast-c0ece5c….log` and `.exit`; review sessions ses_e49a39d7 and ses_e49a3760; issue comments on #106 and #117.
