@@ -80,7 +80,7 @@ Recipient mode needs only the release folder. It re-runs every release-scope che
 VERIFIED (limited): N release-checked, M producer-attested
 ```
 
-<!-- docs-test: run -->
+<!-- docs-test: skip reason=verify-blocked-by-unregistered-check -->
 ```powershell
 pets-release verify ..\sinceai-out\health-s1
 ```

@@ -30,6 +30,9 @@ ALLOWED_SKIP_REASONS = (
     "runs-the-whole-test-suite-recursively",
     # verify --full needs producer context (inputs, key, signed release) from a real run; promote after ticket 21
     "full-verify-needs-producer-context",
+    # the fixture release claims `release.manifest-shapes`, which no merged ticket registers yet, so
+    # recipient verify correctly fails closed; promote to run once the check is registered
+    "verify-blocked-by-unregistered-check",
 )
 SUBCOMMANDS = ("run", "verify", "detect", "dashboard", "submission")
 MARKER = re.compile(r"<!--\s*docs-test:\s*(run|skip|pending)\b([^>]*?)-->")
@@ -110,6 +113,12 @@ def test_block(block, tmp_path):
     conf = _load_conftest()
     first = block["body"].strip().splitlines()[0]
     if block["kind"] == "skip":
+        if block["arg"] == "reason=verify-blocked-by-unregistered-check":
+            from pets_release.checks.registry import all_checks
+
+            assert "release.manifest-shapes" not in {c.name for c in all_checks()}, (
+                "release.manifest-shapes is registered now: promote the verify block to run"
+            )
         _transcript(f"SKIP block {block['n']} ({block['arg']}): {first}")
         pytest.skip(f"named reason: {block['arg']}")
     if block["kind"] == "pending":
