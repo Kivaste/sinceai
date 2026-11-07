@@ -103,6 +103,13 @@ def _form_fn(form: str, params: dict):
 @register(name="contract.forms", version="1.0.0", scope="release", unit="cells")
 def contract_forms_check(release, contract, context):
     files = contract_files(contract)
+    # CS turns have a zero-health policy, independent of the caller's chosen text form/rung.
+    # Check the supplied contract itself: an alternate file cannot supply or relax this flag.
+    health_key = "healthInTextRequired"
+    if health_key in contract and type(contract[health_key]) is not bool:
+        raise ValueError("contract healthInTextRequired must be boolean")
+    if "text" in files.get("turns.csv", {}).get("columns", {}) and contract.get(health_key) is not True:
+        raise ValueError("contract healthInTextRequired must be true for CS text")
     out = []
     n = 0
     for f in release.csv_files:

@@ -213,6 +213,11 @@ def _scenario_rule(scenario: str) -> dict:
         then["properties"]["contract"] = {"required": ["k"]}
     else:
         then["properties"]["contract"] = {"not": {"required": ["k"]}}
+    if scenario == "CS-S1":
+        then["properties"]["contract"].update({
+            "required": ["healthInTextRequired"],
+            "properties": {"healthInTextRequired": {"const": True}},
+        })
     return {
         "if": {"properties": {"release": {"properties": {"scenario": {"const": scenario}},
                                           "required": ["scenario"]}},
@@ -258,6 +263,7 @@ MANIFEST_SCHEMA: dict = {
         "fieldJustifications": _arr(_FIELD_JUSTIFICATION, 1),
         "contract": _obj({
             "k": {"type": "integer", "minimum": 2},  # k-anonymity target; required/forbidden per scenario
+            "healthInTextRequired": {"type": "boolean"},  # CS-S1 requires the literal true
             "files": _map("fileName", _obj({
                 "required": _arr(_ref("name")),
                 "columns": _map("name", _obj({"form": {"type": "string", "minLength": 1, "maxLength": 300},

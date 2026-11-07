@@ -15,7 +15,8 @@ Everything comes from the canonical sources, with no fallbacks:
 Contract shape (what 02's schema stores and 04's contract checks read)::
 
     {"files": {"<table>.csv": {"columns": {name: {"form", "params"}}, "required": [...]}},
-     "qi": [{"table", "column", "derived_from"}], "tokens": [{"table", "column", "scope"}]}
+     "qi": [{"table", "column", "derived_from"}], "tokens": [{"table", "column", "scope"}],
+     "healthInTextRequired": true}  # required for CS-S1's zero-health privacy target
 
 Every released column is required (the ladders' ``apply`` emits all of them) and nullable
 (source columns may contain empty cells). ``params`` also carries ``rung`` and, for a derived or
@@ -146,6 +147,9 @@ def generate(policy: Any, plan: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     k = _k_target(policy)
     if k is not None:
         contract["k"] = k
+    health_required = _health_target(policy)
+    if health_required is not None:
+        contract["healthInTextRequired"] = health_required
     _validate_contract(contract)
     return contract
 
@@ -194,6 +198,17 @@ def _k_target(policy: Any) -> int | None:
 
 def _valid_k(value: Any) -> bool:
     return type(value) is int and value >= 2
+
+
+def _health_target(policy: Any) -> bool | None:
+    """Carry the zero-health target explicitly; CS-S1 cannot omit or weaken it."""
+    targets = [t for t in policy.privacy_targets if t.get("kind") == "health_in_text"]
+    if not targets and policy.scenario != "CS-S1":
+        return None
+    if (len(targets) != 1 or type(targets[0].get("max_hits")) is not int
+            or targets[0]["max_hits"] != 0):
+        raise ContractError("policy: health target invalid")
+    return True
 
 
 def digest(contract: Mapping[str, Any]) -> str:
@@ -285,9 +300,11 @@ def _parse_plan(plan: Sequence[Mapping[str, Any]]) -> dict[tuple[str, str], dict
 def _validate_contract(contract: Mapping[str, Any]) -> None:
     if not isinstance(contract, Mapping):
         raise ContractError("contract: not an object")
-    _exact(contract, _CONTRACT_KEYS, "contract", optional=frozenset({"k"}))
+    _exact(contract, _CONTRACT_KEYS, "contract", optional=frozenset({"k", "healthInTextRequired"}))
     if "k" in contract and not _valid_k(contract["k"]):
         raise ContractError("contract: k invalid")
+    if "healthInTextRequired" in contract and type(contract["healthInTextRequired"]) is not bool:
+        raise ContractError("contract: healthInTextRequired invalid")
     files = contract["files"]
     if not isinstance(files, Mapping) or not files:
         raise ContractError("no released files")
@@ -300,6 +317,8 @@ def _validate_contract(contract: Mapping[str, Any]) -> None:
         cols, required = spec["columns"], spec["required"]
         if not isinstance(cols, Mapping) or not cols:
             raise ContractError(f"{name}: columns")
+        if name == "turns.csv" and "text" in cols and contract.get("healthInTextRequired") is not True:
+            raise ContractError("contract: healthInTextRequired must be true for CS text")
         if not isinstance(required, list) or required != sorted(set(required)) or not set(required) <= set(cols):
             raise ContractError(f"{name}: required unsorted or undeclared")
         for column, body in cols.items():

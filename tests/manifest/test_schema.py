@@ -104,6 +104,7 @@ def _as_cs(m):
     m["bindings"]["lexiconDigests"] = {"health-lexicon": "a" * 64}
     m["release"]["releaseScopeId"] = _scope_id(m)
     m["contract"].pop("k", None)
+    m["contract"]["healthInTextRequired"] = True
     _rebind_contract(m)
     return m
 
@@ -112,6 +113,17 @@ def _rebind_contract(m):
     from pets_release.manifest import canonical_digest
 
     m["bindings"]["contractDigest"] = canonical_digest(m["contract"])
+
+
+@pytest.mark.parametrize("value", ["missing", False, None, 0, 1, "true"])
+def test_cs_contract_requires_literal_true_health_enforcement(m, value):
+    _as_cs(m)
+    if value == "missing":
+        del m["contract"]["healthInTextRequired"]
+    else:
+        m["contract"]["healthInTextRequired"] = value
+    _rebind_contract(m)
+    assert validate_manifest(m)
 
 
 # --- contract.k: the scenario's k-anonymity target --------------------------------------------------------------
