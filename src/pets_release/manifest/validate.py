@@ -99,14 +99,30 @@ def _order(errs: list[str], path: str, items: list, key) -> None:
         errs.append(f"{path}: order")
 
 
+# #132: anchored regexes proven (by inspection, under the ``fullmatch`` the contract.forms check applies) to
+# accept only strings the validator ID already accepts. Regex inclusion is not checked in general: any regex
+# not listed here must equal the rung's form exactly. ``text`` has no entry on purpose (#132 r2): the text
+# checks scan only ``text``-form columns, so a regex substitute would hide the column from them.
+_NARROWING_REGEXES: dict[str, frozenset[str]] = {
+    "hex64": frozenset({"^[0-9a-f]{64}$"}),  # the hex64 validator's own pattern
+    "decimal": frozenset({"^[0-9]+$"}),  # [0-9]+ is within -?\d+(?:\.\d+)?
+}
+
+
+def _narrows(form: str, validator: str) -> bool:
+    """True only if ``form`` provably accepts no string the validator ID ``validator`` rejects and the swap
+    leaves every check's scope unchanged."""
+    return form in _NARROWING_REGEXES.get(validator, frozenset())
+
+
 def _applied_rungs(m: dict, errs: list[str]) -> dict:
     """#109: ``{(table, source column): rung}`` as the bound contract applies it to each released field
     (``contract.files[<table>.csv].columns[<outputColumn>].params.rung``). Fail closed (no rung, no sacrifice
     decision): the contract rung must exist and equal the justification's, lie on the ladder the pinned policy
-    gives that source column (its default family, or exactly its ``alt_floors`` rung), and the column's form must be the rung's form. A rung whose form is a validator ID
-    (``text``, ``hex64``, ``decimal``, ...) may declare a narrower anchored regex instead; every regex-form rung
-    (all timestamp rungs) must carry exactly its own form. A contract column no released justification backs is
-    an error too."""
+    gives that source column (its default family, or exactly its ``alt_floors`` rung), and the column's form must
+    be the rung's form. A rung whose form is a validator ID may declare an anchored regex instead only if that
+    regex provably narrows the validator (#132, ``_narrows``); every regex-form rung (all timestamp rungs) must
+    carry exactly its own form. A contract column no released justification backs is an error too."""
     from pets_release.ladders import CONTRACT_FORMS, RUNG_KIND
     from pets_release.policy import get_policy
 
@@ -137,10 +153,7 @@ def _applied_rungs(m: dict, errs: list[str]) -> dict:
         if not on_ladder:
             errs.append(f"{where}: rung-not-on-ladder")
         want = CONTRACT_FORMS.get(rung)
-        # a validator-ID form (text, hex64, ...) may be replaced by an anchored regex; a regex form never
-        anchored_regex_allowed = want is not None and not want.startswith("^") \
-            and col["form"].startswith("^") and col["form"].endswith("$")
-        if want is None or (col["form"] != want and not anchored_regex_allowed):
+        if want is None or (col["form"] != want and not _narrows(col["form"], want)):
             errs.append(f"{where}: rung-form-mismatch")
         applied[(t, c)] = rung
     for file, spec in sorted(files.items()):
