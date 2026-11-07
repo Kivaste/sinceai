@@ -54,6 +54,7 @@ class Check:
     scope: str
     unit: str
     run: Callable
+    applies_to: tuple = ()  # contract column forms this check scans; required to return not_applicable
 
 
 _CHECKS: dict[str, Check] = {}
@@ -62,8 +63,15 @@ _INFRA = {"records", "registry", "release", "runner", "__main__"}
 _state: dict = {"loaded": False, "error": None}
 
 
-def register(*, name: str, version: str, scope: str, unit: str):
-    """Decorator: register ``run(release, contract, context) -> Outcome`` as a gate check."""
+def register(*, name: str, version: str, scope: str, unit: str, applies_to: tuple = ()):
+    """Decorator: register ``run(release, contract, context) -> Outcome`` as a gate check.
+
+    ``applies_to``: contract column forms (e.g. ``("text",)``) the check scans. Only a check that
+    declares them may return ``Outcome.not_applicable()``, and only when the contract declares
+    no column with any of those forms."""
+    applies_to = tuple(applies_to)
+    if not all(isinstance(f, str) and f for f in applies_to):
+        raise RegistryError(f"bad applies_to for check {name!r}")
     if not isinstance(name, str) or not CHECK_NAME.match(name):
         raise RegistryError(f"bad check name {name!r}")
     if not isinstance(version, str) or not SEMVER.match(version):
@@ -74,7 +82,7 @@ def register(*, name: str, version: str, scope: str, unit: str):
     def deco(fn):
         if name in _CHECKS and _CHECKS[name].run is not fn:
             raise RegistryError(f"duplicate check name {name!r}")
-        _CHECKS[name] = Check(name=name, version=version, scope=scope, unit=unit, run=fn)
+        _CHECKS[name] = Check(name=name, version=version, scope=scope, unit=unit, run=fn, applies_to=applies_to)
         mod = getattr(fn, "__module__", "") or ""
         _BY_MODULE[mod] = _BY_MODULE.get(mod, 0) + 1
         return fn
