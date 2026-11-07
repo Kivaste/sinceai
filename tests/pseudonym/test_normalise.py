@@ -292,3 +292,87 @@ def test_candidate_hashing_of_10k_hetus_recovers_no_tokens():
                 if hx in prefixes[len(hx)]:
                     recovered += 1
     assert recovered == 0
+
+
+# --- follow-up #42 ---------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "a,b",
+    [
+        ("Thoresen", "Thorenen"),
+        ("Mathiesen", "Mathienen"),
+        ("Andersen", "Andernen"),
+        ("Petersen", "Peternen"),
+        ("Mikkelsen", "Mikkelnen"),
+    ],
+)
+def test_germanic_sen_surnames_are_not_turned_into_nen_names(a, b):
+    assert normalise(a, "PERSON") == a.casefold()
+    assert normalise(a, "PERSON") != b.casefold()
+
+
+def test_finnish_nen_inflections_still_return_to_nominative():
+    for form, nom in [
+        ("Virtasen", "virtanen"),
+        ("Korhosen", "korhonen"),
+        ("Hämäläisen", "hämäläinen"),
+        ("Mäkiselle", "mäkinen"),
+        ("Koskiselta", "koskinen"),
+    ]:
+        assert normalise(form, "PERSON") == nom
+
+
+@pytest.mark.parametrize(
+    "a,b",
+    [
+        ("040 123 4567 x12", "0401234567"),
+        ("+358 40 123 4567 ext. 99", "0401234567"),
+        ("0401234567x5", "+358401234567"),
+        ("+46 70 123 45 67 extension 3", "+46701234567"),
+        ("040-1234567 EXT 2", "0401234567"),
+    ],
+)
+def test_phone_extension_is_not_part_of_the_number(a, b):
+    assert normalise(a, "PHONE") == normalise(b, "PHONE")
+
+
+def test_spoken_six_is_not_an_extension():
+    assert normalise("zero four zero six", "PHONE") == "+358406"
+
+
+@pytest.mark.parametrize("where", ["value", "scope"])
+def test_lone_surrogate_gives_content_free_value_error(where):
+    bad = "ab\ud800cd"
+    p = pseudonymiser_for(MasterKey.from_text(TEST_KEY))
+    with pytest.raises(ValueError) as ei:
+        if where == "value":
+            p.token(bad, label="EMAIL", scope=REL)
+        else:
+            p.token("x", label="EMAIL", scope=Scope.conversation(bad))
+    assert "ud800" not in str(ei.value).lower() and "ab" not in str(ei.value)
+    assert not isinstance(ei.value, UnicodeError)
+    assert ei.value.__cause__ is None and ei.value.__context__ is None
+
+
+def test_secret_key_eq_and_hash_are_consistent():
+    from pets_release.pseudonym.keys import MasterKey as MK
+    from pets_release.pseudonym.keys import SecretKey
+
+    m = MK(b"k" * 32)
+    a, b = SecretKey(b"k" * 32, "x"), SecretKey(b"k" * 32, "y")
+    assert (a == b) and hash(a) == hash(b)
+    assert hash(m) == hash(SecretKey(b"k" * 32, "z"))
+
+
+@pytest.mark.parametrize("a,b", [("x12 040 123 4567", "0401234567"), ("ext 3 0401234567", "0401234567")])
+def test_leading_extension_marker_does_not_swallow_the_number(a, b):
+    assert normalise(a, "PHONE") != ""
+    assert normalise(a, "PHONE") != normalise("x99 0409999999", "PHONE")
+
+
+@pytest.mark.parametrize("value", ["extension", "x", "ext.", "(0)", "n/a"])
+def test_phone_without_national_digits_is_refused_not_a_shared_token(value):
+    p = pseudonymiser_for(MasterKey.from_text(TEST_KEY))
+    with pytest.raises(ValueError):
+        p.token(value, label="PHONE", scope=REL)

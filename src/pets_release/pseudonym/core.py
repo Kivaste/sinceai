@@ -17,6 +17,17 @@ DOMAIN = "pets-release/pseudonym/v1"
 SCOPE_KINDS = ("conversation", "release", "recipient")
 
 
+def _require_utf8(text: str, what: str) -> None:
+    """Content-free error for lone surrogates (the codec error echoes one)."""
+    ok = True
+    try:
+        text.encode("utf-8")
+    except UnicodeError:
+        ok = False
+    if not ok:  # raised outside the except block: no __context__
+        raise ValueError(f"{what} is not valid Unicode text")
+
+
 @dataclass(frozen=True, slots=True)
 class Scope:
     kind: str
@@ -29,6 +40,7 @@ class Scope:
             raise ValueError("scope ID must be a non-empty string")
         if "\x00" in self.scope_id:
             raise ValueError("scope ID must not contain NUL")
+        _require_utf8(self.scope_id, "scope ID")
 
     def __repr__(self) -> str:  # scope IDs may be data-derived (conversation)
         return f"Scope(kind={self.kind!r}, <id redacted>)"
@@ -48,7 +60,7 @@ class Scope:
 
 _AMBIGUOUS = object()
 # Values that must carry an identity; an empty one would share a valid token.
-_NON_EMPTY_LABELS = frozenset({RECORD_KEY, "NATIONAL_ID"})
+_NON_EMPTY_LABELS = frozenset({RECORD_KEY, "NATIONAL_ID", "PHONE"})
 
 
 def _bases(word: str) -> set[str]:
@@ -132,6 +144,7 @@ class Pseudonymiser:
                 raise TypeError(f"{name} must be a string")
             if "\x00" in fval:
                 raise ValueError(f"{name} must not contain NUL")
+        _require_utf8(value, "value")
         norm = normalise(value, label, phone_country=self._phone_country)
         if label in _NON_EMPTY_LABELS and not norm:
             raise ValueError(f"empty {label} value cannot be pseudonymised")
