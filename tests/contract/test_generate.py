@@ -42,7 +42,7 @@ def _entry(table: str, column: str, rung: str, params: dict | None = None, floor
 
 
 def _build(entries: list[dict], qi: tuple = ()):
-    floors = {(e["table"], e["column"]): FieldFloor("x", e["floor"], "test") for e in entries}
+    floors = {(e["table"], e["column"]): FieldFloor(RUNG_KIND.get(e["floor"], "categorical"), e["floor"], "test") for e in entries}
     return _policy(floors, qi), entries
 
 
@@ -80,8 +80,10 @@ def test_join_derived_qi_without_join_via_on_non_person_table_rejected() -> None
 def test_join_via_must_name_an_existing_column() -> None:
     plan = [_entry("lab_results", "sampled_ts", "ts.month_hour"), _entry("ed_visits", "visit_id", "id.pseudonym")]
     for bad in (["ed_visits"], "ed_visits.visit_id", ["ed_visits", "no_col"], ["no_table", "visit_id"], ["a b", "c"]):
-        qi = ({"table": "lab_results", "column": "sampled_ts", "join_via": bad},)
-        policy, entries = _build(plan, qi)
+        valid = ({"table": "lab_results", "column": "sampled_ts", "derived": "sampled_ts", "join_via": ["ed_visits", "visit_id"]},)
+        policy, entries = _build(plan, valid)
+        # 09 validates join_via too; bypass it so the generator's own check is what is under test
+        object.__setattr__(policy, "qi", ({**valid[0], "join_via": bad},))
         with pytest.raises(ContractError, match="join_via"):
             generate(policy, entries)
 
@@ -140,7 +142,7 @@ def test_derived_column_under_release_name_with_derivation_and_qi() -> None:
 
 
 def test_qi_listed_only_when_released_and_join_derived_named() -> None:
-    qi = ({"table": "lab_results", "column": "sampled_ts", "join_via": ["ed_visits", "visit_id"]},)
+    qi = ({"table": "lab_results", "column": "sampled_ts", "derived": "sampled_ts", "join_via": ["ed_visits", "visit_id"]},)
     released_policy, released = _build([
         _entry("lab_results", "sampled_ts", "ts.month_hour"),
         _entry("lab_results", "value", "num.exact"),
@@ -153,6 +155,7 @@ def test_qi_listed_only_when_released_and_join_derived_named() -> None:
     withheld_policy, withheld = _build([
         _entry("lab_results", "sampled_ts", "withheld"),
         _entry("lab_results", "value", "num.exact"),
+        _entry("ed_visits", "visit_id", "id.pseudonym"),
     ], qi)
     assert generate(withheld_policy, withheld)["qi"] == []
 

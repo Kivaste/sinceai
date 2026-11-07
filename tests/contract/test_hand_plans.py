@@ -90,3 +90,42 @@ def test_released_join_derived_qi_without_join_via_is_rejected() -> None:
     assert not any("join_via" in r for r in policy.qi if r["column"] == "sampled_ts")
     with pytest.raises(ContractError, match="sampled_ts: join-derived qi needs join_via"):
         generate(policy, plan)
+
+
+def test_health_contract_carries_k_and_cs_has_none() -> None:
+    health = generate(get_policy("HEALTH-S1"), hand_plan("HEALTH-S1"))
+    cs = generate(get_policy("CS-S1"), hand_plan("CS-S1"))
+    assert health["k"] == 5
+    assert "k" not in cs
+    without_k = {key: value for key, value in health.items() if key != "k"}
+    assert digest(health) != digest(without_k)  # k is part of the canonical digest
+
+
+def test_policy_k_below_two_is_rejected() -> None:
+    policy, plan = get_policy("HEALTH-S1"), hand_plan("HEALTH-S1")
+    for bad in (1, 0, -3, True, "5", 2.5):
+        targets = tuple({**t, "k": bad} if t["kind"] == "k_anonymity" else t for t in policy.privacy_targets)
+        with pytest.raises(ContractError, match="k target"):
+            generate(dataclasses.replace(policy, privacy_targets=targets), plan)
+    both = (*policy.privacy_targets, next(t for t in policy.privacy_targets if t["kind"] == "k_anonymity"))
+    with pytest.raises(ContractError, match="k target"):
+        generate(dataclasses.replace(policy, privacy_targets=both), plan)
+
+
+def test_alt_floor_accepts_fallback_and_param_minimum_is_enforced() -> None:
+    policy, plan = get_policy("CS-S1"), hand_plan("CS-S1")
+    turn_id = next(e for e in plan if (e["table"], e["column"]) == ("turns", "turn_id"))
+    fallback = {**turn_id, "rung": "id.pseudonym", "floor": "id.pseudonym"}
+    swapped = [fallback if e is turn_id else e for e in plan]
+    # the conditional-keep fallback plan is accepted by the alt floor ...
+    assert "turn_id" in generate(policy, swapped)["files"]["turns.csv"]["columns"]
+    # ... but an alt floor admits only the alt rung or withheld
+    bad = [{**turn_id, "rung": "keep", "floor": "id.pseudonym"} if e is turn_id else e for e in plan]
+    with pytest.raises(ContractError, match="turn_id: rung finer than floor"):
+        generate(policy, bad)
+
+    health, hplan = get_policy("HEALTH-S1"), hand_plan("HEALTH-S1")
+    muni = next(e for e in hplan if (e["table"], e["column"]) == ("ed_visits", "municipality"))
+    low = [{**muni, "params": {"n": 3}} if e is muni else e for e in hplan]
+    with pytest.raises(ContractError, match="municipality: below policy minimum"):
+        generate(health, low)

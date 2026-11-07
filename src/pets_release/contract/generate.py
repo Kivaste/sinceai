@@ -69,11 +69,17 @@ def generate(policy: Any, plan: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     tokens: list[dict[str, str]] = []
     for (table, column), entry in sorted(entries.items()):
         floor = policy.floors[(table, column)].rung
+        alt = (policy.alt_floors or {}).get((table, column))
+        spec_min = policy.param_minimums.get((table, column))
+        if spec_min is not None and entry["rung"] == spec_min["rung"]:
+            value = entry["params"].get(spec_min["param"])
+            if type(value) is not int or value < spec_min["min"]:
+                raise ContractError(f"{table}.{column}: below policy minimum")
         if entry["rung"] == _WITHHELD:
-            _check_floor(table, column, entry, floor)
+            _check_floor(table, column, entry, floor, alt)
             continue
         body = _form(table, column, entry["rung"])
-        _check_floor(table, column, entry, floor)
+        _check_floor(table, column, entry, floor, alt)
         name = output_column(entry)
         if not isinstance(name, str) or not _NAME.fullmatch(name):
             raise ContractError(f"{table}.{column}: release name")
@@ -124,8 +130,25 @@ def generate(policy: Any, plan: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
         "qi": sorted(qi, key=lambda r: (r["table"], r["column"])),
         "tokens": sorted(tokens, key=lambda r: (r["table"], r["column"])),
     }
+    k = _k_target(policy)
+    if k is not None:
+        contract["k"] = k
     _validate_contract(contract)
     return contract
+
+
+def _k_target(policy: Any) -> int | None:
+    """The scenario's k-anonymity target (int >= 2), or None when the policy has none."""
+    targets = [t for t in policy.privacy_targets if t.get("kind") == "k_anonymity"]
+    if not targets:
+        return None
+    if len(targets) > 1 or not _valid_k(targets[0].get("k")):
+        raise ContractError("policy: k target invalid")
+    return targets[0]["k"]
+
+
+def _valid_k(value: Any) -> bool:
+    return type(value) is int and value >= 2
 
 
 def digest(contract: Mapping[str, Any]) -> str:
@@ -144,11 +167,18 @@ def _form(table: str, column: str, rung: str) -> dict[str, Any]:
     return body
 
 
-def _check_floor(table: str, column: str, entry: Mapping[str, Any], floor: str) -> None:
-    """The plan floor equals the policy floor, and the rung is not finer than it (07's ordering)."""
+def _check_floor(table: str, column: str, entry: Mapping[str, Any], floor: str, alt: str | None = None) -> None:
+    """The plan floor is the policy floor (or its alt floor), and the rung is not finer than it.
+
+    An alt floor (conditional-keep fallback) admits only the alt rung or ``withheld``.
+    """
+    rung = entry["rung"]
+    if alt is not None and entry["floor"] == alt != floor:
+        if rung not in (alt, _WITHHELD):
+            raise ContractError(f"{table}.{column}: rung finer than floor")
+        return
     if entry["floor"] != floor:
         raise ContractError(f"{table}.{column}: plan floor differs from policy floor")
-    rung = entry["rung"]
     if rung == _WITHHELD:
         return
     if floor == _WITHHELD:
@@ -210,7 +240,9 @@ def _parse_plan(plan: Sequence[Mapping[str, Any]]) -> dict[tuple[str, str], dict
 def _validate_contract(contract: Mapping[str, Any]) -> None:
     if not isinstance(contract, Mapping):
         raise ContractError("contract: not an object")
-    _exact(contract, _CONTRACT_KEYS, "contract")
+    _exact(contract, _CONTRACT_KEYS, "contract", optional=frozenset({"k"}))
+    if "k" in contract and not _valid_k(contract["k"]):
+        raise ContractError("contract: k invalid")
     files = contract["files"]
     if not isinstance(files, Mapping) or not files:
         raise ContractError("no released files")
@@ -264,8 +296,8 @@ def _validate_contract(contract: Mapping[str, Any]) -> None:
             raise ContractError("qi: derived_from")
 
 
-def _exact(obj: Mapping[str, Any], allowed: frozenset[str], where: str) -> None:
-    unknown = set(obj) - allowed
+def _exact(obj: Mapping[str, Any], allowed: frozenset[str], where: str, optional: frozenset[str] = frozenset()) -> None:
+    unknown = set(obj) - allowed - optional
     if unknown:
         raise ContractError(f"{where}: unknown key {min(unknown)}")
     missing = allowed - set(obj)
