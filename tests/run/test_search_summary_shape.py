@@ -45,4 +45,5 @@ def test_long_float_risk_is_released_rounded(tmp_path, monkeypatch):
     pts = json.loads((out / "privacy_manifest.json").read_text(encoding="utf-8"))["measured"]["search"]["points"]
     assert any(p["risk"] == round(PLANTED, 6) for p in pts)
     for p in pts:
-        assert p["risk"] == round(p["risk"], 6) and p["utility"] == round(p["utility"], 6)
+        assert p["risk"] == round(p["risk"], 6)
+        assert p["utility"] is None or p["utility"] == round(p["utility"], 6)  # null: unscored (#133)

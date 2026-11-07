@@ -8,7 +8,9 @@ Rule: each field's reason cites the log step it comes from; plan/log disagreemen
   plan rung differs from its adopting step         -> JustificationError
   field off its floor with no adopting step        -> JustificationError
   log without a start step                         -> JustificationError
-  measured.search                                  -> one point per non-final entry; final entry excluded
+  measured.search                                  -> one point per non-final entry; final entry excluded;
+                                                      an unscored rejected entry has utility null (#133;
+                                                      refusals: test_search_summary_unmeasured, CLI seam)
 """
 from __future__ import annotations
 
@@ -88,5 +90,6 @@ def test_search_summary_points():
     s = search_summary(LOG, {"bound_reached": False})
     assert s["status"] == "measured" and s["candidates"] == 4 and s["accepted"] == 2
     assert [p["step"] for p in s["points"]] == [0, 1, 2, 3]
-    assert s["points"][1] == {"step": 1, "risk": 0.5, "utility": 0.0, "accepted": False}  # missing score -> 0
+    assert s["points"][1] == {"step": 1, "risk": 0.5, "utility": None, "accepted": False}  # unscored: null (#133)
+    assert s["points"][3]["utility"] == 0.1
     assert s["boundReached"] is False
