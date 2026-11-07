@@ -406,50 +406,62 @@ def _collapse(text, m):
     return "".join(parts), end, single
 
 
+# the cue scan crosses line breaks (as the cell rescan does); value collapsing does not
+_CTOK = re.compile(r"\s*(" + _MASKED + r"|[,;]|[^\s" + _MASKED + r",;]+)")
+
+
 def _cue_end(kind, lo, hi, text, pos):
     """End offset of the value after a cue ending at ``pos``, or None. Same rule as the cell rescans
-    (``cells._validators._cued_value_counts``), over up to ``_cues.WINDOW`` tokens:
-    a masked placeholder is the redacted value (skipped; it uses up the copula); copulas and function
-    words are skipped; a value-shaped token counts; after a copula (plus at most hedges) the first word
-    counts unless it is prose, after any other function word only a value-shaped token counts; prose words are passed over (then only a value-shaped token counts); any other
-    word, a sentence end or a turn edge stops the scan."""
-    copula = False
-    alpha_ok = True
+    (``cells._validators._cued_value_counts``), over up to ``_cues.WINDOW`` tokens, never past a
+    sentence end: a value-shaped token counts anywhere; a copula (also a trailing ":") arms, and while
+    armed the first word that is not a hedge is the value unless it is prose; any later copula re-arms;
+    other function words and non-value words disarm; separator runs are skipped; a masked placeholder
+    is the redacted value (skipped, disarms) unless a value is glued to it."""
+    armed = False
     for _ in range(_cues.WINDOW):
-        m = _VTOK.match(text, pos)
+        m = _CTOK.match(text, pos)
         if not m:
             return None
         pos = m.end()
         raw = m.group(1)
         if raw == _MASKED or _cues.is_placeholder(raw.rstrip(_TRAIL)):
-            copula = False  # an exact placeholder (masked in the digit view) is the redacted value
+            # ``_normalise.MASK`` is " <mask> ": exactly one space and then a value character means the
+            # source glued a value to the placeholder ("[SECRET_1]hunterxyz")
+            glued = raw == _MASKED and text[pos:pos + 1] == " " and text[pos + 1:pos + 2].isalnum()
+            if not glued:
+                armed = False
             continue
         if raw[:1] in ":=":
-            copula = True
+            armed = True
         tok = raw.rstrip(_TRAIL).lstrip(":=#")
         last = raw.rstrip("\"')]")[-1:]
         ends = bool(last) and last in _SENTENCE_END
-        low = tok.rstrip(_TAIL_PUNCT + ":").lower()
-        if not low or low in {"-", ","}:
+        low = tok.rstrip(_TAIL_PUNCT + ":=").lower()
+        arms_after = tok.rstrip(_TAIL_PUNCT)[-1:] in (":", "=") and not ends  # "router: x"
+        if _cues.is_punct(low):
+            if ends:
+                return None
+            armed = armed or arms_after
+            continue
+        if low in _cues.COPULAS:
+            armed = True
+            continue
+        if low in _cues.HEDGES:
             if ends:
                 return None
             continue
-        if low in _cues.COPULAS:
-            copula = True
-            continue
         if low in _SKIP_WORDS:
-            if low not in _cues.HEDGES:
-                alpha_ok = False  # "is a pain", "is not working": a description, not a value
+            armed = arms_after  # "is a pain", "is not working": a description, not a value
             if ends:
                 return None
             continue
         value, end, single = _collapse(text, m)
-        if _value_ok(kind, lo, hi, value, single, copula and alpha_ok):
+        if _value_ok(kind, lo, hi, value, single, armed):
             return end
-        if low in _cues.PROSE_WORDS and not ends:
-            alpha_ok = False
-            continue
-        return None
+        pos = max(pos, end)  # a rejected collapsed value ("4321 0000 0000 99") is not re-read in parts
+        if ends:
+            return None
+        armed = arms_after  # not the value; a later copula re-arms
     return None
 
 
@@ -466,6 +478,8 @@ def _value_ok(kind, lo, hi, value, single, copula=True):
         value = value.rstrip(_TAIL_PUNCT)
     if not lo <= len(value) <= hi:
         return False
+    if _cues.DATE_OR_TIME.fullmatch(value.rstrip(_TAIL_PUNCT)):
+        return copula  # a date counts only right after a copula, as in the cell rescan
     if _secret_like(value) or single:
         return True
     # cue + copula/colon + a word that is not everyday prose ("salasana on kissakala")

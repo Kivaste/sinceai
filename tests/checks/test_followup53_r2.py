@@ -92,9 +92,16 @@ TEXT_FALSE_POSITIVES = [
     "my password is probably the old one",
     "lösenordet är inte rätt",
     "password is not working",
-    "password policy: strong",
     "what is the password?",
 ]
+
+
+# round 3 (review): any copula in the clause re-arms, a trailing ":" included ("router: kissakala"), so a
+# "label: word" after a cue is refused (fail closed) in both checks
+@pytest.mark.parametrize("check", SECRET_CHECKS)
+@pytest.mark.parametrize("text", ["password policy: strong", "password for the router: kissakala"])
+def test_label_colon_word_after_cue_refuses(tmp_path, check, text):
+    assert _hits(tmp_path, text, check) >= 1
 
 
 @pytest.mark.parametrize("check", SECRET_CHECKS)

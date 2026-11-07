@@ -39,8 +39,7 @@ HEDGES = frozenset("""
 probably maybe perhaps still now varmaan kai luultavasti ehkä edelleen nyt nog kanske typ fortfarande nu
 """.split())
 COPULAS = frozenset({"is", "was", "on", "oli", "är", "var", "it's", "its", "=", ":"})
-# Everyday words: never a value, but they may sit between a cue and a value; a credential-shaped
-# token after them still counts, an alphabetic one no longer does.
+# Everyday words: never a value; they may sit between a cue and its value.
 PROSE_WORDS = FUNCTION_WORDS | frozenset("""
 and or but because while until once only even such some any all each every both other another
 more most much many few less least own than then there here yes ok okay sure please thanks thank
@@ -55,5 +54,13 @@ kaikki kaikissa kaikkiin palveluille palveluun tunnus tunnukset lukittu lukittun
 sivulla ongelma fel rätt gammal gamla ny nya samma annan fär mycket bara glömt ändrat borta läst
 spärrat något vad detta det bra dålig och eller men
 """.split())
-# tokens scanned after a cue (the redactor's CUE_SCAN_TOKENS is 6)
-WINDOW = 6
+# Tokens scanned after a cue, up to the sentence end. Generous on purpose (the redactor scans 6):
+# skipped words and separator runs must not push a value out of reach.
+WINDOW = 12
+# A date or time: counts as a value only right after a copula ("password is 12/03/2021").
+DATE_OR_TIME = re.compile(r"\d{1,2}[./]\d{1,2}(?:[./]\d{2,4})?|\d{1,2}:\d{2}")
+
+
+def is_punct(word: str) -> bool:
+    """A separator/punctuation run ("-", "--", "/", "#", "\u00b7"): skipped between a cue and its value."""
+    return not any(c.isalnum() for c in word)

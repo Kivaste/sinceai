@@ -180,19 +180,21 @@ def device_ids(s):
 
 
 # --- cue + value rule shared by usernames and secrets ------------------------------------------
-# Same shape as the redactor (ticket 12), scanned over up to _cues.WINDOW tokens after the cue:
-# * an exact redactor placeholder is the (already redacted) value: skipped, and it uses up the copula;
-# * copulas/colons ("is", "on", "är", ":") and function words ("the", "not", "for", "edelleen") are skipped;
-# * a credential-shaped token (digit, inner symbol, mixed case, long) counts anywhere in the window;
-# * after a copula (plus at most hedges, _cues.HEDGES), the first word counts unless it is prose; after any
-#   other function word ("is a pain", "is not working") only a credential-shaped token counts;
-# * a cue inside a placeholder ("[USERNAME_1]") is no cue;
-# * prose words are passed over (only a credential-shaped token can count after one); any other word, or a
-#   sentence end, stops the scan. Brackets are value characters ("[Hunter2!]"), not a placeholder.
+# Scanned over up to _cues.WINDOW tokens after the cue, never past a sentence end (". ! ? ;"):
+# * a credential-shaped token (digit, inner symbol, mixed case, long) counts anywhere in the scan;
+# * a copula ("is", "on", "är", ":", "=", also a trailing ":" as in "router: x") arms; while armed, the first
+#   word that is not a hedge (_cues.HEDGES) is the value: it counts unless it is prose (a date counts too).
+#   Any copula later in the scan re-arms ("password for the router is kissakala");
+# * function words other than hedges ("is a pain", "is not working") and any other non-value word disarm;
+# * separator/punctuation runs ("-", "--", "/", "#", "·") are skipped;
+# * an exact redactor placeholder is the (already redacted) value: skipped, and it disarms, unless a
+#   value is glued to it ("[SECRET_1]hunterxyz");
+# * a cue inside a placeholder ("[USERNAME_1]") is no cue; a cue glued to a longer word ("pinta") is no cue.
+# Brackets are value characters ("[Hunter2!]"), not a placeholder.
 _CUE_TOKEN = re.compile(_cues.PLACEHOLDER_SRC + r"|(?:(?!" + _cues.PLACEHOLDER_SRC + r")\S)+")
 _WRAP = "\"'()[]<>,;"
 _SENTENCE_END = ".!?;"
-_DATE_OR_TIME = re.compile(r"\d{1,2}[./]\d{1,2}(?:[./]\d{2,4})?|\d{1,2}:\d{2}")
+_DATE_OR_TIME = _cues.DATE_OR_TIME
 
 
 def _credential_shaped(v: str) -> bool:
@@ -217,8 +219,8 @@ def _cued_values(cue, s: str, *, alpha_without_copula: bool) -> int:
 def _cued_value_counts(s: str, pos: int, *, alpha_without_copula: bool) -> bool:
     """True when a value follows the cue ending at ``pos``. ``alpha_without_copula``: a plain word right
     after the cue counts too (usernames: "username mattikoski")."""
-    copula = False
-    alpha_ok = True  # no prose word seen yet
+    armed = False  # a copula, followed by nothing but hedges, separators or a glued placeholder
+    words = 0
     for i, m in enumerate(_CUE_TOKEN.finditer(s, pos)):
         if i >= _cues.WINDOW:
             break
@@ -226,40 +228,46 @@ def _cued_value_counts(s: str, pos: int, *, alpha_without_copula: bool) -> bool:
         if i == 0 and m.start() == pos and tok[0].isalpha():
             return False  # the cue is the start of another word ("pinta", "passwordless")
         if _cues.is_placeholder(tok):
-            copula = False  # the redacted value took the copula; "[SECRET_1] ok" is prose
+            if not s[m.end():m.end() + 1].isalnum():
+                armed = False  # the redacted value took the copula; "[SECRET_1] ok" is prose
             continue
         if tok[:1] in ":=":
-            copula = True
+            armed = True
         core = tok.lstrip(":=")
         last = core.rstrip("\"')]")[-1:]
         ends = bool(last) and last in _SENTENCE_END
         val = core.strip(_WRAP)
-        word = val.rstrip(".!?:)")
+        word = val.rstrip(".!?:=)")
         low = word.lower()
-        if not word:
+        arms_after = val.rstrip(".!?)")[-1:] in (":", "=") and not ends  # "router: x", "pwd= x"
+        if _cues.is_punct(word):
+            if ends:
+                break
+            armed = armed or arms_after
+            continue
+        first_word = words == 0
+        words += 1
+        if low in _cues.COPULAS:
+            armed = True
+            continue
+        if low in _cues.HEDGES:
             if ends:
                 break
             continue
-        if low in _cues.COPULAS:
-            copula = True
-            continue
         if low in _cues.FUNCTION_WORDS:
-            if low not in _cues.HEDGES:
-                alpha_ok = False  # "is a pain", "is not working": a description, not a value
+            armed = arms_after  # "is a pain", "is not working": a description, not a value
             if ends:
                 break
             continue
         if _credential_shaped(val):
             return True
-        if low in _cues.PROSE_WORDS:
-            alpha_ok = False
-            if ends:
-                break
-            continue
-        if (alpha_ok and len(word) >= 3 and any(c.isalpha() for c in word)
-                and (copula or (alpha_without_copula and i == 0))):
+        if (armed or (alpha_without_copula and first_word)) and low not in _cues.PROSE_WORDS and (
+                (len(word) >= 3 and any(c.isalpha() for c in word))
+                or (armed and _DATE_OR_TIME.fullmatch(word))):
             return True
-        break  # an ordinary word that is not the value ends the cue
+        if ends:
+            break
+        armed = arms_after  # any other word is not the value; a later copula re-arms
     return False
 
 
