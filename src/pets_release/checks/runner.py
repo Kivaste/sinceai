@@ -1,4 +1,15 @@
-"""Gate runner: runs the selected registry checks and decides every status itself (fail closed)."""
+"""Gate runner: runs the selected registry checks and decides every status itself (fail closed).
+
+Refusal: any record that is not ``pass`` or ``not_applicable`` refuses, and so does a run in which
+no check actually ran (empty selection, or every record ``not_applicable``).
+
+Notes for the writer (16), which binds export assertions to records via ``ASSERTION_CHECKS``:
+- An assertion may be written ``false`` only from a record with status ``pass`` **and hits == 0**.
+  Low-severity hits (e.g. private/loopback IPs in ``rescan.ip-addresses``) pass the gate but can
+  not back the assertion (02 pins hits=0): the writer must refuse, or omit an optional assertion.
+- A ``not_applicable`` record (denominator 0) can never back an export assertion; if a required
+  assertion's check is ``not_applicable`` the writer must refuse.
+"""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -45,6 +56,14 @@ def _valid(out, chk: Check) -> bool:
     return True
 
 
+def _declares_any(contract, forms) -> bool:
+    """True if any contract column has one of ``forms``; an unreadable contract counts as True."""
+    try:
+        return any(spec["form"] in forms for f in contract["files"].values() for spec in f["columns"].values())
+    except Exception:  # noqa: BLE001
+        return True
+
+
 def _run_one(chk: Check, release, contract, context) -> CheckRecord:
     if release is None:
         return _record(chk, "error")
@@ -54,8 +73,15 @@ def _run_one(chk: Check, release, contract, context) -> CheckRecord:
         return _record(chk, "error")
     if not _valid(out, chk):
         return _record(chk, "error")
+    if out.skipped and out.inapplicable:
+        return _record(chk, "error")
     if out.skipped:
         return _record(chk, "not_run")
+    if out.inapplicable:
+        # allowed only for a check that declares its forms, when the contract declares none of them
+        if out.n != 0 or out.violations or not chk.applies_to or _declares_any(contract, chk.applies_to):
+            return _record(chk, "error")
+        return _record(chk, "not_applicable")
     viol = tuple(sorted(out.violations, key=lambda v: (v.file, v.column or "", v.label, v.severity)))
     if out.n == 0:  # nothing scanned: on a non-empty release that is an error; an empty one is never clean
         return _record(chk, "error", 0, viol)
@@ -77,5 +103,6 @@ def run_checks(release_dir, contract, context=None, *, scope: str | None = None,
     except Exception:  # noqa: BLE001
         release = None
     records = tuple(_run_one(c, release, contract, context) for c in selected)
-    refused = (not records) or any(r.status != "pass" for r in records)
+    ran = [r for r in records if r.status != "not_applicable"]
+    refused = (not ran) or any(r.status != "pass" for r in ran)
     return GateResult(refused=refused, records=records)

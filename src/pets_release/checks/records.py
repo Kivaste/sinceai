@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 
 UNITS = ("cells", "turns", "persons", "files", "rows")
 SCOPES = ("release", "producer")
-STATUSES = ("pass", "fail", "error", "not_run")
+STATUSES = ("pass", "fail", "error", "not_run", "not_applicable")
 SEVERITIES = ("high", "low")
 MAX_LOCATIONS = 100
 
@@ -32,10 +32,18 @@ class Outcome:
     n: int
     violations: tuple = ()
     skipped: bool = False
+    inapplicable: bool = False
 
     @staticmethod
     def not_run() -> Outcome:
+        """Inputs unavailable (e.g. no source tables): recorded as not_run, which refuses."""
         return Outcome(n=0, violations=(), skipped=True)
+
+    @staticmethod
+    def not_applicable() -> Outcome:
+        """The contract declares no column of this check's forms (``applies_to``). The runner
+        verifies that claim; otherwise the record is an error."""
+        return Outcome(n=0, violations=(), inapplicable=True)
 
 
 @dataclass(frozen=True)

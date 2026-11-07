@@ -25,8 +25,8 @@ def main(argv=None) -> int:
                     help="run only this registered check (repeatable); default: every check")
     try:
         a = ap.parse_args(argv)
-    except SystemExit:
-        return 2
+    except SystemExit as e:  # --help exits 0; any parse error is a usage error (2)
+        return 0 if e.code == 0 else 2
     selected = None
     if a.check is not None:
         from pets_release.checks.registry import RegistryError, all_checks
@@ -49,7 +49,10 @@ def main(argv=None) -> int:
         print("contract unreadable", file=sys.stderr)
         return 2
     res = run_checks(a.release, contract, {"phase": a.phase}, scope=a.scope, checks=selected)
-    print(json.dumps(res.summary(), sort_keys=True, separators=(",", ":"), ensure_ascii=False))
+    selection = "partial" if (a.check is not None or a.scope is not None) else "full"
+    summary = res.summary() | {"selection": selection}
+    print(json.dumps(summary, sort_keys=True, separators=(",", ":"), ensure_ascii=False))
+    print(f"selection: {selection}" + (" (not a full gate run)" if selection == "partial" else ""), file=sys.stderr)
     return 1 if res.refused else 0
 
 
