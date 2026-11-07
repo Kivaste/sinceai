@@ -139,6 +139,16 @@ def _result(role: str, sub: str, *ev: str) -> tuple[str, str, list[str]]:
     return role, sub, list(ev)
 
 
+# Follow-up #87: a column with values but no positive signal is not evidence of non-sensitivity (a forgotten
+# quasi-identifier must not look free to release), so it gets the cautious role quasi_identifier. Only an empty
+# column, which has nothing to release, may be non_sensitive.
+UNMATCHED_ROLE = "quasi_identifier"
+
+
+def _unmatched(sub: str, *ev: str) -> tuple[str, str, list[str]]:
+    return _result(UNMATCHED_ROLE, sub, *ev, "no positive signal: cautious default")
+
+
 def _classify(c: _Col, link: str | None) -> tuple[str, str, list[str]]:
     vals, hint = c.values, c.hint
     if not vals:
@@ -280,7 +290,7 @@ def _classify(c: _Col, link: str | None) -> tuple[str, str, list[str]]:
             return _result("sensitive_attribute", "FINANCIAL_DATA", "decimal-amounts", f"median>={int(med // 100) * 100}")
         if ints and 1000 <= med <= 30000 and distinct >= 50 and c.unique_ratio > 0.3:
             return _result("sensitive_attribute", "FINANCIAL_DATA", "integer-amounts")
-        return _result("non_sensitive", "MEASUREMENT", f"numeric {_pct(c.num_frac)}")
+        return _unmatched("MEASUREMENT", f"numeric {_pct(c.num_frac)}", f"distinct={distinct}")
 
     # 10. header tokens decide what values could not
     if hint:
@@ -297,13 +307,13 @@ def _classify(c: _Col, link: str | None) -> tuple[str, str, list[str]]:
     if health >= 0.3 and c.distinct <= 50:
         return _result("sensitive_attribute", "HEALTH_DATA", f"lexicon:health {_pct(health)}")
     if c.distinct <= 2 and low <= {"0", "1", "y", "n", "yes", "no", "true", "false", "kyllä", "ei"}:
-        return _result("non_sensitive", "CATEGORY", "flag")
+        return _unmatched("CATEGORY", "flag")
     if c.distinct <= 60 or c.unique_ratio < 0.3:
-        return _result("non_sensitive", "CATEGORY", f"categorical distinct={c.distinct}")
+        return _unmatched("CATEGORY", f"categorical distinct={c.distinct}")
     if mean_words >= 3:
         return _result("free_text", "FREE_TEXT", f"mean-words:{round(mean_words)}")
     del tokens
-    return _result("non_sensitive", "OTHER", f"no signal distinct={c.distinct}")
+    return _unmatched("OTHER", f"distinct={c.distinct}")
 
 
 def _links(tables: dict[str, pd.DataFrame]) -> dict[tuple[str, str], str]:

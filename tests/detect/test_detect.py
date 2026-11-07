@@ -93,7 +93,7 @@ def test_sensitive_attribute_from_physiological_range_and_name_tokens():
     r = _roles(inventory.detect_table(df, "x", "t"))
     assert r["temp"] == "sensitive_attribute"
     assert r["diagnosis_code"] == "sensitive_attribute"
-    assert r["region"] == "non_sensitive"
+    assert r["region"] == "quasi_identifier"  # follow-up #87: no positive signal is not evidence of non-sensitivity
 
 
 def test_mixed_real_world_formats():
@@ -325,6 +325,52 @@ def test_cli_refuses_direct_csv_in_forbidden_locations(tmp_path, cli, rel):
     assert p.returncode == 2
     assert not out.exists()
     assert "forbidden" in p.stderr
+
+
+# --- follow-up #87 ---------------------------------------------------------
+# Rule: a column with values but no positive signal (validator, range, vocabulary, lexicon, header) gets the
+# cautious role quasi_identifier, never non_sensitive. Rows (trigger -> result), one per former fail-open return:
+#   numeric outside every band            -> quasi_identifier (was non_sensitive / MEASUREMENT)
+#   binary flag                           -> quasi_identifier (was non_sensitive / CATEGORY)
+#   low-cardinality categorical           -> quasi_identifier (was non_sensitive / CATEGORY)
+#   high-cardinality, short, no signal    -> quasi_identifier (was non_sensitive / OTHER)
+#   empty column (no values to release)   -> non_sensitive (unchanged)
+
+
+def _no_signal_frame(n: int = 300) -> pd.DataFrame:
+    return pd.DataFrame(
+        {
+            "f1": [str(1 + i % 9) for i in range(n)],  # small integer codes
+            "f2": [str(i % 2) for i in range(n)],  # binary flag
+            "f3": [["qa", "qb", "qc", "qd", "qe", "qf", "qg"][i % 7] for i in range(n)],  # rare-ish categories
+            "f4": [f"zq{i * 7919 % 1000:03d}x" for i in range(n)],  # high-cardinality short tokens
+        },
+        dtype=str,
+    )
+
+
+@pytest.mark.parametrize("col", ["f1", "f2", "f3", "f4"])
+def test_no_signal_column_defaults_to_quasi_identifier(col):
+    row = {r["column"]: r for r in inventory.detect_table(_no_signal_frame(), "x", "t")}[col]
+    assert row["role"] == "quasi_identifier", row
+    assert any("no positive signal" in e for e in row["evidence"]), row
+
+
+def test_empty_column_stays_non_sensitive():
+    inv = inventory.detect_table(pd.DataFrame({"e": [""] * 10}, dtype=str), "x", "t")
+    assert inv[0]["role"] == "non_sensitive"
+
+
+def test_cli_never_emits_non_sensitive_for_no_signal_columns(tmp_path, cli):
+    src = tmp_path / "export.csv"
+    _write_csv(src, _no_signal_frame())
+    out = tmp_path / "labels.csv"
+    p = cli("detect", str(src), "--out", str(out))
+    assert p.returncode == 0, p.stderr
+    rows = list(csv.reader(out.read_text(encoding="utf-8").splitlines()))
+    assert rows[0] == UNSEEN_HEADER
+    assert {r[0]: r[1] for r in rows[1:]} == {c: "quasi_identifier" for c in ("f1", "f2", "f3", "f4")}
+    assert "non_sensitive" not in p.stderr
 
 
 def test_unknown_role_raises_instead_of_asserting(monkeypatch):
