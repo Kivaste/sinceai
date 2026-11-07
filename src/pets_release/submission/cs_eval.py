@@ -202,7 +202,7 @@ def masking_effect(kit: Kit, turns, convs, passes, context: dict) -> dict:
             "turnLevel": {"heldOutTurns": len(held), "maskedTurns": masked,
                           "maskedShare": round(masked / len(held), 4),
                           "tasks": {"CS-U1": _not_measured(CS_U1_NOT_MEASURED),
-                                    "CS-U5": _vocabulary(sub, text_before, texts)}}}
+                                    "CS-U5": vocabulary_effect(sub, text_before, texts)}}}
 
 
 def _exact_micro(gold: dict, pred: dict, labels: set) -> dict:
@@ -240,18 +240,23 @@ def _target_recall(gold: dict, before: dict, after: dict) -> dict:
     return out
 
 
-def _vocabulary(sub, before: dict, after: dict) -> dict:
+def vocabulary_effect(sub, before: dict, after: dict) -> dict:
     """CS-U5 (ordinary vocabulary retained, matched by turn_id) by the pinned scorer on the held-out turns: original
     vs redacted, before and after masking. The scorer gives 0 when no token is common to >= 25 conversations, so a
-    frame where the original scored against itself is not 1.0 is not_measured (never a made-up 0)."""
+    frame where the original scored against itself is not 1.0 is not_measured (never a made-up 0).
+
+    The pinned scorer caches the common vocabulary under ("u5", id(frame), len(frame)); a later frame of the same
+    length can get a freed frame's id and consume its vocabulary (#148 r3). The scorer is kit code (not modified), so
+    its cache is emptied before every call: each score is computed from its own input, never from a reused entry."""
     import pandas as pd
-    from pets_eval.utility.customer_service import u5_vocab
+    from pets_eval.utility import customer_service as kit_cs
 
     orig = {"turns": sub[["turn_id", "conversation_id", "text"]].copy()}
 
     def score(texts: dict):
         prot = pd.DataFrame({"turn_id": list(texts), "text": list(texts.values())}, dtype=str)
-        return u5_vocab(orig, {"turns": prot})["score"]
+        kit_cs._CACHE.clear()  # never score against a vocabulary cached for another frame
+        return kit_cs.u5_vocab(orig, {"turns": prot})["score"]
 
     if score(dict(zip(sub["turn_id"], sub["text"]))) != 1.0:
         return _not_measured("no common vocabulary in the held-out frame (CS-U5 counts tokens used in >= 25 "
