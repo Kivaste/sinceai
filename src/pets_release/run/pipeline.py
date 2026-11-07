@@ -62,6 +62,16 @@ def _refuse(out: Path, report: dict) -> None:
 _AT_FROM = ("unitsBefore", "unitsSuppressed", "share", "maxShare", "withinBound")
 
 
+def _within_bound(out: Path, scenario_id: str, sup: dict) -> bool:
+    """The suppression report's ``withinBound``; a missing or non-bool value refuses (fail closed, #111)."""
+    wb = sup.get("withinBound")
+    if type(wb) is not bool:
+        _refuse(out, {"status": "refused", "scenario": scenario_id, "reasons": ["suppression:within-bound-missing"],
+                      "suppression": sup})
+        raise RunRefused("suppression report has no within-bound result")
+    return wb
+
+
 def protect(plan, *, policy, source, master, scope_id, recipient):
     """Plan -> (released, finals, suppressed, suppression report, contract): apply with release-scope pseudonyms,
     contract, local suppression. One function for ``run`` and the ``verify --full`` re-measure of a rung step."""
@@ -149,7 +159,7 @@ def run_release(*, kit, scenario: dict, created: str, key_text: str, out, plan_n
     for rs in policy.rung_sacrifices:
         key = (rs["table"], rs["column"])
         entry = next(e for e in plan if (e["table"], e["column"]) == key)
-        if entry["rung"] != rs["from"] or sup.get("withinBound", True):
+        if _within_bound(out, scenario_id, sup) or entry["rung"] != rs["from"]:
             continue
         at_from = k_at_from(sup)
         plan = [dict(e, rung=rs["to"], params={}, reason=rs["reason"][:500]) if (e["table"], e["column"]) == key
@@ -158,7 +168,7 @@ def run_release(*, kit, scenario: dict, created: str, key_text: str, out, plan_n
         released, finals, suppressed, sup, contract = protect(plan, policy=policy, source=source, master=master,
                                                               scope_id=rsid, recipient=recipient)
         steps.append(rung_step(policy, rs, contract, at_from))
-    if not sup.get("withinBound", True):
+    if not _within_bound(out, scenario_id, sup):
         _refuse(out, {"status": "refused", "scenario": scenario_id, "reasons": ["suppression:share-above-max"],
                       "suppression": sup})
         raise RunRefused("suppression share above the policy bound")
