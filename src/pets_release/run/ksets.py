@@ -10,7 +10,9 @@ a design target. The manifest's ``measured.kSets`` therefore reports both:
 
 Each measured set gives per-person k (persons, unidentified units, min, median, below-k count and share) before
 local suppression (the plan applied) and on the released tables (after suppression), through the production
-``person_k_values`` rule with the set's QIs as the contract's QIs. Next to the sets: every catalogued QI
+``person_k_values`` rule with the set's QIs as the contract's QIs. The released figures are always measured on
+table files with row maps derived from them: at run, the exact bytes the writer publishes; at ``verify --full``,
+the published files themselves (round 2: never a re-suppression from the source). Next to the sets: every catalogued QI
 (``policy.qi`` plus the kit data dictionary's QIs in ``KIT_DICTIONARY_QI``) the release withholds, with its
 ``fieldJustifications`` reason. A catalogued QI without a justification makes the whole section not measured.
 
@@ -74,12 +76,17 @@ def _qi_sort(rows) -> list[dict]:
     return sorted((dict(q) for q in rows), key=lambda q: (q["table"], q["column"]))
 
 
-def measure_sets(policy, plan, contract, *, source, master, scope_id, recipient) -> list[dict]:
-    """The two set records for ``plan`` (the run's own ``applied`` and local suppression, re-done here). Each is
-    measured or ``not_measured`` with a reason; never raises for a computation failure."""
+def measure_sets(policy, plan, contract, *, source, master, scope_id, recipient, released_dir,
+                 released_ctx) -> list[dict]:
+    """The two set records for ``plan``. ``beforeSuppression`` replays the plan from the source (the run's own
+    ``applied``; suppression is never re-done here). ``released`` is measured on the tables in ``released_dir`` (the
+    published files at verify; the exact frames handed to the writer at run) with ``released_ctx``, whose row maps
+    were derived from those tables. Each set is measured or ``not_measured`` with a reason; never raises for a
+    computation failure."""
+    from pets_release.checks.producer.kanon import person_k_values
     from pets_release.run.context import producer_context
     from pets_release.run.pipeline import applied
-    from pets_release.run.suppress import apply_suppression, person_k_of
+    from pets_release.run.suppress import person_k_of  # before suppression: in-memory tables, lineage row maps
 
     k = (contract or {}).get("k")
     if not isinstance(k, int) or isinstance(k, bool) or k < 2:
@@ -97,7 +104,6 @@ def measure_sets(policy, plan, contract, *, source, master, scope_id, recipient)
                                   recipient=recipient)
         base = producer_context(scenario_id=policy.scenario, policy=policy, source=source, master=master,
                                 scope_id=scope_id, recipient=recipient, contract=contract, released=None)
-        post, post_finals, _, _ = apply_suppression(pre, pre_finals, policy=policy, contract=contract, base_ctx=base)
         out = []
         with tempfile.TemporaryDirectory(prefix="pets-ksets-") as td:
             tmp = Path(td)
@@ -110,7 +116,7 @@ def measure_sets(policy, plan, contract, *, source, master, scope_id, recipient)
                     continue
                 sub = {**contract, "qi": rows}
                 before = _summary(person_k_of(pre, pre_finals, sub, base, tmp), k)
-                after = _summary(person_k_of(post, post_finals, sub, base, tmp), k)
+                after = _summary(person_k_values(released_dir, sub, released_ctx), k)
                 out.append({"set": name, "status": "measured", "qi": rows, "beforeSuppression": before,
                             "released": after})
         return out
@@ -146,12 +152,27 @@ def k_sets_block(policy, contract, field_justifications, sets) -> dict:
     return {"status": "measured", "source": SOURCE, "k": k, "sets": [dict(s) for s in sets], "withheld": withheld}
 
 
-def k_sets_problems(manifest: dict, source: dict, master_key) -> list[str]:
-    """``verify --full``: re-measure ``measured.kSets`` from the manifest's rungs (rebuilt with the hand plan's params,
-    as the search does) and the kit; it must equal the signed section and be measured. Content-free lines."""
+def released_context(policy, contract, released: dict, *, source, master, scope_id, recipient) -> dict:
+    """The person-k context for ``released`` tables: the producer context plus row maps derived from those tables
+    (record-key tokens inverted against the source), never taken from a file or from the run's lineage."""
+    from pets_release.run.context import producer_context, released_rowmaps
+
+    base = producer_context(scenario_id=policy.scenario, policy=policy, source=source, master=master,
+                            scope_id=scope_id, recipient=recipient, contract=contract, released=None)
+    return {**base, "rowmaps": released_rowmaps(scenario_id=policy.scenario, source=source, released=released,
+                                                master=master, scope_id=scope_id, recipient=recipient,
+                                                contract=contract)}
+
+
+def k_sets_problems(manifest: dict, source: dict, master_key, release_dir) -> list[str]:
+    """``verify --full``: re-measure ``measured.kSets``. ``beforeSuppression`` from the manifest's rungs (rebuilt with
+    the hand plan's params, as the search does) and the kit; ``released`` on the published tables in
+    ``release_dir`` (their digests are verified separately) with freshly derived row maps. It must equal the signed
+    section, and every part must be measured (an agreed ``not_measured`` is still a failure). Content-free lines."""
     from pets_release.minimiser import rebuild_plan
     from pets_release.minimiser.kit import params_from_plan
     from pets_release.policy import get_policy, hand_plan, validate_plan
+    from pets_release.run.context import read_released
 
     signed = manifest["measured"]["kSets"]
     contract = manifest["contract"]
@@ -165,8 +186,14 @@ def k_sets_problems(manifest: dict, source: dict, master_key) -> list[str]:
         validate_plan(plan, policy)
     except Exception:  # noqa: BLE001 - unknown state fails closed, content-free
         return ["measured.kSets: not reproducible (plan cannot be rebuilt from the manifest's rungs)"]
-    sets = measure_sets(policy, plan, contract, source=source, master=master_key,
-                        scope_id=manifest["release"]["releaseScopeId"], recipient=manifest["release"]["recipient"])
+    scope_id, recipient = manifest["release"]["releaseScopeId"], manifest["release"]["recipient"]
+    try:
+        ctx = released_context(policy, contract, read_released(release_dir, contract), source=source,
+                               master=master_key, scope_id=scope_id, recipient=recipient)
+    except Exception:  # noqa: BLE001 - unknown state fails closed, content-free
+        return ["measured.kSets: not reproducible (published tables unreadable)"]
+    sets = measure_sets(policy, plan, contract, source=source, master=master_key, scope_id=scope_id,
+                        recipient=recipient, released_dir=Path(release_dir), released_ctx=ctx)
     fresh = k_sets_block(policy, contract, manifest["fieldJustifications"], sets)
     out = []
     if fresh != signed:

@@ -139,6 +139,7 @@ def test_dashboard_shows_both_sets_and_the_withheld_list(released, tmp_path):
         assert f'data-set="{s["set"]}"' in body
     for w in m["measured"][KS]["withheld"]:
         assert f"<td>{w['table']}.{w['column']}</td>" in body
+    assert 'class="k-sets-coincide"' in body  # the hand plan keeps only scenario QIs: (a) == (b), said so
 
 
 def test_full_verify_fails_on_a_changed_k_set_figure(released, tmp_path):
