@@ -5,7 +5,9 @@
     file is a violation; a missing or empty scan root is an error).
 (b) Runtime: in a clean subprocess, import every ``pets_release`` module (walk_packages)
     and require that ``pets_attacker`` never entered ``sys.modules`` and that no file
-    under the kit's truth/ directory was opened (audit hook on ``open``).
+    under the kit's truth/ directory was opened (audit hook on ``open``). The hook fails closed:
+    an ``open`` it cannot resolve to a path (an int fd, or any error inside the hook) is refused,
+    recorded as ``hook-error``, and makes the child exit non-zero (``runtime-check-failed``).
 
 Residual risk: import names or paths computed at runtime are covered by (b) only for
 code paths exercised at import time.
@@ -83,14 +85,20 @@ _CHILD = r"""
 import importlib, json, os, pkgutil, sys
 truth = os.path.normcase(os.path.realpath(sys.argv[1]))
 opened = []
+hook_errors = []
 def hook(event, args):
-    if event == "open" and args and isinstance(args[0], (str, bytes, os.PathLike)):
-        try:
-            p = os.path.normcase(os.path.realpath(os.fsdecode(args[0])))
-        except Exception:
-            return
-        if p == truth or p.startswith(truth + os.sep):
-            opened.append(1)
+    if event != "open":
+        return
+    # Fail closed: an open the hook cannot resolve to a path (int fd, decode/resolve error) is refused.
+    try:
+        if not args or not isinstance(args[0], (str, bytes, os.PathLike)):
+            raise TypeError("unresolvable open target")
+        p = os.path.normcase(os.path.realpath(os.fsdecode(args[0])))
+    except BaseException:
+        hook_errors.append(1)
+        raise PermissionError("boundary audit hook refused an unresolvable open") from None
+    if p == truth or p.startswith(truth + os.sep):
+        opened.append(1)
 sys.addaudithook(hook)
 errors = []
 n = 0
@@ -110,7 +118,9 @@ print("RESULT" + json.dumps({
     "errors": sorted(set(errors)),
     "attacker": sorted(k for k in sys.modules if k.split(".")[0] == sys.argv[3]),
     "truth_opened": bool(opened),
+    "hook_errors": len(hook_errors),
 }))
+sys.exit(3 if hook_errors else 0)
 """
 
 
@@ -128,14 +138,21 @@ def runtime_violations(src: Path, truth_dir: Path) -> list[str]:
         except (OSError, subprocess.TimeoutExpired):
             return ["runtime-check-failed"]
     line = next((x for x in reversed(r.stdout.splitlines()) if x.startswith("RESULT")), None)
-    if r.returncode != 0 or line is None:
+    if line is None:
         return ["runtime-check-failed"]
-    res = json.loads(line[len("RESULT"):])
-    out = [f"import-error:{m}" for m in res["errors"]]
-    if res["attacker"]:
-        out.append("attacker-loaded")
-    if res["truth_opened"]:
-        out.append("truth-opened")
+    try:
+        res = json.loads(line[len("RESULT"):])
+        out = [f"import-error:{m}" for m in res["errors"]]
+        if res["attacker"]:
+            out.append("attacker-loaded")
+        if res["truth_opened"]:
+            out.append("truth-opened")
+        if res["hook_errors"] != 0:
+            out.append("hook-error")
+    except (ValueError, KeyError, TypeError):
+        return ["runtime-check-failed"]
+    if r.returncode != 0:
+        out.append("runtime-check-failed")
     return out
 
 
