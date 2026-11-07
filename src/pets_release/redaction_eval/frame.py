@@ -45,7 +45,8 @@ def load_cs_frame(kit_root) -> Frame:
     root = Path(kit_root)
     turns = pd.read_csv(root / "data/customer_service/turns.csv", dtype=str, keep_default_na=False)
     convs = pd.read_csv(
-        root / "data/customer_service/conversations.csv", dtype=str, usecols=["conversation_id", "split"]
+        root / "data/customer_service/conversations.csv", dtype=str, keep_default_na=False, na_filter=False,
+        usecols=["conversation_id", "split"],
     )
     gold = load_spans(root / "metadata/pii_spans/customer_service__turns__text.jsonl")
     return build_frame(turns.to_dict("records"), convs.to_dict("records"), gold)

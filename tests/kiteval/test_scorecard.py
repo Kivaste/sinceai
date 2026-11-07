@@ -219,7 +219,7 @@ def test_linkage_is_expected_exactly_when_the_kit_has_identity_data_for_the_tabl
     from pets_release.kiteval.scorecard import _expected_sections
 
     scen = {"id": "TEST-S1", "dataset": "customer_service"}
-    catalog = pd.read_csv(kit / "metadata" / "field_catalog.csv", dtype=str)
+    catalog = pd.read_csv(kit / "metadata" / "field_catalog.csv", dtype=str, keep_default_na=False)
     tables = {"conversations": kit / "data" / "customer_service" / "conversations.csv"}
 
     def linkage():

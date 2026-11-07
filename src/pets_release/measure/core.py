@@ -163,7 +163,7 @@ def _identity_inputs(original_dir: Path, tables, record_keys: dict, out: Path):
             raise MeasureRejected("record_key")
         ids = list(df[key])
         pd.DataFrame({"protected_row": range(len(ids)), "original_record_id": ids}).to_csv(
-            maps / f"rowmap_{name}.csv", index=False)
+            maps / f"rowmap_{name}.csv", index=False, lineterminator="\n")
         rowmaps[name] = maps / f"rowmap_{name}.csv"
         lineage[name] = Lineage(tuple(ids), frozenset())
     return release, rowmaps, lineage

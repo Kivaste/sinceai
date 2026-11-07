@@ -154,7 +154,7 @@ def test_script_entrypoint_writes_the_same_fixture(tmp_path, gen):
 
 def test_train_split_has_every_intent_class(tmp_path, gen):
     gen.generate(tmp_path / "kit")
-    conv = pd.read_csv(tmp_path / "kit" / "customer_service" / "conversations.csv", dtype=str)
+    conv = pd.read_csv(tmp_path / "kit" / "customer_service" / "conversations.csv", dtype=str, keep_default_na=False)
     train = conv[conv["split"] == "train"]
     assert len(train) >= 50
     assert train["intent"].nunique() == 15
@@ -164,8 +164,8 @@ def test_train_split_has_every_intent_class(tmp_path, gen):
 
 def test_each_scored_diagnosis_group_has_thirty_joined_rows(tmp_path, gen):
     gen.generate(tmp_path / "kit")
-    visits = pd.read_csv(tmp_path / "kit" / "health" / "ed_visits.csv", dtype=str)
-    labs = pd.read_csv(tmp_path / "kit" / "health" / "lab_results.csv", dtype=str)
+    visits = pd.read_csv(tmp_path / "kit" / "health" / "ed_visits.csv", dtype=str, keep_default_na=False)
+    labs = pd.read_csv(tmp_path / "kit" / "health" / "lab_results.csv", dtype=str, keep_default_na=False)
     from pets_eval.utility.health import GROUP_NAMES, diagnosis_group
 
     kept = visits[visits["disposition"].fillna("") != "cancelled_duplicate"]
@@ -220,7 +220,7 @@ def test_leading_zero_postcode_is_text(tmp_path, gen):
     zero_codes = [code for code in gen.POSTCODES if str(code).startswith("0")]
     assert zero_codes
     assert zero_codes[0] in raw
-    visits = pd.read_csv(tmp_path / "kit" / "health" / "ed_visits.csv", dtype=str)
+    visits = pd.read_csv(tmp_path / "kit" / "health" / "ed_visits.csv", dtype=str, keep_default_na=False)
     assert visits["visit_id"].str.match(r"SYNV-\d{6}$").all()
 
 
@@ -232,7 +232,7 @@ def test_committed_fixture_bytes_are_protected_from_line_ending_conversion():
 
 def test_identity_codes_use_the_reserved_synthetic_range(tmp_path, gen):
     gen.generate(tmp_path / "kit")
-    visits = pd.read_csv(tmp_path / "kit" / "health" / "ed_visits.csv", dtype=str)
+    visits = pd.read_csv(tmp_path / "kit" / "health" / "ed_visits.csv", dtype=str, keep_default_na=False)
     individual = visits["patient_hetu"].str[7:10]
     assert individual.str.match(r"9\d\d$").all()
 
@@ -279,44 +279,44 @@ def _century(sign: str) -> int:
 
 def test_every_hetu_is_valid_and_matches_the_birth_date(tmp_path, gen):
     gen.generate(tmp_path / "kit")
-    visits = pd.read_csv(tmp_path / "kit" / "health" / "ed_visits.csv", dtype=str)
+    visits = pd.read_csv(tmp_path / "kit" / "health" / "ed_visits.csv", dtype=str, keep_default_na=False)
     for code, dob in zip(visits["patient_hetu"], visits["date_of_birth"]):
         assert hetu_ok(code), "invalid HETU in ed_visits"
         dd, mm, yy, sign = code[0:2], code[2:4], code[4:6], code[6]
         assert dob == f"{_century(sign) + int(yy):04d}-{mm}-{dd}"
         assert 900 <= int(code[7:10]) <= 999
-    customers = pd.read_csv(tmp_path / "kit" / "customer_service" / "customers.csv", dtype=str)
+    customers = pd.read_csv(tmp_path / "kit" / "customer_service" / "customers.csv", dtype=str, keep_default_na=False)
     assert all(hetu_ok(code) for code in customers["hetu"])
     assert customers["hetu"].str[7:10].astype(int).between(900, 999).all()
 
 
 def test_each_person_has_exactly_one_hetu(tmp_path, gen):
     gen.generate(tmp_path / "kit")
-    visits = pd.read_csv(tmp_path / "kit" / "health" / "ed_visits.csv", dtype=str)
+    visits = pd.read_csv(tmp_path / "kit" / "health" / "ed_visits.csv", dtype=str, keep_default_na=False)
     people = visits[["patient_hetu", "patient_name", "date_of_birth", "sex"]].drop_duplicates()
     assert people["patient_hetu"].is_unique
     assert not people.duplicated(["patient_name", "date_of_birth", "sex"]).any()
-    customers = pd.read_csv(tmp_path / "kit" / "customer_service" / "customers.csv", dtype=str)
+    customers = pd.read_csv(tmp_path / "kit" / "customer_service" / "customers.csv", dtype=str, keep_default_na=False)
     assert customers["hetu"].is_unique
     assert not set(customers["hetu"]) & set(visits["patient_hetu"])
 
 
 def test_every_iban_is_a_valid_finnish_iban(tmp_path, gen):
     gen.generate(tmp_path / "kit")
-    customers = pd.read_csv(tmp_path / "kit" / "customer_service" / "customers.csv", dtype=str)
+    customers = pd.read_csv(tmp_path / "kit" / "customer_service" / "customers.csv", dtype=str, keep_default_na=False)
     assert len(customers) >= 100
     assert all(iban_ok(v) and v.startswith("FI") for v in customers["iban"])
     assert (customers["iban"].str.len() == 18).all()  # unspaced in tables
     assert all(scan_text(v).get("PHONE", 0) == 0 for v in customers["iban"])
     assert customers["iban"].is_unique
-    turns = pd.read_csv(tmp_path / "kit" / "customer_service" / "turns.csv", dtype=str)
+    turns = pd.read_csv(tmp_path / "kit" / "customer_service" / "turns.csv", dtype=str, keep_default_na=False)
     spoken = turns["text"].str.extractall(r"(FI\d{2}(?: \d{4}){3} \d{2})")[0]
     assert len(spoken) > 0
     assert all(iban_ok(v) for v in spoken)
 
 def test_every_customer_email_is_found_by_the_production_detector(tmp_path, gen):
     gen.generate(tmp_path / "kit")
-    customers = pd.read_csv(tmp_path / "kit" / "customer_service" / "customers.csv", dtype=str)
+    customers = pd.read_csv(tmp_path / "kit" / "customer_service" / "customers.csv", dtype=str, keep_default_na=False)
     for value in customers["email"]:
         assert value.isascii(), "non-ASCII email"
         assert scan_text(value).get("EMAIL", 0) == 1
@@ -324,7 +324,7 @@ def test_every_customer_email_is_found_by_the_production_detector(tmp_path, gen)
 
 def test_no_visit_precedes_the_patients_birth_date(tmp_path, gen):
     gen.generate(tmp_path / "kit")
-    visits = pd.read_csv(tmp_path / "kit" / "health" / "ed_visits.csv", dtype=str)
+    visits = pd.read_csv(tmp_path / "kit" / "health" / "ed_visits.csv", dtype=str, keep_default_na=False)
     assert (pd.to_datetime(visits["arrival_ts"]) >= pd.to_datetime(visits["date_of_birth"])).all()
 
 
@@ -345,8 +345,8 @@ def test_eval_phrase_variants_are_disjoint_from_train_variants(gen):
 def test_each_split_only_uses_its_own_phrase_variants(tmp_path, gen):
     gen.generate(tmp_path / "kit")
     cs = tmp_path / "kit" / "customer_service"
-    conv = pd.read_csv(cs / "conversations.csv", dtype=str)
-    turns = pd.read_csv(cs / "turns.csv", dtype=str)
+    conv = pd.read_csv(cs / "conversations.csv", dtype=str, keep_default_na=False)
+    turns = pd.read_csv(cs / "turns.csv", dtype=str, keep_default_na=False)
     split_of = dict(zip(conv["conversation_id"], conv["split"]))
     train_p, eval_p = _phrases(gen.INTENT_TEXT), _phrases(gen.EVAL_INTENT_TEXT)
     seen = {"train": set(), "eval": set()}
@@ -361,7 +361,7 @@ def test_each_split_only_uses_its_own_phrase_variants(tmp_path, gen):
 
 def test_products_use_the_kit_pipe_separator(tmp_path, gen):
     gen.generate(tmp_path / "kit")
-    customers = pd.read_csv(tmp_path / "kit" / "customer_service" / "customers.csv", dtype=str)
+    customers = pd.read_csv(tmp_path / "kit" / "customer_service" / "customers.csv", dtype=str, keep_default_na=False)
     assert not customers["products"].str.contains(";").any()
     assert customers["products"].str.contains(r"\|").any()
 

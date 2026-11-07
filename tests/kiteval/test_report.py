@@ -708,3 +708,31 @@ def test_risk_components_must_be_exactly_the_released_tables_risks():
 def test_released_and_tables_must_be_name_to_row_count_maps(bad):
     _rejected_for(_passing_report(), "structure", released=bad)
     _rejected_for(_passing_report(), "structure", tables=bad)
+
+
+# --- determinism (follow-up #83): exports sorted, independent of the report's dict / list order ---
+
+def test_exported_lists_are_sorted_whatever_the_input_order():
+    report = _passing_report()
+    report["tables"] = dict(reversed(list(report["tables"].items())))
+    report["utility"] = list(reversed(report["utility"]))
+    out = _validate(report)
+    assert [t["table"] for t in out["tables"]] == sorted(t["table"] for t in out["tables"])
+    assert [t["id"] for t in out["tasks"]] == ["H-U2", "H-U4"]
+
+
+def test_not_applicable_is_sorted(monkeypatch):
+    from pets_release.kiteval import report as mod
+
+    real = mod._check_table
+
+    def check(name, tr, expected, found, **kw):
+        res = real(name, tr, expected, found, **kw)
+        found.append({"table": name, "section": "linkage", "key": "z", "code": "no_data"})
+        found.append({"table": name, "section": "linkage", "key": "a", "code": "no_data"})
+        return res
+
+    monkeypatch.setattr(mod, "_check_table", check)
+    out = _validate(_passing_report())
+    keys = [(i["table"], i["section"], i["key"], i["code"]) for i in out["not_applicable"]]
+    assert keys == sorted(keys) and len(keys) >= 4
