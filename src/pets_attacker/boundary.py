@@ -1,22 +1,29 @@
-﻿"""Truth-boundary and import-graph guards: AST scan of src/*.py. Fails closed.
+﻿"""Truth-boundary and import-graph guards. Both fail closed.
 
-- A missing or empty scan root is an error, never "no hits".
-- An unparseable file outside the attacker is a violation.
-- Dynamic imports (`import_module`, `__import__`) must resolve to a literal or a
-  module-level string constant; anything else is a violation, except the sites in
-  ALLOWED_DYNAMIC, which are also required never to mention the attacker at all.
+(a) Static: no Python file under src/ outside pets_attacker/ may contain the substring
+    ``pets_attacker`` or a ``truth`` path-segment literal (raw-text regex; an unreadable
+    file is a violation; a missing or empty scan root is an error).
+(b) Runtime: in a clean subprocess, import every ``pets_release`` module (walk_packages)
+    and require that ``pets_attacker`` never entered ``sys.modules`` and that no file
+    under the kit's truth/ directory was opened (audit hook on ``open``).
+
+Residual risk: import names or paths computed at runtime are covered by (b) only for
+code paths exercised at import time.
 """
 
 from __future__ import annotations
 
-import ast
+import json
+import os
 import re
+import subprocess
+import sys
+import tempfile
 from pathlib import Path
 
 ATTACKER = "pets_attacker"
-_TRUTH_RE = re.compile(r"(^|[\\/])truth([\\/]|$)")
-# Package-relative (posix) files that discover their own sub-modules dynamically.
-ALLOWED_DYNAMIC = frozenset({"pets_release/checks/registry.py", "pets_release/cli.py"})
+PACKAGE = "pets_release"
+_TRUTH_RE = re.compile(r"""(^|[\\/'"])truth([\\/'"]|$)""", re.MULTILINE)
 
 
 class BoundaryError(ValueError):
@@ -33,100 +40,93 @@ def _py_files(src: Path, *, inside_attacker: bool):
             yield p
 
 
-def _raw(p: Path) -> str:
-    return p.read_text(encoding="utf-8-sig", errors="replace")
-
-
-def _parse(p: Path):
+def _text(p: Path) -> str | None:
     try:
-        return ast.parse(_raw(p))
-    except (SyntaxError, ValueError):
+        return p.read_text(encoding="utf-8-sig")
+    except (OSError, UnicodeDecodeError):
         return None
 
 
-def _docstring_nodes(tree: ast.AST) -> set:
-    out = set()
-    for parent in ast.walk(tree):
-        if isinstance(parent, (ast.Module, ast.FunctionDef, ast.ClassDef, ast.AsyncFunctionDef)):
-            body = parent.body
-            if body and isinstance(body[0], ast.Expr):
-                out.add(id(body[0].value))
+def _scan(src: Path, pattern, *, inside_attacker: bool = False) -> list[str]:
+    out = []
+    for p in _py_files(src, inside_attacker=inside_attacker):
+        t = _text(p)
+        if t is None or pattern(t):  # unreadable = violation
+            out.append(str(p))
     return out
 
 
-def _truth_hits(p: Path, *, unparseable_is_hit: bool) -> bool:
-    tree = _parse(p)
-    if tree is None:
-        return unparseable_is_hit
-    docs = _docstring_nodes(tree)
-    for n in ast.walk(tree):
-        if (isinstance(n, ast.Constant) and isinstance(n.value, str) and id(n) not in docs
-                and (n.value == "truth" or _TRUTH_RE.search(n.value))):
-            return True
-    return False
-
-
 def truth_references(src: Path) -> list[str]:
-    """Files outside the attacker package that name a `truth` path segment (or cannot be parsed)."""
-    return [str(p) for p in _py_files(src, inside_attacker=False) if _truth_hits(p, unparseable_is_hit=True)]
+    """Files outside the attacker package naming a `truth` path segment (or unreadable)."""
+    return _scan(src, lambda t: bool(_TRUTH_RE.search(t)))
+
+
+def attacker_importers(src: Path) -> list[str]:
+    """Files outside the attacker package mentioning `pets_attacker` at all (or unreadable)."""
+    return _scan(src, lambda t: ATTACKER in t)
 
 
 def attacker_reads_truth(src: Path) -> bool:
     """Sanity: the attacker package itself is the one place that does."""
-    return any(_truth_hits(p, unparseable_is_hit=False) for p in _py_files(src, inside_attacker=True))
+    return any((t := _text(p)) is not None and _TRUTH_RE.search(t)
+               for p in _py_files(src, inside_attacker=True))
 
 
-def _constants(tree: ast.AST) -> dict:
-    out = {}
-    for n in tree.body:
-        if isinstance(n, ast.Assign) and isinstance(n.value, ast.Constant) and isinstance(n.value.value, str):
-            for t in n.targets:
-                if isinstance(t, ast.Name):
-                    out[t.id] = n.value.value
-        elif (isinstance(n, ast.AnnAssign) and isinstance(n.value, ast.Constant) and isinstance(n.value.value, str)
-              and isinstance(n.target, ast.Name)):
-            out[n.target.id] = n.value.value
+_CHILD = r"""
+import importlib, json, os, pkgutil, sys
+truth = os.path.normcase(os.path.realpath(sys.argv[1]))
+opened = []
+def hook(event, args):
+    if event == "open" and args and isinstance(args[0], (str, bytes, os.PathLike)):
+        try:
+            p = os.path.normcase(os.path.realpath(os.fsdecode(args[0])))
+        except Exception:
+            return
+        if p == truth or p.startswith(truth + os.sep):
+            opened.append(1)
+sys.addaudithook(hook)
+errors = []
+n = 0
+pkg = importlib.import_module(sys.argv[2])
+mods = [sys.argv[2]]
+for m in pkgutil.walk_packages(pkg.__path__, sys.argv[2] + ".", onerror=lambda name: errors.append(name)):
+    mods.append(m.name)
+for name in mods:
+    try:
+        importlib.import_module(name)
+        n += 1
+    except BaseException:
+        errors.append(name)
+print("RESULT" + json.dumps({
+    "imported": n,
+    "errors": sorted(set(errors)),
+    "attacker": sorted(k for k in sys.modules if k.split(".")[0] == sys.argv[3]),
+    "truth_opened": bool(opened),
+}))
+"""
+
+
+def runtime_violations(src: Path, truth_dir: Path) -> list[str]:
+    """Import every pets_release module in a clean subprocess; list boundary violations (names only)."""
+    src = Path(src).resolve()
+    if not (src / PACKAGE / "__init__.py").is_file():
+        raise BoundaryError(f"{PACKAGE} not found under the scan root")
+    env = {k: v for k, v in os.environ.items() if k not in ("PYTHONPATH", "PYTHONSTARTUP")}
+    env.update(PYTHONPATH=str(src), PYTHONDONTWRITEBYTECODE="1", PYTHONUTF8="1")
+    with tempfile.TemporaryDirectory() as cwd:
+        try:
+            r = subprocess.run([sys.executable, "-c", _CHILD, str(truth_dir), PACKAGE, ATTACKER],
+                               cwd=cwd, env=env, capture_output=True, text=True, timeout=600, check=False)
+        except (OSError, subprocess.TimeoutExpired):
+            return ["runtime-check-failed"]
+    line = next((x for x in reversed(r.stdout.splitlines()) if x.startswith("RESULT")), None)
+    if r.returncode != 0 or line is None:
+        return ["runtime-check-failed"]
+    res = json.loads(line[len("RESULT"):])
+    out = [f"import-error:{m}" for m in res["errors"]]
+    if res["attacker"]:
+        out.append("attacker-loaded")
+    if res["truth_opened"]:
+        out.append("truth-opened")
     return out
-
-
-def _is_attacker(name: str) -> bool:
-    return name.split(".")[0] == ATTACKER
-
-
-def _imports_attacker(p: Path, rel: str) -> bool:
-    tree = _parse(p)
-    if tree is None:
-        return True  # fail closed
-    consts = _constants(tree)
-    for n in ast.walk(tree):
-        if isinstance(n, ast.Import) and any(_is_attacker(a.name) for a in n.names):
-            return True
-        if isinstance(n, ast.ImportFrom) and n.level == 0 and _is_attacker(n.module or ""):
-            return True
-        if isinstance(n, ast.Call):
-            fn = n.func.attr if isinstance(n.func, ast.Attribute) else getattr(n.func, "id", "")
-            if fn not in ("import_module", "__import__"):
-                continue
-            arg = n.args[0] if n.args else next((k.value for k in n.keywords if k.arg in ("name", "package")), None)
-            if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
-                if _is_attacker(arg.value):
-                    return True
-            elif isinstance(arg, ast.Name) and arg.id in consts:
-                if _is_attacker(consts[arg.id]):
-                    return True
-            elif rel in ALLOWED_DYNAMIC:
-                if ATTACKER in _raw(p):
-                    return True
-            else:
-                return True  # unresolvable dynamic import
-    return False
-
-
-def attacker_importers(src: Path) -> list[str]:
-    """Files outside the attacker package that import it, import dynamically without a resolvable
-    target, or cannot be parsed."""
-    root = Path(src)
-    return [str(p) for p in _py_files(src, inside_attacker=False)
-            if _imports_attacker(p, p.relative_to(root).as_posix())]
-
 

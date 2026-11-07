@@ -10,6 +10,14 @@ import pandas as pd
 from pets_attacker.cli import main
 from pets_attacker.personas import AGGREGATE_KEYS
 
+RUNGS = {"ed_visits": {"arrival_ts": "ts.exact", "municipality": "keep"}}
+
+
+def _rungs_file(root: Path) -> list:
+    p = root / "rungs.json"
+    p.write_text(json.dumps(RUNGS), encoding="utf-8")
+    return ["--rungs", str(p)]
+
 
 def _mini_kit(root: Path) -> Path:
     kit, rel = root / "kit", root / "rel"
@@ -36,7 +44,7 @@ def _mini_kit(root: Path) -> Path:
 def test_cli_emits_aggregates_only(tmp_path: Path):
     kit = _mini_kit(tmp_path)
     out = tmp_path / "out.json"
-    assert main(["--kit", str(kit), "--release", str(tmp_path / "rel"), "--label", "t", "--out", str(out)]) == 0
+    assert main(["--kit", str(kit), "--release", str(tmp_path / "rel"), "--label", "t", "--out", str(out)] + _rungs_file(tmp_path)) == 0
     res = json.loads(out.read_text(encoding="utf-8"))
     assert set(res) == {"label", "broker", "insider"}
     assert set(res["broker"]) == {"news_clips_health"}
@@ -51,7 +59,7 @@ def test_cli_emits_aggregates_only(tmp_path: Path):
 def test_cli_fails_closed_without_rowmap(tmp_path: Path):
     kit = _mini_kit(tmp_path)
     (tmp_path / "rel" / "rowmap_ed_visits.csv").unlink()
-    assert main(["--kit", str(kit), "--release", str(tmp_path / "rel"), "--label", "t", "--out", str(tmp_path / "o.json")]) != 0
+    assert main(["--kit", str(kit), "--release", str(tmp_path / "rel"), "--label", "t", "--out", str(tmp_path / "o.json")] + _rungs_file(tmp_path)) != 0
     assert not (tmp_path / "o.json").exists()
 
 
@@ -65,7 +73,7 @@ def test_cli_accepts_a_scoring_dir_next_to_the_release(tmp_path: Path):
     scoring = tmp_path / "rel.scoring"
     _move_rowmap(tmp_path, scoring)
     out = tmp_path / "o.json"
-    base = ["--kit", str(kit), "--release", str(tmp_path / "rel"), "--label", "t", "--out", str(out)]
+    base = ["--kit", str(kit), "--release", str(tmp_path / "rel"), "--label", "t", "--out", str(out)] + _rungs_file(tmp_path)
     assert main(base) != 0  # no rowmap in the release dir and none named: refused
     assert main(base + ["--scoring-dir", str(scoring)]) == 0
     assert json.loads(out.read_text(encoding="utf-8"))["insider"]["evaluated"] is True
@@ -76,7 +84,7 @@ def test_cli_accepts_an_explicit_rowmap_and_does_not_fall_back(tmp_path: Path):
     scoring = tmp_path / "elsewhere"
     _move_rowmap(tmp_path, scoring)
     out = tmp_path / "o.json"
-    base = ["--kit", str(kit), "--release", str(tmp_path / "rel"), "--label", "t", "--out", str(out)]
+    base = ["--kit", str(kit), "--release", str(tmp_path / "rel"), "--label", "t", "--out", str(out)] + _rungs_file(tmp_path)
     assert main(base + ["--rowmap", f"ed_visits={scoring / 'rowmap_ed_visits.csv'}"]) == 0
     # a planted rowmap in the release dir must not win over an explicit scoring dir that lacks one
     (tmp_path / "rel" / "rowmap_ed_visits.csv").write_text("protected_row,original_record_id\n", encoding="utf-8")
@@ -88,4 +96,17 @@ def test_cli_accepts_an_explicit_rowmap_and_does_not_fall_back(tmp_path: Path):
 def test_cli_refuses_a_bad_row_map(tmp_path: Path):
     kit = _mini_kit(tmp_path)
     (tmp_path / "rel" / "rowmap_ed_visits.csv").write_text("protected_row,original_record_id\n", encoding="utf-8")
-    assert main(["--kit", str(kit), "--release", str(tmp_path / "rel"), "--label", "t", "--out", str(tmp_path / "o.json")]) != 0
+    assert main(["--kit", str(kit), "--release", str(tmp_path / "rel"), "--label", "t", "--out", str(tmp_path / "o.json")] + _rungs_file(tmp_path)) != 0
+
+
+def test_cli_refuses_without_rung_metadata_or_with_a_contradicting_one(tmp_path: Path):
+    kit = _mini_kit(tmp_path)
+    base = ["--kit", str(kit), "--release", str(tmp_path / "rel"), "--label", "t", "--out", str(tmp_path / "o.json")]
+    assert main(base) != 0  # no --rungs: shape is never trusted
+    bad = tmp_path / "bad.json"
+    bad.write_text(json.dumps({"ed_visits": {"arrival_ts": "ts.day", "municipality": "keep"}}), encoding="utf-8")
+    assert main(base + ["--rungs", str(bad)]) != 0  # cells carry times, rung says day
+    partial = tmp_path / "partial.json"
+    partial.write_text(json.dumps({"ed_visits": {"municipality": "keep"}}), encoding="utf-8")
+    assert main(base + ["--rungs", str(partial)]) != 0
+    assert not (tmp_path / "o.json").exists()

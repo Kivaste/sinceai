@@ -5,13 +5,20 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 
-from pets_attacker.linkage import QI
-from pets_attacker.personas import (
-    AGGREGATE_KEYS,
-    MappingError,
-    broker_attack,
-    insider_attack,
-)
+from pets_attacker import personas
+from pets_attacker.linkage import QI, RungError
+from pets_attacker.personas import AGGREGATE_KEYS, MappingError
+
+RUNGS = {"arrival_ts": "ts.exact", "municipality": "keep"}
+
+
+def insider_attack(*a, **k):
+    return personas.insider_attack(*a, rungs=k.pop("rungs", RUNGS), **k)
+
+
+def broker_attack(*a, **k):
+    return personas.broker_attack(*a, rungs=k.pop("rungs", RUNGS), **k)
+
 
 REC = [f"v{i}" for i in range(8)]
 PERSON = ["p0", "p1", "p2", "p3", "p4", "p5", "p0", "p1"]  # p0, p1 visit twice
@@ -120,7 +127,7 @@ def test_single_target_ladder_release_is_certain():
     adv = pd.DataFrame({"adv_row_id": ["a0"], "t": ["2025-03-20T10:10:00"], "p": ["Kaarina"]})
     atruth = pd.DataFrame({"adv_row_id": ["a0"], "person_id": ["p0"]})
     qis = [QI("time", ("t",), ("arrival_ts",), window=(1, 1)), QI("exact", ("p",), ("municipality",))]
-    out = broker_attack(adv, atruth, prot, rm, ident, qis, original=orig, record_key="visit_id", sensitive="icd10_primary")
+    out = broker_attack(adv, atruth, prot, rm, ident, qis, rungs={"arrival_ts": "ts.month_hour", "municipality": "geo.topn"}, original=orig, record_key="visit_id", sensitive="icd10_primary")
     assert out["reidentification_rate"] == 1.0 and out["attribute_inference_rate"] == 1.0  # truncated ICD is a prefix
 
 
@@ -159,4 +166,17 @@ def test_zero_targets_is_not_evaluated():
     atruth = pd.DataFrame({"adv_row_id": ["a0"], "person_id": ["pX"]})
     out = broker_attack(adv, atruth, prot, rm, _identity(), [QI("exact", ("profile_city",), ("municipality",))])
     assert out["evaluated"] is False and out["n_targets"] == 0
+
+
+
+def test_personas_refuse_without_rung_metadata():
+    prot, rm = _identity_release([0, 1, 2, 3, 4, 5, 6, 7])
+    with pytest.raises(RungError):
+        personas.insider_attack(_original(), prot, rm, _identity(), date_col="arrival_ts", place_col="municipality",
+                                record_key="visit_id", rungs={})
+    with pytest.raises(RungError):
+        personas.broker_attack(_adv([]), pd.DataFrame({"adv_row_id": ["a"], "person_id": ["p0"]}), prot, rm, _identity(),
+                               [QI("time", ("posted_ts",), ("arrival_ts",))], rungs={})
+
+
 

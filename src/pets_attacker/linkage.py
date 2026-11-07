@@ -70,17 +70,76 @@ def _tokens(s) -> set:
     return {x for x in re.split(r"[\s\-]+", t) if len(x) >= 2}
 
 
-def parse_interval(s: pd.Series):
-    """[start, end) per cell for datetimes, dates, months, years and ISO weeks. NaT when unusable."""
+class RungError(ValueError):
+    """Rung metadata missing, unknown, or contradicted by the released cells. Scoring refused."""
+
+
+# Anchored cell forms per rung (ticket 07 contract forms; kit-baseline forms allowed where noted).
+_TIME_FORMS = {
+    "ts.exact": r"\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}(?::\d{2})?",
+    "ts.hour": r"\d{4}-\d{2}-\d{2}[T ]\d{2}:00",
+    "ts.month_hour": r"\d{4}-\d{2}-01T\d{2}:00",
+    "ts.day": r"\d{4}-\d{2}-\d{2}",
+    "ts.week": r"\d{4}-W\d{2}",
+    "ts.month": r"\d{4}-\d{2}",
+}
+_AGE_FORMS = {
+    "age.band5": r"(?:\d{1,2}-\d{1,2}|90\+)",
+    "age.band10": r"(?:\d{1,2}-\d{1,2}|90\+)",
+    "age.years": r"\d{1,3}",
+    "dob.date": r"\d{4}-\d{2}-\d{2}",
+    "dob.month": r"\d{4}-\d{2}",
+    "dob.year": r"\d{4}",
+}
+_EXACT_RUNGS = frozenset({"keep", "geo.full", "geo.topn"})
+WITHHELD = "withheld"
+KIND_RUNGS = {"time": set(_TIME_FORMS), "age": set(_AGE_FORMS), "exact": set(_EXACT_RUNGS)}
+
+
+def _need_rung(rungs: dict, col: str, kind: str) -> str:
+    r = rungs.get(col) if rungs else None
+    if r is None:
+        raise RungError(f"no rung metadata for column {col!r}")
+    if r != WITHHELD and r not in KIND_RUNGS[kind]:
+        raise RungError(f"rung {r!r} is not valid for a {kind} column ({col!r})")
+    return r
+
+
+def _cells(s: pd.Series) -> list:
+    return ["" if _blank(v) else str(v).strip() for v in s.tolist()]
+
+
+def parse_interval(s: pd.Series, rung: str):
+    """[start, end) per cell, read by the DECLARED rung (never by cell shape). NaT for blank cells.
+    A non-blank cell that does not fit the rung's form is a RungError."""
     start = np.full(len(s), np.datetime64("NaT", "ns"), dtype="datetime64[ns]")
     end = start.copy()
+    if rung == WITHHELD:
+        return start, end
+    form = _TIME_FORMS.get(rung)
+    if form is None:
+        raise RungError(f"unknown timestamp rung {rung!r}")
+    if rung == "ts.month_hour":  # month+hour-of-day only: no instant to place; matched by key
+        for raw in _cells(s):
+            if raw and not re.fullmatch(form, raw):
+                raise RungError("cell does not fit its declared rung")
+        return start, end
     cache: dict = {}
-    for i, raw in enumerate(s.fillna("").astype(str).str.strip().tolist()):
+    for i, raw in enumerate(_cells(s)):
+        if raw == "":
+            continue
         if raw not in cache:
+            if not re.fullmatch(form, raw):
+                raise RungError("cell does not fit its declared rung")
             cache[raw] = _interval_one(raw)
         a, b = cache[raw]
-        if a is not None:
-            start[i], end[i] = a, b
+        if a is None:
+            raise RungError("cell does not fit its declared rung")
+        start[i], end[i] = a, b
+    if rung == "ts.hour":
+        end = np.where(np.isnat(start), end, start + np.timedelta64(1, "h"))
+    elif rung == "ts.exact":
+        end = start.copy()
     return start, end
 
 
@@ -99,9 +158,6 @@ def _interval_one(raw: str):
         if re.fullmatch(r"\d{4}-\d{2}-\d{2}", raw):
             a = pd.Timestamp(raw)
             return a.to_datetime64(), (a + pd.Timedelta(days=1)).to_datetime64()
-        if re.fullmatch(r"\d{4}-\d{2}-\d{2}[T ]\d{2}:00", raw):  # hour bucket (ts.hour)
-            a = pd.Timestamp(raw)
-            return a.to_datetime64(), (a + pd.Timedelta(hours=1)).to_datetime64()
         if re.match(r"\d{4}-\d{2}-\d{2}[T ]\d{1,2}:\d{2}", raw):
             a = pd.Timestamp(raw)
             if a.tzinfo is not None:
@@ -112,43 +168,36 @@ def _interval_one(raw: str):
     return None, None
 
 
-def _age_interval(s: pd.Series, col: str):
-    """Age-in-years interval [lo, hi) at REF per protected cell from a birth date/year, age or band."""
+def _age_interval(s: pd.Series, rung: str):
+    """Age-in-years interval [lo, hi) at REF per cell, read by the declared rung. Blank cell = wildcard."""
     n = len(s)
-    lo, hi = np.full(n, -1.0), np.full(n, 200.0)  # wildcard
-    birth = "birth" in col.lower() or "dob" in col.lower()
+    lo, hi = np.full(n, -1.0), np.full(n, 200.0)
+    if rung == WITHHELD:
+        return lo, hi
+    form = _AGE_FORMS[rung]
     cache: dict = {}
-    for i, raw in enumerate(s.fillna("").astype(str).str.strip().tolist()):
+    for i, raw in enumerate(_cells(s)):
+        if raw == "":
+            continue
         if raw not in cache:
-            cache[raw] = _age_one(raw, birth)
-        if cache[raw] is not None:
-            lo[i], hi[i] = cache[raw]
+            if not re.fullmatch(form, raw):
+                raise RungError("cell does not fit its declared rung")
+            cache[raw] = _age_one(raw, rung)
+        lo[i], hi[i] = cache[raw]
     return lo, hi
 
 
-def _age_one(raw: str, birth: bool):
-    if raw == "" or _MASKED.match(raw):
-        return None
-    if birth:
+def _age_one(raw: str, rung: str):
+    if rung.startswith("dob."):
         a, b = _interval_one(raw)
-        if a is None:
-            return None
         a, b = pd.Timestamp(a), pd.Timestamp(b)
         return (REF - b).days / 365.25, (REF - a).days / 365.25 + 1e-9
-    m = re.fullmatch(r"[\[(]?\s*(\d+)\s*(?:-|â€“|,|\.\.)\s*(\d+)\s*[\])]?", raw)
+    if rung == "age.years":
+        return float(raw), float(raw) + 1
+    m = re.fullmatch(r"(\d+)-(\d+)", raw)
     if m:
         return float(m.group(1)), float(m.group(2)) + 1
-    m = re.fullmatch(r"(\d+)\s*\+", raw)
-    if m:
-        return float(m.group(1)), 130.0
-    m = re.fullmatch(r"<\s*(\d+)", raw)
-    if m:
-        return 0.0, float(m.group(1))
-    try:
-        a = float(raw.replace(",", "."))
-        return a, a + 1
-    except ValueError:
-        return None
+    return float(raw[:-1]), 130.0  # "90+"
 
 
 _MONTH_HOUR = re.compile(r"(\d{4})-(\d{2})-01T(\d{2}):00")
@@ -172,7 +221,7 @@ def _hour_keys(a0, a1) -> np.ndarray:
 class Matcher:
     """Index a protected table once; ask for the candidate rows of each adversary record."""
 
-    def __init__(self, protected: pd.DataFrame, qis: list):
+    def __init__(self, protected: pd.DataFrame, qis: list, rungs: dict):
         self.n = len(protected)
         self.qis = qis
         self.d: dict = {}
@@ -180,16 +229,20 @@ class Matcher:
             col = protected[q.prot[0]]
             if q.kind == "exact":
                 vals = np.array([_norm(v) for v in col.tolist()], dtype=object)
-                known = set(vals) - {"", "other"}  # released places; "other" = grouped non-top-N
+                rung = _need_rung(rungs, q.prot[0], "exact")
+                # only geo.topn groups the tail into "other"; elsewhere "other" is a literal place
+                known = set(vals) - {"", "other"} if rung == "geo.topn" else None
                 self.d[i] = (vals, known)
             elif q.kind == "sex":
                 self.d[i] = np.array(["" if _blank(v) else _SEX.get(str(v).strip().lower(), "") for v in col.tolist()], dtype=object)
             elif q.kind == "postcode":
                 self.d[i] = np.array([re.sub(r"\D", "", "" if _blank(v) else str(v)) for v in col.tolist()], dtype=object)
             elif q.kind == "age":
-                self.d[i] = _age_interval(col, q.prot[0])
+                self.d[i] = _age_interval(col, _need_rung(rungs, q.prot[0], "age"))
             elif q.kind == "time":
-                self.d[i] = parse_interval(col) + (_month_hour_keys(col),)
+                rung = _need_rung(rungs, q.prot[0], "time")
+                mh = _month_hour_keys(col) if rung == "ts.month_hour" else np.full(self.n, -1, dtype=np.int64)
+                self.d[i] = parse_interval(col, rung) + (mh,)
             elif q.kind == "name":
                 full = protected[list(q.prot)].fillna("").astype(str).agg(" ".join, axis=1).tolist()
                 index: dict = {}
@@ -232,7 +285,9 @@ class Matcher:
                     continue
                 if q.kind == "exact":
                     vals, known = self.d[i]
-                    ok = (vals == a) | (vals == "") | ((vals == "other") & (a not in known))
+                    ok = (vals == a) | (vals == "")
+                    if known is not None:
+                        ok |= (vals == "other") & (a not in known)
                 else:
                     ok = (self.d[i] == a) | (self.d[i] == "")
                 mask &= ok
@@ -277,6 +332,7 @@ class Matcher:
                 mask &= ok
             used += 1
         return np.flatnonzero(mask), used
+
 
 
 
