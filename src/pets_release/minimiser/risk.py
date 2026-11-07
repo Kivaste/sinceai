@@ -119,6 +119,8 @@ def risk_vector(policy, plan, prot, source, kspec, k) -> tuple[dict, object]:
     wanted = set(policy.risk_vector)
     if wanted & K_COMPONENTS:
         pk, _ = person_k(prot, plan, policy, source, kspec, k)  # raises on a missing PersonK
+        if pk is None:  # #118: no caller may score a missing PersonK
+            raise PersonKMissing("PersonK missing: per-person k not measured")
         n = len(pk.per_person) + pk.unidentified
         below = sum(1 for v in pk.per_person.values() if v < k) + pk.unidentified
         uniq = sum(1 for v in pk.per_person.values() if v == 1) + pk.unidentified

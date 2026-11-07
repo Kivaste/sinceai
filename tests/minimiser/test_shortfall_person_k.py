@@ -13,6 +13,9 @@ Failure rows (trigger -> wrong result before the fix):
   S2 same policy, per-person k yields no PersonK
        -> candidates scored and logged with no k measurement; the search only crashed (RuntimeError) in the
           final suppression, never a refusal
+  S4 ``risk.person_k`` yields None at a search call site (evaluate / risk_vector / suppress)
+       -> suppress broke out of its loop (0 of 0 persons suppressed, search went on to the final gate);
+          evaluate and risk_vector scored on or crashed with an AttributeError instead of refusing
   S3 a risk component measured during the search but missing from the final re-check
        -> final log entry recorded it as 0.0 and the plan was released with it unmeasured
 
@@ -53,6 +56,36 @@ def test_missing_person_k_refuses_before_any_score(syn, monkeypatch):
     with pytest.raises(MinimiserRefused, match="PersonK missing") as ei:
         _run(syn, _no_k_policy(syn))
     assert ei.value.log == []
+
+
+def _person_k_none_in(site):
+    """A ``risk.person_k`` that returns no PersonK when called from ``site`` (the search method calling it) and the
+    real result elsewhere: a fault plant at the boundary, to prove each call site refuses on its own."""
+    import sys
+
+    from pets_release.minimiser import risk
+
+    real = risk.person_k
+
+    def planted(*a, **kw):
+        pk, contract = real(*a, **kw)
+        return (None if sys._getframe(1).f_code.co_name == site else pk), contract
+    return planted
+
+
+@pytest.mark.parametrize("site", ["evaluate", "risk_vector", "suppress"])
+def test_person_k_none_at_each_search_site_refuses(syn, monkeypatch, site):
+    """S4: a PersonK of None, at the candidate evaluation (risk vector without k components: ``evaluate``; with
+    them: ``risk_vector``) or in the local-suppression loop, refuses with ``PersonK missing``. Before the fix
+    suppression broke out of its loop and reported 0 of 0 persons."""
+    from pets_release.minimiser import risk
+
+    monkeypatch.setattr(risk, "person_k", _person_k_none_in(site))
+    with pytest.raises(MinimiserRefused, match="PersonK missing") as ei:
+        _run(syn, syn.policy() if site == "risk_vector" else _no_k_policy(syn))
+    if site != "suppress":
+        assert ei.value.log == []  # refused at the first candidate, before any score is logged
+    assert not any("0 of 0 persons" in e["reason"] for e in ei.value.log)
 
 
 def test_final_risk_component_missing_refuses(syn):
