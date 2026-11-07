@@ -18,8 +18,10 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 
 import pandas as pd
+import pytest
 from run_helpers import build_kit, cli, run_args
 
 MONTH_HOUR = re.compile(r"^\d{4}-\d{2}-01T\d{2}:00$")
@@ -58,10 +60,16 @@ def test_month_hour_kept_when_k_passes_within_budget(released):
     assert not any("rungStep" in s for s in m["sacrifices"])
 
 
-def test_hour_of_day_adopted_as_recorded_sacrifice(tmp_path):
-    kit = build_kit(tmp_path / "kit", spread_arrivals)
-    out = tmp_path / "out" / "rel"
-    proc = cli(*run_args(kit, out))
+@pytest.fixture(scope="module")
+def spread(tmp_path_factory):
+    base = tmp_path_factory.mktemp("spread")
+    kit = build_kit(base / "kit", spread_arrivals)
+    out = base / "out" / "rel"
+    return kit, out, cli(*run_args(kit, out))
+
+
+def test_hour_of_day_adopted_as_recorded_sacrifice(spread):
+    kit, out, proc = spread
     assert proc.returncode == 0, proc.stdout + proc.stderr
     m = _manifest(out)
     assert _just(m, "arrival_ts")["rung"] == "ts.hour_of_day"
@@ -81,3 +89,40 @@ def test_hour_of_day_adopted_as_recorded_sacrifice(tmp_path):
     assert lim.returncode == 0, lim.stdout + lim.stderr
     full = cli("verify", "--full", "--kit", str(kit), str(out))
     assert full.returncode == 0, full.stdout + full.stderr
+
+
+def _planted(spread, tmp_path, edit):
+    _, out, proc = spread
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    dst = tmp_path / "rel"
+    shutil.copytree(out, dst)
+    from pets_release.manifest import canonical_bytes
+
+    m = _manifest(dst)
+    edit(m)
+    (dst / "privacy_manifest.json").write_bytes(canonical_bytes(m))
+    return dst
+
+
+def test_verify_refuses_hour_of_day_without_record(spread, tmp_path):
+    def drop(m):
+        for s in m["sacrifices"]:
+            s.pop("rungStep", None)
+
+    res = cli("verify", str(_planted(spread, tmp_path, drop)))
+    assert res.returncode == 1, res.stdout + res.stderr
+    assert "rung-sacrifice-missing" in res.stdout
+
+def _hu8(m):
+    return next(s for s in m["sacrifices"] if s["check"] == "H-U8")
+
+
+@pytest.mark.parametrize("edit,code", [
+    (lambda m: _hu8(m)["rungStep"]["atFrom"].update(share=0.05), "budget-not-exceeded"),
+    (lambda m: _hu8(m).update(after=0.5), "rung-sacrifice-check-not-strict"),
+    (lambda m: _hu8(m)["rungStep"].update(column="triage"), "field-mismatch"),
+], ids=["k-within-budget", "check-below-threshold", "other-column"])
+def test_verify_refuses_forged_rung_step(spread, tmp_path, edit, code):
+    res = cli("verify", str(_planted(spread, tmp_path, edit)))
+    assert res.returncode == 1, res.stdout + res.stderr
+    assert code in res.stdout
