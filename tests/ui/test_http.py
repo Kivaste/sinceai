@@ -248,6 +248,21 @@ def test_client_plan_overrides_are_refused_without_starting_a_job(tmp_path):
         assert not list(out.iterdir())
 
 
+def test_duplicate_key_run_request_is_refused_without_starting_a_job(tmp_path):
+    """#131 (HTTP seam): the run request parses strictly; a duplicate "scenario" whose first value is not a
+    scenario (last value valid) is 400 and starts nothing (was: last value kept, job started)."""
+    with running(tmp_path, record_commands=True) as (_, url, _, out):
+        parts = urlsplit(url)
+        req = Request(f"{parts.scheme}://{parts.netloc}/api/run?{parts.query}", method="POST",
+                      data=b'{"scenario": "NOT-A-SCENARIO", "scenario": "HEALTH-S1"}',
+                      headers={"Content-Type": "application/json"})
+        with urlopen(req, timeout=60) as response:
+            assert response.status == 400
+        assert json.loads(request(url, "/api/result")[1])["status"] == "IDLE"
+        assert not (tmp_path / "commands.jsonl").exists()
+        assert not list(out.iterdir())
+
+
 def test_unsupported_server_plan_is_refused_at_startup(tmp_path):
     """CLI seam: no advertised server plan can forward the unsupported measured value."""
     kit = build_kit(tmp_path / "kit", coarse_qis)

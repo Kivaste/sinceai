@@ -48,7 +48,7 @@ def run(kit: Path, release: Path, label: str, scoring_dir: Path | None = None, r
     protected, rowmap = _csv(prot_path), load_rowmap(rowmap_path)
     original = _csv(kit / "data" / DOMAIN / f"{TABLE}.csv")
     identity = load_identity(kit, DOMAIN, TABLE)
-    specs = json.loads((kit / "metadata" / "attack_specs.json").read_text(encoding="utf-8"))["attacks"]
+    specs = loads_strict((kit / "metadata" / "attack_specs.json").read_bytes())["attacks"]  # #131: strict
     broker = {}
     for spec in specs:
         if spec["dataset"] != DOMAIN or spec["table"] != TABLE:
