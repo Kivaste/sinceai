@@ -20,6 +20,9 @@ Contract shape (what 02's schema stores and 04's contract checks read)::
 Every released column is required (the ladders' ``apply`` emits all of them) and nullable
 (source columns may contain empty cells). ``params`` also carries ``rung`` and, for a derived or
 renamed column, ``derived_from`` (the source column). Withheld columns and tables are absent.
+A released ``text.redacted`` column also carries ``conversation`` and ``order`` (release names of
+its table's conversation and order columns, from ``_CONVERSATIONS``), so the gate's text checks
+stitch turns per conversation; no binding, or a bound column withheld, refuses generation (#63).
 """
 
 from __future__ import annotations
@@ -49,6 +52,12 @@ _TOKEN_KEYS = frozenset({"column", "scope", "table"})
 _FORM_MAX = 300
 _WITHHELD = "withheld"
 _PSEUDONYM_SCOPE = "release"  # ticket 07 binds id.pseudonym to the release scope
+_REDACTED_TEXT = "text.redacted"
+# Conversational text tables: (dataset, table) -> (conversation column, order column), source names.
+# Every released ``text.redacted`` column must sit in one of these tables (#63).
+_CONVERSATIONS: dict[tuple[str, str], tuple[str, str]] = {
+    ("customer_service", "turns"): ("conversation_id", "seq"),
+}
 
 
 class ContractError(ValueError):
@@ -97,6 +106,10 @@ def generate(policy: Any, plan: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
                 raise ContractError(f"{table}.{column}: token scope invalid")
             tokens.append({"table": table, "column": name, "scope": scope})
 
+    for (table, column), entry in sorted(entries.items()):
+        if entry["rung"] == _REDACTED_TEXT:
+            _bind_conversation(policy.dataset, table, column, columns[table], released)
+
     person_tables = {t for t, _ in policy.direct_identifiers}  # tables that hold the person directly
     qi: list[dict[str, str]] = []
     for row in policy.qi:
@@ -135,6 +148,38 @@ def generate(policy: Any, plan: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
         contract["k"] = k
     _validate_contract(contract)
     return contract
+
+
+def _bind_conversation(dataset: str, table: str, column: str, spec: dict[str, dict[str, Any]],
+                       released: Mapping[tuple[str, str], str]) -> None:
+    """Give a released redacted text column its table's conversation and order bindings.
+
+    The text scanner stitches turns per conversation only through these params; without them it
+    scans row by row, so a missing binding (unknown table, or a bound column withheld) is refused.
+    """
+    binding = _CONVERSATIONS.get((dataset, table))
+    names = [released.get((table, c)) for c in binding] if binding else [None]
+    if any(n is None for n in names):
+        raise ContractError(f"{table}.{column}: conversation binding missing or bound column withheld")
+    name = released[(table, column)]
+    params = {**spec[name]["params"], "conversation": names[0], "order": names[1]}
+    spec[name]["params"] = dict(sorted(params.items()))
+
+
+def _check_binding(name: str, column: str, params: Mapping[str, Any], cols: Mapping[str, Any],
+                   required: list) -> None:
+    """Bindings are both-or-neither names of other required columns; redacted text needs them."""
+    where = f"{name}.{column}: conversation binding"
+    conv, order = params.get("conversation"), params.get("order")
+    if conv is None and order is None:
+        if params.get("rung") == _REDACTED_TEXT:
+            raise ContractError(f"{where} missing")
+        return
+    for value in (conv, order):
+        if not isinstance(value, str) or value == column or value not in cols or value not in required:
+            raise ContractError(f"{where} invalid")
+    if conv == order:
+        raise ContractError(f"{where} invalid")
 
 
 def _k_target(policy: Any) -> int | None:
@@ -267,6 +312,7 @@ def _validate_contract(contract: Mapping[str, Any]) -> None:
                 raise ContractError(f"{name}.{column}: form invalid")
             if not isinstance(body["params"], Mapping):
                 raise ContractError(f"{name}.{column}: params")
+            _check_binding(name, column, body["params"], cols, required)
     for label, keys in (("qi", _QI_KEYS), ("tokens", _TOKEN_KEYS)):
         rows = contract[label]
         if not isinstance(rows, list):

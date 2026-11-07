@@ -3,8 +3,9 @@
 Text fields are the contract columns whose form is the validator ID ``text``. A
 conversational field names its conversation column and its order column in ``params``:
 ``{"form": "text", "params": {"conversation": "conversation_id", "order": "seq"}}``; its rows
-are grouped and stitched per conversation. A text field with neither param (free notes) is
-scanned row by row. Naming only one of the two is an error.
+are grouped and stitched per conversation. A text field with neither param (a categorical or
+geo value) is scanned row by row. Naming only one of the two is an error, and so is a redacted
+free-text field (``params.rung == "text.redacted"``) without both (#63).
 """
 from __future__ import annotations
 
@@ -14,6 +15,7 @@ import weakref
 from . import _normalise as normalise
 
 TEXT_FORM = "text"
+REDACTED_RUNG = "text.redacted"  # free text from the redactor: always conversational in a release
 # A column with a non-text form is treated as undeclared free text (and the text checks
 # error) if at least this share of its non-empty values has at least this many tokens.
 UNDECLARED_TEXT_TOKENS = 6
@@ -43,7 +45,9 @@ def text_fields(contract):
             params = spec.get("params") or {}
             conv, order = params.get("conversation"), params.get("order")
             if conv is None and order is None:
-                pass  # not conversational: each row is its own conversation
+                if params.get("rung") == REDACTED_RUNG:  # #63: never fall back to row-by-row
+                    raise TextCheckError("redacted text column has no conversation/order binding")
+                # not conversational (a categorical/geo value): each row is its own conversation
             elif not isinstance(conv, str) or not isinstance(order, str):
                 raise TextCheckError("text column names only one of conversation/order")
             out.append((fname, col, conv, order))
