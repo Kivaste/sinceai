@@ -44,9 +44,11 @@ def main(argv=None) -> int:
                 return 2
             selected = [by_name[n] for n in sorted(set(a.check))]
         # registry broken: fall through with selected=None so run_checks refuses with registry_error
-    try:
-        with open(a.contract, encoding="utf-8") as fh:
-            contract = json.load(fh)
+    from pets_release.manifest.canonical import loads_strict
+
+    try:  # #114: strict (duplicate keys, NaN/Infinity refuse); never a gate on a partially parsed contract
+        with open(a.contract, "rb") as fh:
+            contract = loads_strict(fh.read())
     except (OSError, ValueError):
         print("contract unreadable", file=sys.stderr)
         return 2
