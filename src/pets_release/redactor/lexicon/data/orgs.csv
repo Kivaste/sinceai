@@ -1,0 +1,133 @@
+term,lang,label,match,boundary,notes
+Nordea,fi,ORG,phrase,word,banks
+Danske Bank,fi,ORG,phrase,word,banks
+S-Pankki,fi,ORG,phrase,word,banks
+Aktia,fi,ORG,phrase,word,banks
+Handelsbanken,fi,ORG,phrase,word,banks
+OP,fi,ORG,phrase,word,banks
+Osuuspankki,fi,ORG,phrase,word,banks
+POP Pankki,fi,ORG,phrase,word,banks
+Säästöpankki,fi,ORG,phrase,word,banks
+Oma Säästöpankki,fi,ORG,phrase,word,banks
+Ålandsbanken,fi,ORG,phrase,word,banks
+Elisa,fi,ORG,phrase,word,telecom operators
+Telia,fi,ORG,phrase,word,telecom operators
+DNA,fi,ORG,phrase,word,telecom operators
+Saunalahti,fi,ORG,phrase,word,telecom operators
+Sonera,fi,ORG,phrase,word,telecom operators
+Welho,fi,ORG,phrase,word,telecom operators
+Nokia,fi,ORG,phrase,word,employers
+Kone,fi,ORG,phrase,word,employers
+Fortum,fi,ORG,phrase,word,employers
+Posti,fi,ORG,phrase,word,employers
+Finnair,fi,ORG,phrase,word,employers
+Stockmann,fi,ORG,phrase,word,employers
+Kesko,fi,ORG,phrase,word,employers
+S-ryhmä,fi,ORG,phrase,word,employers
+Wärtsilä,fi,ORG,phrase,word,employers
+UPM,fi,ORG,phrase,word,employers
+Stora Enso,fi,ORG,phrase,word,employers
+Metsä Group,fi,ORG,phrase,word,employers
+Valmet,fi,ORG,phrase,word,employers
+Outokumpu,fi,ORG,phrase,word,employers
+Neste,fi,ORG,phrase,word,employers
+Orion,fi,ORG,phrase,word,employers
+Fazer,fi,ORG,phrase,word,employers
+Valio,fi,ORG,phrase,word,employers
+Atria,fi,ORG,phrase,word,employers
+Lidl,fi,ORG,phrase,word,employers
+Prisma,fi,ORG,phrase,word,employers
+K-Market,fi,ORG,phrase,word,employers
+Alko,fi,ORG,phrase,word,employers
+VR,fi,ORG,phrase,word,employers
+Yle,fi,ORG,phrase,word,employers
+Ikea,fi,ORG,phrase,word,employers
+Ericsson,fi,ORG,phrase,word,employers
+Volvo,fi,ORG,phrase,word,employers
+Microsoft,fi,ORG,phrase,word,employers
+Google,fi,ORG,phrase,word,employers
+Kela,fi,ORG,phrase,word,authorities
+Verohallinto,fi,ORG,phrase,word,authorities
+Poliisi,fi,ORG,phrase,word,authorities
+Maistraatti,fi,ORG,phrase,word,authorities
+Digi- ja väestötietovirasto,fi,ORG,phrase,word,authorities
+Traficom,fi,ORG,phrase,word,authorities
+Työvoimatoimisto,fi,ORG,phrase,word,authorities
+HUS,fi,ORG,phrase,word,care providers
+Terveystalo,fi,ORG,phrase,word,care providers
+Mehiläinen,fi,ORG,phrase,word,care providers
+Pihlajalinna,fi,ORG,phrase,word,care providers
+Väestöliitto,fi,ORG,phrase,word,care providers
+Diacor,fi,ORG,phrase,word,care providers
+Octopus,fi,ORG,phrase,word,care providers
+Kanta-Hämeen keskussairaala,fi,ORG,phrase,word,care providers
+Helsingin yliopisto,fi,ORG,phrase,word,education
+Aalto-yliopisto,fi,ORG,phrase,word,education
+Tampereen yliopisto,fi,ORG,phrase,word,education
+Turun yliopisto,fi,ORG,phrase,word,education
+Oulun yliopisto,fi,ORG,phrase,word,education
+Haaga-Helia,fi,ORG,phrase,word,education
+Metropolia,fi,ORG,phrase,word,education
+Laurea,fi,ORG,phrase,word,education
+Oy,fi,ORG,legal-suffix,word,legal-form suffix ending an organisation name
+Oyj,fi,ORG,legal-suffix,word,legal-form suffix ending an organisation name
+Ab,fi,ORG,legal-suffix,word,legal-form suffix ending an organisation name
+Abp,fi,ORG,legal-suffix,word,legal-form suffix ending an organisation name
+Ltd,fi,ORG,legal-suffix,word,legal-form suffix ending an organisation name
+Inc,fi,ORG,legal-suffix,word,legal-form suffix ending an organisation name
+AB,fi,ORG,legal-suffix,word,legal-form suffix ending an organisation name
+ry,fi,ORG,legal-suffix,word,legal-form suffix ending an organisation name
+r.y.,fi,ORG,legal-suffix,word,legal-form suffix ending an organisation name
+Ky,fi,ORG,legal-suffix,word,legal-form suffix ending an organisation name
+Tmi,fi,ORG,legal-suffix,word,legal-form suffix ending an organisation name
+GmbH,fi,ORG,legal-suffix,word,legal-form suffix ending an organisation name
+LLC,fi,ORG,legal-suffix,word,legal-form suffix ending an organisation name
+Oy Ab,fi,ORG,legal-suffix,word,legal-form suffix ending an organisation name
+Oyj.,fi,ORG,legal-suffix,word,legal-form suffix ending an organisation name
+Osakeyhtiö,fi,ORG,legal-suffix,word,legal-form suffix ending an organisation name
+Group,fi,ORG,legal-suffix,word,legal-form suffix ending an organisation name
+Corp,fi,ORG,legal-suffix,word,legal-form suffix ending an organisation name
+plc,fi,ORG,legal-suffix,word,legal-form suffix ending an organisation name
+A/S,fi,ORG,legal-suffix,word,legal-form suffix ending an organisation name
+ASA,fi,ORG,legal-suffix,word,legal-form suffix ending an organisation name
+töissä,fi,ORG,cue-strong,word,employer / affiliation cue; the organisation follows
+työskentelen,fi,ORG,cue-strong,word,employer / affiliation cue; the organisation follows
+työnantajani on,fi,ORG,cue-strong,word,employer / affiliation cue; the organisation follows
+työnantajani,fi,ORG,cue-strong,word,employer / affiliation cue; the organisation follows
+työpaikkani on,fi,ORG,cue-strong,word,employer / affiliation cue; the organisation follows
+työpaikkani,fi,ORG,cue-strong,word,employer / affiliation cue; the organisation follows
+I work at,fi,ORG,cue-strong,word,employer / affiliation cue; the organisation follows
+I work for,fi,ORG,cue-strong,word,employer / affiliation cue; the organisation follows
+I work in,fi,ORG,cue-strong,word,employer / affiliation cue; the organisation follows
+employer is,fi,ORG,cue-strong,word,employer / affiliation cue; the organisation follows
+my employer is,fi,ORG,cue-strong,word,employer / affiliation cue; the organisation follows
+my bank is,fi,ORG,cue-strong,word,employer / affiliation cue; the organisation follows
+pankkini on,fi,ORG,cue-strong,word,employer / affiliation cue; the organisation follows
+pankkini,fi,ORG,cue-strong,word,employer / affiliation cue; the organisation follows
+vakuutusyhtiöni on,fi,ORG,cue-strong,word,employer / affiliation cue; the organisation follows
+operaattorini on,fi,ORG,cue-strong,word,employer / affiliation cue; the organisation follows
+entinen operaattorini on,fi,ORG,cue-strong,word,employer / affiliation cue; the organisation follows
+previous operator is,fi,ORG,cue-strong,word,employer / affiliation cue; the organisation follows
+former operator is,fi,ORG,cue-strong,word,employer / affiliation cue; the organisation follows
+operaattori on,fi,ORG,cue-strong,word,employer / affiliation cue; the organisation follows
+operaattori oli,fi,ORG,cue-strong,word,employer / affiliation cue; the organisation follows
+operaattorini oli,fi,ORG,cue-strong,word,employer / affiliation cue; the organisation follows
+entinen operaattori on,fi,ORG,cue-strong,word,employer / affiliation cue; the organisation follows
+entinen operaattorini on,fi,ORG,cue-strong,word,employer / affiliation cue; the organisation follows
+operaattorina,fi,ORG,cue-strong,word,employer / affiliation cue; the organisation follows
+ty?nantaja on,fi,ORG,cue-strong,word,employer / affiliation cue; the organisation follows
+ty?paikka on,fi,ORG,cue-strong,word,employer / affiliation cue; the organisation follows
+ty?paikkana,fi,ORG,cue-strong,word,employer / affiliation cue; the organisation follows
+nykyinen ty?nantajani on,fi,ORG,cue-strong,word,employer / affiliation cue; the organisation follows
+working at,fi,ORG,cue-strong,word,employer / affiliation cue; the organisation follows
+works at,fi,ORG,cue-strong,word,employer / affiliation cue; the organisation follows
+work at,fi,ORG,cue-strong,word,employer / affiliation cue; the organisation follows
+employed by,fi,ORG,cue-strong,word,employer / affiliation cue; the organisation follows
+employed at,fi,ORG,cue-strong,word,employer / affiliation cue; the organisation follows
+jag arbetar på,fi,ORG,cue-strong,word,employer / affiliation cue; the organisation follows
+min bank är,fi,ORG,cue-strong,word,employer / affiliation cue; the organisation follows
+min arbetsgivare är,fi,ORG,cue-strong,word,employer / affiliation cue; the organisation follows
+bank:,fi,ORG,cue-strong,word,employer / affiliation cue; the organisation follows
+operaattori:,fi,ORG,cue-strong,word,employer / affiliation cue; the organisation follows
+employer:,fi,ORG,cue-strong,word,employer / affiliation cue; the organisation follows
+from,en,ORG,cue-strong,multi,needs a run of two or more words; a single word after from is more likely a place

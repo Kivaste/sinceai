@@ -1,0 +1,133 @@
+term,lang,label,match,boundary,notes
+nimeni on,fi,PERSON,cue-strong,word,cue before a name; the cue itself is not part of the span
+nimi on,fi,PERSON,cue-strong,word,cue before a name; the cue itself is not part of the span
+nimeni,fi,PERSON,cue-strong,word,cue before a name; the cue itself is not part of the span
+my name is,fi,PERSON,cue-strong,word,cue before a name; the cue itself is not part of the span
+name is,fi,PERSON,cue-strong,word,cue before a name; the cue itself is not part of the span
+mun nimi on,fi,PERSON,cue-strong,word,cue before a name; the cue itself is not part of the span
+minun nimeni on,fi,PERSON,cue-strong,word,cue before a name; the cue itself is not part of the span
+jag heter,fi,PERSON,cue-strong,word,cue before a name; the cue itself is not part of the span
+mitt namn ?r,fi,PERSON,cue-strong,word,cue before a name; the cue itself is not part of the span
+kutsutaan,fi,PERSON,cue-strong,word,cue before a name; the cue itself is not part of the span
+nimell?,fi,PERSON,cue-strong,word,cue before a name; the cue itself is not part of the span
+under the name,fi,PERSON,cue-strong,word,cue before a name; the cue itself is not part of the span
+customer name,fi,PERSON,cue-strong,word,cue before a name; the cue itself is not part of the span
+asiakkaan nimi,fi,PERSON,cue-strong,word,cue before a name; the cue itself is not part of the span
+full name,fi,PERSON,cue-strong,word,cue before a name; the cue itself is not part of the span
+koko nimi,fi,PERSON,cue-strong,word,cue before a name; the cue itself is not part of the span
+nimi:,fi,PERSON,cue-strong,word,cue before a name; the cue itself is not part of the span
+name:,fi,PERSON,cue-strong,word,cue before a name; the cue itself is not part of the span
+namn:,fi,PERSON,cue-strong,word,cue before a name; the cue itself is not part of the span
+yhteyshenkil?,fi,PERSON,cue-strong,word,cue before a name; the cue itself is not part of the span
+contact person,fi,PERSON,cue-strong,word,cue before a name; the cue itself is not part of the span
+kontaktperson,fi,PERSON,cue-strong,word,cue before a name; the cue itself is not part of the span
+h?nen nimens? on,fi,PERSON,cue-strong,word,cue before a name; the cue itself is not part of the span
+h?nen nimens?,fi,PERSON,cue-strong,word,cue before a name; the cue itself is not part of the span
+hei,fi,PERSON,cue-weak,word,cue before a name; only known names after it
+moi,fi,PERSON,cue-weak,word,cue before a name; only known names after it
+moikka,fi,PERSON,cue-weak,word,cue before a name; only known names after it
+terve,fi,PERSON,cue-weak,word,cue before a name; only known names after it
+hello,fi,PERSON,cue-weak,word,cue before a name; only known names after it
+hi,fi,PERSON,cue-weak,word,cue before a name; only known names after it
+hej,fi,PERSON,cue-weak,word,cue before a name; only known names after it
+hey,fi,PERSON,cue-weak,word,cue before a name; only known names after it
+kiitos,fi,PERSON,cue-weak,word,cue before a name; only known names after it
+kiitti,fi,PERSON,cue-weak,word,cue before a name; only known names after it
+thanks,fi,PERSON,cue-weak,word,cue before a name; only known names after it
+thank you,fi,PERSON,cue-weak,word,cue before a name; only known names after it
+tack,fi,PERSON,cue-weak,word,cue before a name; only known names after it
+terveisin,fi,PERSON,cue-weak,word,cue before a name; only known names after it
+terveisiä,fi,PERSON,cue-weak,word,cue before a name; only known names after it
+best regards,fi,PERSON,cue-weak,word,cue before a name; only known names after it
+regards,fi,PERSON,cue-weak,word,cue before a name; only known names after it
+kind regards,fi,PERSON,cue-weak,word,cue before a name; only known names after it
+br,fi,PERSON,cue-weak,word,cue before a name; only known names after it
+mvh,fi,PERSON,cue-weak,word,cue before a name; only known names after it
+ystävällisin terveisin,fi,PERSON,cue-weak,word,cue before a name; only known names after it
+yst. terveisin,fi,PERSON,cue-weak,word,cue before a name; only known names after it
+olen,fi,PERSON,cue-weak,word,cue before a name; only known names after it
+minä olen,fi,PERSON,cue-weak,word,cue before a name; only known names after it
+mä oon,fi,PERSON,cue-weak,word,cue before a name; only known names after it
+oon,fi,PERSON,cue-weak,word,cue before a name; only known names after it
+I am,fi,PERSON,cue-weak,word,cue before a name; only known names after it
+I'm,fi,PERSON,cue-weak,word,cue before a name; only known names after it
+jag är,fi,PERSON,cue-weak,word,cue before a name; only known names after it
+asiakas,fi,PERSON,cue-weak,word,cue before a name; only known names after it
+agentti,fi,PERSON,cue-weak,word,cue before a name; only known names after it
+agent,fi,PERSON,cue-weak,word,cue before a name; only known names after it
+doctor,fi,PERSON,cue-weak,word,cue before a name; only known names after it
+l??k?ri,fi,PERSON,cue-weak,word,cue before a name; only known names after it
+this is,fi,PERSON,cue-weak,word,cue before a name; only known names after it
+puhuu,fi,PERSON,cue-weak,word,cue before a name; only known names after it
+puhun,fi,PERSON,cue-weak,word,cue before a name; only known names after it
+puhutteko,fi,PERSON,cue-weak,word,cue before a name; only known names after it
+puhuttiin,fi,PERSON,cue-weak,word,cue before a name; only known names after it
+mieheni,fi,PERSON,cue-weak,word,cue before a name; only known names after it
+vaimoni,fi,PERSON,cue-weak,word,cue before a name; only known names after it
+puolisoni,fi,PERSON,cue-weak,word,cue before a name; only known names after it
+äitini,fi,PERSON,cue-weak,word,cue before a name; only known names after it
+isäni,fi,PERSON,cue-weak,word,cue before a name; only known names after it
+poikani,fi,PERSON,cue-weak,word,cue before a name; only known names after it
+tyttäreni,fi,PERSON,cue-weak,word,cue before a name; only known names after it
+veljeni,fi,PERSON,cue-weak,word,cue before a name; only known names after it
+siskoni,fi,PERSON,cue-weak,word,cue before a name; only known names after it
+sisareni,fi,PERSON,cue-weak,word,cue before a name; only known names after it
+tätini,fi,PERSON,cue-weak,word,cue before a name; only known names after it
+setäni,fi,PERSON,cue-weak,word,cue before a name; only known names after it
+enoni,fi,PERSON,cue-weak,word,cue before a name; only known names after it
+isoäitini,fi,PERSON,cue-weak,word,cue before a name; only known names after it
+isoisäni,fi,PERSON,cue-weak,word,cue before a name; only known names after it
+mummoni,fi,PERSON,cue-weak,word,cue before a name; only known names after it
+vaarini,fi,PERSON,cue-weak,word,cue before a name; only known names after it
+ystäväni,fi,PERSON,cue-weak,word,cue before a name; only known names after it
+naapurini,fi,PERSON,cue-weak,word,cue before a name; only known names after it
+kollegani,fi,PERSON,cue-weak,word,cue before a name; only known names after it
+esimieheni,fi,PERSON,cue-weak,word,cue before a name; only known names after it
+my wife,fi,PERSON,cue-weak,word,cue before a name; only known names after it
+my husband,fi,PERSON,cue-weak,word,cue before a name; only known names after it
+my son,fi,PERSON,cue-weak,word,cue before a name; only known names after it
+my daughter,fi,PERSON,cue-weak,word,cue before a name; only known names after it
+my mother,fi,PERSON,cue-weak,word,cue before a name; only known names after it
+my father,fi,PERSON,cue-weak,word,cue before a name; only known names after it
+my brother,fi,PERSON,cue-weak,word,cue before a name; only known names after it
+my sister,fi,PERSON,cue-weak,word,cue before a name; only known names after it
+my friend,fi,PERSON,cue-weak,word,cue before a name; only known names after it
+my colleague,fi,PERSON,cue-weak,word,cue before a name; only known names after it
+min fru,fi,PERSON,cue-weak,word,cue before a name; only known names after it
+min man,fi,PERSON,cue-weak,word,cue before a name; only known names after it
+min mamma,fi,PERSON,cue-weak,word,cue before a name; only known names after it
+min pappa,fi,PERSON,cue-weak,word,cue before a name; only known names after it
+herra,fi,PERSON,cue-weak,word,cue before a name; only known names after it
+rouva,fi,PERSON,cue-weak,word,cue before a name; only known names after it
+neiti,fi,PERSON,cue-weak,word,cue before a name; only known names after it
+mr,fi,PERSON,cue-weak,word,cue before a name; only known names after it
+mrs,fi,PERSON,cue-weak,word,cue before a name; only known names after it
+ms,fi,PERSON,cue-weak,word,cue before a name; only known names after it
+miss,fi,PERSON,cue-weak,word,cue before a name; only known names after it
+fru,fi,PERSON,cue-weak,word,cue before a name; only known names after it
+herr,fi,PERSON,cue-weak,word,cue before a name; only known names after it
+tämä on,fi,PERSON,cue-weak,word,cue before a name; only known names after it
+täällä,fi,PERSON,cue-weak,word,cue before a name; only known names after it
+soitti,fi,PERSON,cue-weak,word,cue before a name; only known names after it
+soittaa,fi,PERSON,cue-weak,word,cue before a name; only known names after it
+kysyi,fi,PERSON,cue-weak,word,cue before a name; only known names after it
+sanoi,fi,PERSON,cue-weak,word,cue before a name; only known names after it
+said,fi,PERSON,cue-weak,word,cue before a name; only known names after it
+asked,fi,PERSON,cue-weak,word,cue before a name; only known names after it
+called,fi,PERSON,cue-weak,word,cue before a name; only known names after it
+ask for,fi,PERSON,cue-weak,word,cue before a name; only known names after it
+kysy,fi,PERSON,cue-weak,word,cue before a name; only known names after it
+kysyn,fi,PERSON,cue-weak,word,cue before a name; only known names after it
+pyydän,fi,PERSON,cue-weak,word,cue before a name; only known names after it
+pyytää,fi,PERSON,cue-weak,word,cue before a name; only known names after it
+sano,fi,PERSON,cue-weak,word,cue before a name; only known names after it
+ilmoitti,fi,PERSON,cue-weak,word,cue before a name; only known names after it
+hänen nimensä on,fi,PERSON,cue-weak,word,cue before a name; only known names after it
+hänen nimensä,fi,PERSON,cue-weak,word,cue before a name; only known names after it
+ja,fi,PERSON,cue-weak,word,cue before a name; only known names after it
+and,fi,PERSON,cue-weak,word,cue before a name; only known names after it
+och,fi,PERSON,cue-weak,word,cue before a name; only known names after it
+eli,fi,PERSON,cue-weak,word,cue before a name; only known names after it
+tai,fi,PERSON,cue-weak,word,cue before a name; only known names after it
+or,fi,PERSON,cue-weak,word,cue before a name; only known names after it
+sekä,fi,PERSON,cue-weak,word,cue before a name; only known names after it
