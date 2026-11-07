@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import json
 import os
 import subprocess
@@ -13,6 +14,150 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src"
 PYTHON = sys.executable
+
+_CHECKOUT_BASELINE = pytest.StashKey[dict[Path, set[str]]]()
+
+
+def _guard_git(directory: Path, *args: str) -> str:
+    result = subprocess.run(
+        ["git", "-C", str(directory), *args], capture_output=True,
+        text=True, encoding="utf-8", check=False,
+    )
+    if result.returncode:
+        raise pytest.UsageError("checkout write guard: Git identity/status unavailable")
+    return result.stdout
+
+
+def _dirty_paths(root: Path) -> set[str]:
+    # NUL records preserve spaces, quoting and newlines. A rename has two paths.
+    records = iter(_guard_git(root, "status", "--porcelain=v1", "-z", "--untracked-files=all").split("\0"))
+    paths = set()
+    for record in records:
+        if not record:
+            continue
+        paths.add(record[3:])
+        if "R" in record[:2] or "C" in record[:2]:
+            paths.add(next(records))
+    return paths
+
+
+def _literal_test_path(node, source: Path) -> Path | None:
+    """Interpret only literal pathlib expressions, never execute test source."""
+    if (isinstance(node, ast.Call) and len(node.args) == 1 and not node.keywords
+            and isinstance(node.func, ast.Name) and node.func.id == "Path"):
+        arg = node.args[0]
+        if isinstance(arg, ast.Name) and arg.id == "__file__":
+            return source
+        if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+            return Path(arg.value)
+    if (isinstance(node, ast.Call) and not node.args and not node.keywords
+            and isinstance(node.func, ast.Attribute) and node.func.attr in {"resolve", "absolute"}):
+        path = _literal_test_path(node.func.value, source)
+        return path.resolve() if path is not None else None
+    if isinstance(node, ast.Attribute) and node.attr == "parent":
+        path = _literal_test_path(node.value, source)
+        return path.parent if path is not None else None
+    if (isinstance(node, ast.Subscript) and isinstance(node.value, ast.Attribute)
+            and node.value.attr == "parents" and isinstance(node.slice, ast.Constant)):
+        path = _literal_test_path(node.value.value, source)
+        if path is not None:
+            return path.parents[node.slice.value]
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
+        path = _literal_test_path(node.left, source)
+        if path is not None and isinstance(node.right, ast.Constant) and isinstance(node.right.value, str):
+            return path / node.right.value
+    return None
+
+
+def _check_test_roots(root: Path):
+    """Check helpers, conftests and function-local resolutions before tests run.
+
+    A parents[n] reference into tests/ is legitimate for fixtures/imports. It
+    must stay inside this checkout; a repo-root assignment must equal Git's root.
+    """
+    for source in sorted((root / "tests").rglob("*.py")):
+        tree = ast.parse(source.read_text(encoding="utf-8-sig"), filename=str(source))
+        for node in ast.walk(tree):
+            named_root = False
+            strict_root = False
+            expression = node
+            if isinstance(node, (ast.Assign, ast.AnnAssign)):
+                targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+                strict_root = any(
+                    isinstance(t, ast.Name) and t.id in {"ROOT", "REPO", "REPO_ROOT"}
+                    for t in targets
+                )
+                named_root = any(
+                    isinstance(t, ast.Name) and t.id.lower() in {"root", "repo", "repo_root"}
+                    for t in targets
+                )
+                expression = node.value
+            parent_ref = isinstance(node, ast.Subscript) and isinstance(node.value, ast.Attribute) \
+                and node.value.attr == "parents"
+            if not named_root and not parent_ref:
+                continue
+            path = _literal_test_path(expression, source)
+            if path is None:
+                if strict_root:
+                    raise pytest.UsageError(
+                        f"checkout root guard: {source.relative_to(root)}:{node.lineno} "
+                        "repo-root resolution must be a literal pathlib expression"
+                    )
+                continue  # tmp_path/kit roots and non-literal expressions are not repo resolutions.
+            path = path.resolve()
+            if (named_root and path != root) or (parent_ref and not path.is_relative_to(root)):
+                raise pytest.UsageError(
+                    f"checkout root guard: {source.relative_to(root)}:{node.lineno} "
+                    "resolves outside the running tests' Git worktree root"
+                )
+
+
+def pytest_sessionstart(session):
+    """Take one baseline per checkout, before collection or worker startup.
+
+    Fixtures never execute in the xdist controller, so its session hooks own the
+    same autouse guard's lifecycle. Workers must not take independent baselines.
+    """
+    if hasattr(session.config, "workerinput"):
+        return
+    identity = _guard_git(
+        Path(__file__).resolve().parent, "rev-parse", "--path-format=absolute",
+        "--show-toplevel", "--git-common-dir",
+    ).splitlines()
+    root, common = map(Path, identity)
+    roots = {root.resolve(), common.resolve().parent}
+    session.config.stash[_CHECKOUT_BASELINE] = {
+        checkout: _dirty_paths(checkout) for checkout in sorted(roots)
+    }
+    _check_test_roots(root.resolve())
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _checkout_write_guard(request):
+    """Controller hooks bracket all workers and fixture teardowns, once only."""
+    if not hasattr(request.config, "workerinput"):
+        assert _CHECKOUT_BASELINE in request.config.stash, "checkout write guard did not start"
+
+
+@pytest.hookimpl(trylast=True)
+def pytest_sessionfinish(session, exitstatus):
+    if hasattr(session.config, "workerinput") or _CHECKOUT_BASELINE not in session.config.stash:
+        return
+    factory = getattr(session.config, "_tmp_path_factory", None)
+    basetemp = getattr(factory, "_basetemp", None)
+    new_paths = []
+    for root, baseline in session.config.stash[_CHECKOUT_BASELINE].items():
+        for relative in sorted(_dirty_paths(root) - baseline):
+            path = (root / relative).resolve()
+            if basetemp is None or not path.is_relative_to(basetemp.resolve()):
+                new_paths.append(str(path))
+    if new_paths:
+        session.exitstatus = pytest.ExitCode.TESTS_FAILED
+        reporter = session.config.pluginmanager.get_plugin("terminalreporter")
+        if reporter is not None:
+            reporter.write_sep("=", "checkout write guard: new dirty paths", red=True)
+            for path in new_paths:
+                reporter.write_line(path, red=True)
 
 VISITS_CSV = "id,when,code\n00123,7.11.2026,010\n000,1.1.2024,00\n"
 LABS_CSV = "lab_id\nL1\n"
