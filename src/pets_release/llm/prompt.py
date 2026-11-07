@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import json
 
-from pets_release.llm.dictionary import DataDictionary
+from pets_release.llm.dictionary import DataDictionary, validate_dictionary
 from pets_release.llm.vocabulary import DETAIL_LEVELS, TRUST_LEVELS, AnalysisType
 
 SYSTEM = (
@@ -24,11 +24,11 @@ SYSTEM = (
 def build_messages(request: str, dictionary: DataDictionary, vocabulary: tuple[AnalysisType, ...]) -> list[dict]:
     if not isinstance(request, str):
         raise TypeError("request must be text")
-    if not isinstance(dictionary, DataDictionary):
+    if type(dictionary) is not DataDictionary:
         raise TypeError("dictionary must be a DataDictionary")
     if not isinstance(vocabulary, tuple) or not all(isinstance(a, AnalysisType) for a in vocabulary):
         raise TypeError("vocabulary must be a tuple of AnalysisType")
-    dictionary = dictionary.validated()  # fresh copy from real instances only; re-runs the allowlists
+    dictionary = validate_dictionary(dictionary)  # exact types, fresh copy, allowlists re-run
     schema = {
         "dataset": dictionary.dataset,
         "tables": [

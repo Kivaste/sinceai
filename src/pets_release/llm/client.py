@@ -11,7 +11,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from urllib.parse import urlparse
 
-from pets_release.llm.dictionary import DataDictionary
+from pets_release.llm.dictionary import DataDictionary, validate_dictionary
 from pets_release.llm.draft import DraftRejected, build_draft, parse_model_output
 from pets_release.llm.prompt import build_messages
 from pets_release.llm.screen import MIN_KEY_CHECK, has_credential, has_value_shape
@@ -82,6 +82,7 @@ def draft_policy(
 ) -> dict:
     """Request text + typed dictionary in, validated DRAFT policy out. Raises LlmError or DraftRejected."""
     request = screen_request(request)
+    dictionary = validate_dictionary(dictionary)  # exact types first; use only the validated copy below
     _check_key(config.api_key)
     messages = build_messages(request, dictionary, vocabulary_for(dictionary.dataset))
     body = json.dumps(

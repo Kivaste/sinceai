@@ -127,7 +127,9 @@ def test_short_keys_are_refused_before_sending(key):
     with pytest.raises(LlmError) as e:
         draft_policy("req", parse_dictionary(DICT_MD, "health"), LlmConfig("http://localhost:1/v1", "m", key),
                      lambda *a: calls.append(a))
-    assert calls == [] and key not in str(e.value) or key == "a"
+    assert calls == []
+    if len(key) > 1:  # a 1-char key trivially occurs in any message text
+        assert key not in str(e.value)
     with pytest.raises(LlmError):
         resolve_config("http://localhost:1/v1", "m", {"PETS_LLM_API_KEY": key})
 
@@ -178,3 +180,37 @@ def test_complete_alignment_exits_zero_and_writes(cli, make_kit, tmp_path):
 def test_docs_do_not_claim_exit_zero_regardless():
     doc = (Path(__file__).resolve().parents[2] / "docs" / "llm-front-end.md").read_text(encoding="utf-8")
     assert "regardless" not in doc
+
+
+# ---- round 3: exact types before any method dispatch ----------------------------------------------------
+
+
+def test_dictionary_subclass_overriding_validated_is_refused_and_transport_never_called():
+    planted = "someone@example.org"
+
+    class Evil(DataDictionary):
+        def validated(self):  # would hand back unchecked stand-in children
+            return SimpleNamespace(dataset="health", tables=(SimpleNamespace(
+                name="ed_visits", columns=(SimpleNamespace(name=planted, role="record_key", subtype="RECORD_ID"),)),))
+
+    calls = []
+    evil = Evil("health", ())
+    with pytest.raises((TypeError, DictionaryError)):
+        draft_policy("req", evil, LlmConfig("http://localhost:1/v1", "m", ""),
+                     lambda *a: calls.append(a) or _chat(GOOD))
+    assert calls == []
+    with pytest.raises((TypeError, DictionaryError)):
+        build_messages("req", evil, vocabulary_for("health"))
+
+
+def test_table_and_column_subclasses_are_refused():
+    class C(ColumnInfo):
+        pass
+
+    class T(TableInfo):
+        pass
+
+    with pytest.raises(DictionaryError):
+        TableInfo("t", (C("c", "record_key", "RECORD_ID"),))
+    with pytest.raises(DictionaryError):
+        DataDictionary("health", (T("t", ()),))

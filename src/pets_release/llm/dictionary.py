@@ -71,22 +71,26 @@ class DataDictionary:
         if not isinstance(self.tables, tuple) or not all(type(t) is TableInfo for t in self.tables):
             raise DictionaryError("a dictionary's tables must be a tuple of TableInfo")
 
-    def validated(self) -> "DataDictionary":
-        """A fresh, re-validated copy built only from real instances (call sites use this, never the original)."""
-        if type(self) is not DataDictionary:
-            raise DictionaryError("not a DataDictionary")
-        tables = []
-        for t in self.tables:
-            if type(t) is not TableInfo or not isinstance(t.columns, tuple):
-                raise DictionaryError("a dictionary's tables must be TableInfo")
-            if not all(type(c) is ColumnInfo for c in t.columns):
-                raise DictionaryError("a table's columns must be ColumnInfo")
-            tables.append(TableInfo(t.name, tuple(ColumnInfo(c.name, c.role, c.subtype) for c in t.columns)))
-        return DataDictionary(self.dataset, tuple(tables))
-
     def columns(self) -> frozenset[tuple[str, str]]:
         return frozenset((t.name, c.name) for t in self.tables for c in t.columns)
 
+
+def validate_dictionary(d: object) -> DataDictionary:
+    """Trusted module-level validator: exact types first (no method of the argument is dispatched), then a fresh
+    copy rebuilt from real instances so every allowlist re-runs. Call sites use the returned copy only."""
+    if type(d) is not DataDictionary:
+        raise DictionaryError("not a DataDictionary")
+    tables_in = d.tables
+    if type(tables_in) is not tuple:
+        raise DictionaryError("a dictionary's tables must be a tuple")
+    tables = []
+    for t in tables_in:
+        if type(t) is not TableInfo or type(t.columns) is not tuple:
+            raise DictionaryError("a dictionary's tables must be TableInfo")
+        if not all(type(c) is ColumnInfo for c in t.columns):
+            raise DictionaryError("a table's columns must be ColumnInfo")
+        tables.append(TableInfo(t.name, tuple(ColumnInfo(c.name, c.role, c.subtype) for c in t.columns)))
+    return DataDictionary(d.dataset, tuple(tables))
 
 def parse_dictionary(markdown: str, dataset: str) -> DataDictionary:
     """Parse the kit's docs/DATA_DICTIONARY.md for one dataset. Fails closed when nothing is found."""
