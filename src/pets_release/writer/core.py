@@ -36,9 +36,6 @@ from pets_release.writer.assemble import (
 FILE_NAME = re.compile(r"^[A-Za-z0-9_]{1,64}\.csv$")
 SCORING_NAME = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.\-]{0,99}$")
 SCAN_MIN_LEN = 6  # released cell values at least this long must not appear in manifest text (outside `contract`)
-# Source values (withheld tables/columns, suppressed rows, raw forms; #80) at least SCAN_MIN_LEN long are scanned
-# too, unless held by this many rows of their column: such a value is a category, not row content.
-SOURCE_CATEGORY_MIN_ROWS = 5
 REFUSAL_REPORT = "refusal_report.json"
 GATE_REPORT = "gate_report.json"
 LINEAGE_FILE = "lineage.json"
@@ -183,19 +180,31 @@ def _self_scan(build: Path, c: Candidate, manifest: dict, context: dict) -> list
     verify = run_checks(build, c.contract, {**context, "phase": "verify"})
     reasons += _gate_reasons(verify, "selfscan")
     reasons += [r.replace("gate:", "selfscan:") for r in _registry_reasons(verify.records)]
-    text = "\x00".join(_strings({k: v for k, v in manifest.items() if k != "contract"}, []))
-    values = set()
+    strings = _strings({k: v for k, v in manifest.items() if k != "contract"}, [])
+    released = set()
     for t in c.tables:
-        values.update(v for v in pd.unique(t.frame.to_numpy(dtype=object).ravel()) if len(v) >= SCAN_MIN_LEN)
-    for df in context.get("source", {}).values():
+        released.update(v for v in pd.unique(t.frame.to_numpy(dtype=object).ravel()) if len(v) >= SCAN_MIN_LEN)
+    # #80: every source cell value (withheld tables and columns, suppressed rows, raw forms) is scanned too. The
+    # one exemption is by identity, not frequency: a manifest string that IS a table or column header name (the
+    # writer's structured table/column fields) may contain a source value, e.g. a category inside a column name.
+    source = context.get("source", {})
+    headers = {stem for stem in source} | {str(col) for df in source.values() for col in df.columns} \
+        | {t.name[:-4] for t in c.tables} | {col for t in c.tables for col in t.frame.columns}
+    from_source = set()
+    for df in source.values():
         for col in df.columns:
-            counts = df[col].value_counts(dropna=True)
-            values.update(v for v, n in counts.items()
-                          if isinstance(v, str) and len(v) >= SCAN_MIN_LEN and n < SOURCE_CATEGORY_MIN_ROWS)
-    grams = {text[i:i + SCAN_MIN_LEN] for i in range(len(text) - SCAN_MIN_LEN + 1)}  # prefilter: fast on big kits
-    if any(v[:SCAN_MIN_LEN] in grams and v in text for v in values):
+            from_source.update(v for v in pd.unique(df[col].to_numpy(dtype=object))
+                               if isinstance(v, str) and len(v) >= SCAN_MIN_LEN)
+    if _occurs(released, "\x00".join(strings)) or _occurs(from_source, "\x00".join(s for s in strings
+                                                                                     if s not in headers)):
         reasons.append("selfscan:manifest-value")
     return reasons
+
+
+def _occurs(values: set, text: str) -> bool:
+    """Any value (each >= SCAN_MIN_LEN long) a substring of ``text``. An n-gram prefilter keeps big kits fast."""
+    grams = {text[i:i + SCAN_MIN_LEN] for i in range(len(text) - SCAN_MIN_LEN + 1)}
+    return any(v[:SCAN_MIN_LEN] in grams and v in text for v in values)
 
 
 def _publish_scoring(staging: Path, scoring: Path) -> None:
