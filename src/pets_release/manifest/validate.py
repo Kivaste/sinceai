@@ -66,17 +66,23 @@ def _flagged(part: str) -> bool:
     return flagged(part)
 
 
+def _safe(part: str) -> str:
+    """``part`` if it looks like a plain name, else ``<key>``: identifier-shaped names never reach a diagnostic."""
+    # a key the identifier detectors flag is masked in every diagnostic (round-2 review, #61)
+    ok = isinstance(part, str) and _SAFE_KEY.match(part) and not _DIGIT_RUN.search(part) and not _flagged(part)
+    return part if ok else "<key>"
+
+
 def _fmt(path) -> str:
     out = "$"
     for part in path:
-        if isinstance(part, int):
-            out += f"[{part}]"
-        elif _SAFE_KEY.match(part) and not _DIGIT_RUN.search(part) and not _flagged(part):
-            # a key the identifier detectors flag is masked in every diagnostic (round-2 review, #61)
-            out += "." + part
-        else:
-            out += ".<key>"
+        out += f"[{part}]" if isinstance(part, int) else "." + _safe(part)
     return out
+
+
+def _field(t: str, c: str) -> str:
+    """Content-free ``$.fieldJustifications: <table>.<column>`` prefix (#109 round 2)."""
+    return f"{_fmt(['fieldJustifications'])}: {_safe(t)}.{_safe(c)}"
 
 
 def _schema_errors(obj: Any) -> list[str]:
@@ -97,7 +103,7 @@ def _applied_rungs(m: dict, errs: list[str]) -> dict:
     """#109: ``{(table, source column): rung}`` as the bound contract applies it to each released field
     (``contract.files[<table>.csv].columns[<outputColumn>].params.rung``). Fail closed (no rung, no sacrifice
     decision): the contract rung must exist and equal the justification's, lie on the ladder the pinned policy
-    gives that source column, and the column's form must be the rung's form. A rung whose form is a validator ID
+    gives that source column (its default family, or exactly its ``alt_floors`` rung), and the column's form must be the rung's form. A rung whose form is a validator ID
     (``text``, ``hex64``, ``decimal``, ...) may declare a narrower anchored regex instead; every regex-form rung
     (all timestamp rungs) must carry exactly its own form. A contract column no released justification backs is
     an error too."""
@@ -105,10 +111,11 @@ def _applied_rungs(m: dict, errs: list[str]) -> dict:
     from pets_release.policy import get_policy
 
     try:
-        floors = get_policy(m["release"]["scenario"]).floors
+        policy = get_policy(m["release"]["scenario"])
     except KeyError:
         errs.append("$.release.scenario: no-policy")
         return {}
+    floors, alt_floors = policy.floors, policy.alt_floors or {}
     files = m["contract"]["files"]
     applied, backed = {}, set()
     for f in m["fieldJustifications"]:
@@ -118,19 +125,22 @@ def _applied_rungs(m: dict, errs: list[str]) -> dict:
         backed.add((f"{t}.csv", out))
         col = files.get(f"{t}.csv", {}).get("columns", {}).get(out)
         rung = col["params"].get("rung") if col is not None else None
-        where = f"{_fmt(['fieldJustifications'])}: {t}.{c}"
+        where = _field(t, c)
         if not isinstance(rung, str):
             errs.append(f"{where}: rung-contract-missing")
             continue
         if rung != f["rung"]:
             errs.append(f"{where}: rung-contract-mismatch")
         floor = floors.get((t, c))
-        if floor is None or RUNG_KIND.get(rung) != floor.family:
+        # on the default family's ladder, or exactly the policy-enumerated alternative floor (CS-S1 turn_id)
+        on_ladder = floor is not None and (RUNG_KIND.get(rung) == floor.family or alt_floors.get((t, c)) == rung)
+        if not on_ladder:
             errs.append(f"{where}: rung-not-on-ladder")
         want = CONTRACT_FORMS.get(rung)
-        narrower = not want.startswith("^") and col["form"].startswith("^") and col["form"].endswith("$") \
-            if want is not None else False
-        if want is None or (col["form"] != want and not narrower):
+        # a validator-ID form (text, hex64, ...) may be replaced by an anchored regex; a regex form never
+        anchored_regex_allowed = want is not None and not want.startswith("^") \
+            and col["form"].startswith("^") and col["form"].endswith("$")
+        if want is None or (col["form"] != want and not anchored_regex_allowed):
             errs.append(f"{where}: rung-form-mismatch")
         applied[(t, c)] = rung
     for file, spec in sorted(files.items()):
@@ -157,7 +167,7 @@ def _rung_step_errors(m: dict) -> list[str]:
         match = [s for _, s in steps if (s["rungStep"]["table"], s["rungStep"]["column"], s["rungStep"]["to"])
                  == (t, c, rung)]
         if len(match) != 1:
-            errs.append(f"{_fmt(['fieldJustifications'])}: {t}.{c}: rung-sacrifice-missing")
+            errs.append(f"{_field(t, c)}: rung-sacrifice-missing")
     for i, s in steps:
         st = s["rungStep"]
         at = st["atFrom"]
