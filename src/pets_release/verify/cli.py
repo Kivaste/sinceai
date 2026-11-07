@@ -5,6 +5,7 @@ import argparse
 import os
 import sys
 
+from pets_release.offline import entry_point
 from pets_release.verify.core import VerifyUsageError, verify_release
 
 
@@ -39,6 +40,7 @@ def _producer_context(kit, master, release_dir) -> dict | None:
         return None
 
 
+@entry_point
 def main(argv: list[str]) -> int:
     a = parser().parse_args(argv)
     try:
