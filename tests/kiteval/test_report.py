@@ -197,6 +197,16 @@ def test_exported_summary_is_allowlisted_and_drops_raw_fields():
     assert "detail" not in blob
 
 
+def test_exported_risks_are_ordered_by_key_whatever_order_the_kit_wrote_them():
+    report = _passing_report()
+    unsorted = {"records with k<5": 0.5, "direct identifiers retained": 0.25}  # kit order: not sorted by key
+    assert list(unsorted) != sorted(unsorted)
+    report["tables"]["ed_visits"]["risks"] = dict(unsorted)
+    report["risk_components"] = {f"ed_visits: {k}": v for k, v in unsorted.items()}
+    exported = list(_validate(report)["risks"])
+    assert exported == ["ed_visits: direct identifiers retained", "ed_visits: records with k<5"]
+
+
 def test_missing_summary_is_a_fail_not_zeros():
     report = _passing_report()
     del report["summary"]
@@ -708,3 +718,31 @@ def test_risk_components_must_be_exactly_the_released_tables_risks():
 def test_released_and_tables_must_be_name_to_row_count_maps(bad):
     _rejected_for(_passing_report(), "structure", released=bad)
     _rejected_for(_passing_report(), "structure", tables=bad)
+
+
+# --- determinism (follow-up #83): exports sorted, independent of the report's dict / list order ---
+
+def test_exported_lists_are_sorted_whatever_the_input_order():
+    report = _passing_report()
+    report["tables"] = dict(reversed(list(report["tables"].items())))
+    report["utility"] = list(reversed(report["utility"]))
+    out = _validate(report)
+    assert [t["table"] for t in out["tables"]] == sorted(t["table"] for t in out["tables"])
+    assert [t["id"] for t in out["tasks"]] == ["H-U2", "H-U4"]
+
+
+def test_not_applicable_is_sorted(monkeypatch):
+    from pets_release.kiteval import report as mod
+
+    real = mod._check_table
+
+    def check(name, tr, expected, found, **kw):
+        res = real(name, tr, expected, found, **kw)
+        found.append({"table": name, "section": "linkage", "key": "z", "code": "no_data"})
+        found.append({"table": name, "section": "linkage", "key": "a", "code": "no_data"})
+        return res
+
+    monkeypatch.setattr(mod, "_check_table", check)
+    out = _validate(_passing_report())
+    keys = [(i["table"], i["section"], i["key"], i["code"]) for i in out["not_applicable"]]
+    assert keys == sorted(keys) and len(keys) >= 4
