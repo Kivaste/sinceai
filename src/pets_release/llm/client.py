@@ -16,6 +16,7 @@ from pets_release.llm.draft import DraftRejected, build_draft, parse_model_outpu
 from pets_release.llm.prompt import build_messages
 from pets_release.llm.screen import MIN_KEY_CHECK, has_credential, has_value_shape
 from pets_release.llm.vocabulary import vocabulary_for
+from pets_release.llm.wire import exact_text
 
 MAX_REQUEST = 2000
 MAX_REPLY_BYTES = 262_144  # whole HTTP body; the sender enforces the same cap before buffering
@@ -61,8 +62,8 @@ def _check_key(key: str) -> None:
 
 
 def screen_request(text: str) -> str:
-    """The request must be plain language: no identifier-shaped values, bounded length."""
-    text = text.strip() if isinstance(text, str) else ""
+    """The request must be plain language: no identifier-shaped values, bounded length. Exact `str` only."""
+    text = exact_text(text, "the data request", LlmError).strip()
     if not text:
         raise LlmError("the data request is empty")
     if len(text) > MAX_REQUEST:
@@ -70,6 +71,17 @@ def screen_request(text: str) -> str:
     if has_value_shape(text):
         raise LlmError("the data request contains a value-shaped string (email, ID or long number); remove it")
     return text
+
+
+def _wire_config(config: object) -> tuple[str, str, str]:
+    """Exact `LlmConfig` only; endpoint, model and key each read once and normalised to plain `str`."""
+    if type(config) is not LlmConfig:
+        raise LlmError("the configuration is not an LlmConfig; refused before sending")
+    return (
+        exact_text(config.endpoint, "the endpoint", LlmError),
+        exact_text(config.model, "the model name", LlmError),
+        exact_text(config.api_key, "the API key", LlmError),
+    )
 
 
 def _url(endpoint: str) -> str:
@@ -81,15 +93,17 @@ def draft_policy(
     request: str, dictionary: DataDictionary, config: LlmConfig, transport: Transport
 ) -> dict:
     """Request text + typed dictionary in, validated DRAFT policy out. Raises LlmError or DraftRejected."""
+    # Every value that reaches the transport goes through `exact_text` first; only the copies are used below.
     request = screen_request(request)
     dictionary = validate_dictionary(dictionary)  # exact types first; use only the validated copy below
-    _check_key(config.api_key)
+    endpoint, model, api_key = _wire_config(config)
+    _check_key(api_key)
     messages = build_messages(request, dictionary, vocabulary_for(dictionary.dataset))
     body = json.dumps(
-        {"model": config.model, "messages": messages, "temperature": 0}, sort_keys=True
+        {"model": model, "messages": messages, "temperature": 0}, sort_keys=True
     ).encode("utf-8")
     try:
-        raw = transport(_url(config.endpoint), body, config.api_key, TIMEOUT_S)
+        raw = transport(_url(endpoint), body, api_key, TIMEOUT_S)
     except Exception:  # noqa: BLE001 - the exception text could echo the key or the endpoint
         raise LlmError("the provider request failed") from None
     if not isinstance(raw, (bytes, bytearray)) or len(raw) > MAX_REPLY_BYTES:
@@ -102,9 +116,9 @@ def draft_policy(
         raise LlmError("the provider reply has no text content")
     if len(content) > MAX_CONTENT_CHARS:
         raise LlmError("the model text is larger than the size limit")
-    draft = build_draft(parse_model_output(content), dictionary, request=request, model=config.model)
+    draft = build_draft(parse_model_output(content), dictionary, request=request, model=model)
     model_fields = {k: v for k, v in draft.items() if k != "requestSha256"}  # the digest is ours, not the model's
-    if has_credential(list(_strings(model_fields)), config.api_key):
+    if has_credential(list(_strings(model_fields)), api_key):
         raise DraftRejected("the draft contains a credential or the API key")
     return draft
 

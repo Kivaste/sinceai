@@ -8,6 +8,7 @@ import json
 
 from pets_release.llm.dictionary import DataDictionary, validate_dictionary
 from pets_release.llm.vocabulary import DETAIL_LEVELS, TRUST_LEVELS, AnalysisType
+from pets_release.llm.wire import exact_text
 
 SYSTEM = (
     "You draft a data-sharing policy from a plain-language data request. You are given the request, "
@@ -22,8 +23,7 @@ SYSTEM = (
 
 
 def build_messages(request: str, dictionary: DataDictionary, vocabulary: tuple[AnalysisType, ...]) -> list[dict]:
-    if not isinstance(request, str):
-        raise TypeError("request must be text")
+    request = exact_text(request, "request", TypeError)  # no method of a str subclass is dispatched
     if type(dictionary) is not DataDictionary:
         raise TypeError("dictionary must be a DataDictionary")
     if not isinstance(vocabulary, tuple) or not all(isinstance(a, AnalysisType) for a in vocabulary):

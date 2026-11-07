@@ -8,6 +8,7 @@ import re
 from dataclasses import dataclass
 
 from pets_release.llm.screen import has_value_shape
+from pets_release.llm.wire import exact_text
 
 _NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,63}$")
 # Closed vocabularies from the kit taxonomy (role / subtype names, not values). Anything else fails closed.
@@ -89,8 +90,18 @@ def validate_dictionary(d: object) -> DataDictionary:
             raise DictionaryError("a dictionary's tables must be TableInfo")
         if not all(type(c) is ColumnInfo for c in t.columns):
             raise DictionaryError("a table's columns must be ColumnInfo")
-        tables.append(TableInfo(t.name, tuple(ColumnInfo(c.name, c.role, c.subtype) for c in t.columns)))
-    return DataDictionary(d.dataset, tuple(tables))
+        cols = tuple(
+            ColumnInfo(_text(c.name, "a column name"), _text(c.role, "a column role"),
+                       _text(c.subtype, "a column subtype"))
+            for c in t.columns
+        )
+        tables.append(TableInfo(_text(t.name, "a table name"), cols))
+    return DataDictionary(_text(d.dataset, "the dataset name"), tuple(tables))
+
+
+def _text(value: object, what: str) -> str:
+    # exact str before the allowlists run: a subclass could pass `in ROLES` via __eq__/__hash__
+    return exact_text(value, what, DictionaryError)
 
 def parse_dictionary(markdown: str, dataset: str) -> DataDictionary:
     """Parse the kit's docs/DATA_DICTIONARY.md for one dataset. Fails closed when nothing is found."""
