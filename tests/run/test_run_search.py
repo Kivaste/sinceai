@@ -130,14 +130,15 @@ def test_unknown_plan_is_a_usage_error(tmp_path):
 
 
 @pytest.mark.parametrize("extra", [(), ("--plan", "hand")])
-def test_cs_s1_refuses_cleanly_naming_the_follow_up(tmp_path, extra):
-    """CS-S1 (release: ticket 23; search: follow-up #96) is not wired in this build: fail closed, say why."""
-    kit = build_kit(tmp_path / "kit", grouped_qis)
+def test_cs_s1_without_its_dataset_refuses_cleanly(tmp_path, extra):
+    """CS-S1 is wired by ticket 23 (its hand plan, with or without --plan hand; its search is follow-up #96). On a
+    kit without the customer_service dataset it fails closed: exit 2, says why, no traceback, nothing written."""
+    kit = build_kit(tmp_path / "kit", grouped_qis)  # health tables only
     out = tmp_path / "out" / "rel"
     args = ["run", "--scenario", "CS-S1", "--kit", str(kit), "--out", str(out), "--created", CREATED, *extra]
     proc = cli(*args)
     assert proc.returncode == 2, proc.stdout + proc.stderr
-    assert "CS-S1" in proc.stderr and "#96" in proc.stderr and "ticket 23" in proc.stderr
+    assert "customer_service" in proc.stderr and "Traceback" not in proc.stderr
     assert "RELEASED" not in proc.stdout
     assert not out.exists() and not (tmp_path / "out" / "rel.scoring").exists()
 

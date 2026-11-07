@@ -47,8 +47,13 @@ def run_cs_s1(*, kit, scenario: dict, created: str, key_text: str, out, tool_rev
     out = Path(out).absolute()
     if out.exists() or scoring_dir(out).exists():
         raise RunError("output folder or its scoring folder already exists")
-    source = kit.load_dataset(policy.dataset)
-    inputs = kit.input_digests(policy.dataset)
+    from pets_release.kit import KitError
+
+    try:
+        source = kit.load_dataset(policy.dataset)
+        inputs = kit.input_digests(policy.dataset)
+    except KitError:
+        raise RunError(f"the kit has no usable {policy.dataset} dataset for CS-S1") from None  # content-free
     master = MasterKey.from_text(key_text)
     rsid = release_scope_id(scenario=SCENARIO, recipient=recipient, inputs=inputs, tool_revision=tool_revision)
 
