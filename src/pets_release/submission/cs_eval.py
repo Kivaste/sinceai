@@ -143,6 +143,11 @@ EFFECT_FRAME = ("customer_service train split, conversation-level skeleton-held-
                 "the eval split's labels are not in the kit")
 
 
+CS_U1_NOT_MEASURED = ("CS-U1 trains its intent classifier on a whole protected train split and tests on original "
+                      "eval text; the eval exports carry no train-split text, and the held-out labelled subset is not "
+                      "that training frame")
+
+
 def _not_measured(reason: str) -> dict:
     return {"status": "not_measured", "reason": reason}
 
@@ -173,20 +178,89 @@ def masking_effect(kit: Kit, turns, convs, passes, context: dict) -> dict:
     if not held:
         return _not_measured("the conversation-level held-out labelled frame is empty on this kit")
     try:
-        texts, spans, order, lengths = _redact(turns[turns["turn_id"].isin(set(held))], passes)
+        sub = turns[turns["turn_id"].isin(set(held))]
+        texts, spans, order, lengths = _redact(sub, passes)
         truth = {t: frame.gold[t] for t in held}
-        before = _micro(truth, {t: list(spans[t]) for t in held})
+        pred_before = {t: list(spans[t]) for t in held}
+        text_before = dict(texts)
+        before = _micro(truth, pred_before)
         _r, _s, gate = _gate(texts, spans, order, lengths, context)
-        after = _micro(truth, {t: spans[t] for t in held})
+        pred_after = {t: spans[t] for t in held}
+        after = _micro(truth, pred_after)
     except SubmissionRefused as e:
         return _not_measured(f"masking could not be replayed on the held-out frame ({e.code})")
     except ModuleNotFoundError:
         return _not_measured("the pinned scorer (pets_eval) is not importable")
     if any(not isinstance(m[k], float) for m in (before, after) for k in m):  # `measured` means every number is real
         return _not_measured("a held-out metric is undefined (the scorer returned no number)")
+    masked = gate["maskedTurns"]
     return {"status": "measured", "frame": EFFECT_FRAME, "metric": "exact-match micro, all labels",
             "conversations": len({frame.conversation_of[t] for t in held}), "turns": len(held),
-            "maskedTurns": gate["maskedTurns"], "before": before, "after": after}
+            "maskedTurns": masked, "before": before, "after": after,
+            "identifying": _identifying(truth, pred_before, pred_after),
+            "csS1TargetRecall": _target_recall(truth, pred_before, pred_after),
+            "turnLevel": {"heldOutTurns": len(held), "maskedTurns": masked,
+                          "maskedShare": round(masked / len(held), 4),
+                          "tasks": {"CS-U1": _not_measured(CS_U1_NOT_MEASURED),
+                                    "CS-U5": _vocabulary(sub, text_before, texts)}}}
+
+
+def _exact_micro(gold: dict, pred: dict, labels: set) -> dict:
+    """The pinned scorer's exact-match micro over ``labels``: rates plus their counts (the denominators)."""
+    from pets_release.redaction_eval.scoring import exact_scores
+
+    m = exact_scores(gold, pred, labels)["micro"]
+    return {"precision": m["precision"], "recall": m["recall"], "f2": m["f2"], "tp": m["tp"], "fp": m["fp"],
+            "fn": m["fn"], "goldSpans": m["tp"] + m["fn"]}
+
+
+def _identifying(gold: dict, before: dict, after: dict) -> dict:
+    """Identifying-only exact micro (the pinned scorer's IDENTIFYING labels, named), before and after masking."""
+    from pets_eval.text import IDENTIFYING
+
+    labels = sorted(IDENTIFYING)
+    b, a = _exact_micro(gold, before, set(labels)), _exact_micro(gold, after, set(labels))
+    if not b["goldSpans"]:
+        return {"labels": labels, **_not_measured("no identifying gold spans in the held-out frame")}
+    return {"labels": labels, "before": b, "after": a}
+
+
+def _target_recall(gold: dict, before: dict, after: dict) -> dict:
+    """Recall of each CS-S1 target label (found / gold), before and after masking; a label with no gold span in
+    the frame is not_measured."""
+    from pets_release.redaction_eval.scoring import CS_S1_TARGET_LABELS
+
+    out = {}
+    for lab in CS_S1_TARGET_LABELS:
+        b, a = _exact_micro(gold, before, {lab}), _exact_micro(gold, after, {lab})
+        n = b["goldSpans"]
+        out[lab] = ({"gold": n, "before": {"found": b["tp"], "recall": round(b["tp"] / n, 4)},
+                     "after": {"found": a["tp"], "recall": round(a["tp"] / n, 4)}} if n
+                    else _not_measured(f"no gold {lab} spans in the held-out frame"))
+    return out
+
+
+def _vocabulary(sub, before: dict, after: dict) -> dict:
+    """CS-U5 (ordinary vocabulary retained, matched by turn_id) by the pinned scorer on the held-out turns: original
+    vs redacted, before and after masking. The scorer gives 0 when no token is common to >= 25 conversations, so a
+    frame where the original scored against itself is not 1.0 is not_measured (never a made-up 0)."""
+    import pandas as pd
+    from pets_eval.utility.customer_service import u5_vocab
+
+    orig = {"turns": sub[["turn_id", "conversation_id", "text"]].copy()}
+
+    def score(texts: dict):
+        prot = pd.DataFrame({"turn_id": list(texts), "text": list(texts.values())}, dtype=str)
+        return u5_vocab(orig, {"turns": prot})["score"]
+
+    if score(dict(zip(sub["turn_id"], sub["text"]))) != 1.0:
+        return _not_measured("no common vocabulary in the held-out frame (CS-U5 counts tokens used in >= 25 "
+                             "conversations)")
+    b, a = score(before), score(after)
+    if not isinstance(b, float) or not isinstance(a, float):
+        return _not_measured("CS-U5 returned no number on the held-out frame")
+    return {"status": "measured", "metric": "share of common word tokens retained (CS-U5, pinned scorer)",
+            "before": round(b, 4), "after": round(a, 4)}
 
 
 # ---------------------------------------------------------------- the gate on the export bytes
