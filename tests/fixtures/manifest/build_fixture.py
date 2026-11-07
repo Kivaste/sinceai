@@ -196,6 +196,11 @@ def _inv(table: str, column: str, role: str, subtype: str, evidence: str) -> dic
             "evidence": [evidence]}
 
 
+def _k_summary() -> dict:
+    # two classes of five persons (invented counts, consistent with tables())
+    return {"persons": 10, "unidentifiedUnits": 0, "minK": 5, "medianK": 5, "belowK": 0, "belowKShare": 0.0}
+
+
 def _fj(table, column, output, rung, floor, reason) -> dict:
     return {"table": table, "column": column, "outputColumn": output,
             "decision": "withheld" if rung == "withheld" else "released",
@@ -293,6 +298,10 @@ def manifest(files: dict[str, bytes]) -> dict:
                 {"baseline": "B2-k", "metric": "worst_reid", "value": 0.1},
             ]},
             "redaction": not_measured("no free text released"),
+            "kSets": {"status": "measured", "source": "fixture", "k": 5, "sets": [
+                {"set": name, "status": "measured", "qi": contract()["qi"],
+                 "beforeSuppression": _k_summary(), "released": _k_summary()}
+                for name in ("scenario", "keptCatalogued")], "withheld": []},
         },
         "sacrifices": [],
         "residualRisks": [

@@ -119,6 +119,25 @@ def test_withheld_catalogued_qis_carry_their_policy_justification(released, tmp_
     assert not any(k in kept for k in withheld)
 
 
+def test_dashboard_shows_both_sets_and_the_withheld_list(released, tmp_path):
+    import re
+
+    _, rel = copy_release(released, tmp_path)
+    out = tmp_path / "dash.html"
+    proc = cli("dashboard", str(rel), "--out", str(out))
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    html = out.read_text(encoding="utf-8")
+    sec = re.search(r'<section id="k-sets" data-status="complete">(.*?)</section>', html, re.S)
+    assert sec, "no complete k-sets section"
+    body = sec.group(1)
+    assert "Scenario QIs" in body and "All kept catalogued QIs" in body
+    m = _manifest(rel)
+    for s in m["measured"][KS]["sets"]:
+        assert f'data-set="{s["set"]}"' in body
+    for w in m["measured"][KS]["withheld"]:
+        assert f"<td>{w['table']}.{w['column']}</td>" in body
+
+
 def test_full_verify_fails_on_a_changed_k_set_figure(released, tmp_path):
     kit, rel = copy_release(released, tmp_path)
     m = _manifest(rel)
