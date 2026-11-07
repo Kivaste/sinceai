@@ -36,8 +36,8 @@ def _mapped(s: pd.Series, fn: Callable[[str], str]) -> pd.Series:
     return s.map(lambda v: v if _isnull(v) else uniq[v]).astype(object)
 
 
-def _parse_ts(v: str) -> tuple[int, int, int, int] | None:
-    """(year, month, day, hour) of a timestamp/date string, or None."""
+def _parse_ts(v: str) -> tuple[int, int, int, int, int, int] | None:
+    """(year, month, day, hour, minute, second) of a fully valid timestamp/date string, or None."""
     m = _TS_RE.match(v)
     if not m:
         return None
@@ -46,16 +46,18 @@ def _parse_ts(v: str) -> tuple[int, int, int, int] | None:
     else:
         y, mo, d = int(m.group("fy")), int(m.group("fm")), int(m.group("fd"))
     h = int(m.group("H")) if m.group("H") else 0
-    if not (1 <= mo <= 12 and 1 <= d <= 31 and 0 <= h <= 23):
+    mi = int(m.group("M")) if m.group("M") else 0
+    sec = int(m.group("S")) if m.group("S") else 0
+    if not (1 <= mo <= 12 and 1 <= d <= 31 and 0 <= h <= 23 and 0 <= mi <= 59 and 0 <= sec <= 59):
         return None
     try:
         pd.Timestamp(year=y, month=mo, day=d)
     except (ValueError, OverflowError):
         return None
-    return y, mo, d, h
+    return y, mo, d, h, mi, sec
 
 
-def _ts_fmt(fn: Callable[[int, int, int, int], str]) -> Callable[[pd.Series, dict], pd.Series]:
+def _ts_fmt(fn: Callable[..., str]) -> Callable[[pd.Series, dict], pd.Series]:
     def run(s: pd.Series, params: dict) -> pd.Series:
         def one(v: str) -> str:
             p = _parse_ts(v)
@@ -66,16 +68,17 @@ def _ts_fmt(fn: Callable[[int, int, int, int], str]) -> Callable[[pd.Series, dic
     return run
 
 
-def _week(y: int, mo: int, d: int, h: int) -> str:
+def _week(y: int, mo: int, d: int, *_: int) -> str:
     iso = pd.Timestamp(year=y, month=mo, day=d).isocalendar()
     return f"{int(iso.year):04d}-W{int(iso.week):02d}"
 
 
-ts_hour = _ts_fmt(lambda y, mo, d, h: f"{y:04d}-{mo:02d}-{d:02d}T{h:02d}:00")
-ts_month_hour = _ts_fmt(lambda y, mo, d, h: f"{y:04d}-{mo:02d}-01T{h:02d}:00")
-ts_day = _ts_fmt(lambda y, mo, d, h: f"{y:04d}-{mo:02d}-{d:02d}")
+ts_exact = _ts_fmt(lambda y, mo, d, h, mi, sec: f"{y:04d}-{mo:02d}-{d:02d} {h:02d}:{mi:02d}:{sec:02d}")
+ts_hour = _ts_fmt(lambda y, mo, d, h, *_: f"{y:04d}-{mo:02d}-{d:02d}T{h:02d}:00")
+ts_month_hour = _ts_fmt(lambda y, mo, d, h, *_: f"{y:04d}-{mo:02d}-01T{h:02d}:00")
+ts_day = _ts_fmt(lambda y, mo, d, h, *_: f"{y:04d}-{mo:02d}-{d:02d}")
 ts_week = _ts_fmt(_week)
-ts_month = _ts_fmt(lambda y, mo, d, h: f"{y:04d}-{mo:02d}")
+ts_month = _ts_fmt(lambda y, mo, d, h, *_: f"{y:04d}-{mo:02d}")
 
 
 def identity(s: pd.Series, params: dict) -> pd.Series:
@@ -193,6 +196,18 @@ def _fmt(d: Decimal, places: int) -> str:
     q = Decimal(1).scaleb(-places)
     out = format(d.quantize(q), "f")
     return out[1:] if re.fullmatch(r"-0(\.0+)?", out) else out  # no negative zero
+
+
+def num_exact(s: pd.Series, params: dict) -> pd.Series:
+    """Canonical decimal text (dot separator, no exponent, optional < or > qualifier); unparseable -> empty."""
+
+    def one(v: str) -> str:
+        t = v.strip()
+        q = t[0] if t[:1] in ("<", ">") else ""  # censored measurement ("<5") keeps its qualifier
+        d = _dec(t[len(q):])
+        return "" if d is None else q + format(d, "f")
+
+    return _mapped(s, one)
 
 
 def num_round(s: pd.Series, params: dict) -> pd.Series:

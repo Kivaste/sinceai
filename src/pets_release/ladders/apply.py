@@ -22,7 +22,7 @@ Redactor = Callable[[str, str, pd.DataFrame, Mapping[str, Any]], pd.Series]
 DEFAULT_AGE_COLUMN = "age_band"
 
 _SIMPLE: dict[str, Callable[[pd.Series, dict], pd.Series]] = {
-    "ts.exact": T.identity,
+    "ts.exact": T.ts_exact,
     "ts.hour": T.ts_hour,
     "ts.month_hour": T.ts_month_hour,
     "ts.day": T.ts_day,
@@ -33,7 +33,7 @@ _SIMPLE: dict[str, Callable[[pd.Series, dict], pd.Series]] = {
     "icd.full": T.icd_full,
     "icd.3": T.icd_3,
     "icd.chapter": T.icd_chapter,
-    "num.exact": T.identity,
+    "num.exact": T.num_exact,
     "num.round": T.num_round,
     "num.bin": T.num_bin,
     "keep": T.identity,
@@ -60,18 +60,17 @@ def _validate(plan: list[Mapping[str, Any]], tables: Mapping[str, pd.DataFrame])
         if rung not in KNOWN_RUNGS:
             raise LadderError(f"unknown rung {rung!r} for {key[0]}.{key[1]}")
         floor = e.get("floor")
-        if floor:
-            if floor not in KNOWN_RUNGS:
-                raise LadderError(f"unknown floor {floor!r} for {key[0]}.{key[1]}")
-            if floor == WITHHELD:
-                ok = rung == WITHHELD
-            elif rung == WITHHELD:
-                ok = True
-            else:
-                (rk, rp), (fk, fp) = coarseness(rung), coarseness(floor)
-                ok = rk == fk and rp >= fp
-            if not ok:
-                raise LadderError(f"rung {rung!r} is finer than its floor {floor!r} for {key[0]}.{key[1]}")
+        if not isinstance(floor, str) or floor not in KNOWN_RUNGS:
+            raise LadderError(f"missing or unknown floor for {key[0]}.{key[1]}")
+        if floor == WITHHELD:
+            ok = rung == WITHHELD
+        elif rung == WITHHELD:
+            ok = True
+        else:
+            (rk, rp), (fk, fp) = coarseness(rung), coarseness(floor)
+            ok = rk == fk and rp >= fp
+        if not ok:
+            raise LadderError(f"rung {rung!r} is finer than its floor {floor!r} for {key[0]}.{key[1]}")
         by_key[key] = e
     for t, df in tables.items():
         for c in df.columns:
