@@ -13,6 +13,9 @@ Phases, each in fixed (table, column) order; linked columns move as one unit:
                kind is unsupported and refuses the plan, as do a raising, refused or incomplete check run.
                A policy declaring no target records privacy ``not_applicable``, never ``pass``
 
+Feasibility (#128): a candidate that releases any column of a table but not that table's record key as its
+``id.pseudonym`` token is never evaluated or adopted, and the final plan is refused if it does.
+
 Acceptance: every purpose check status ``ok`` with score >= 0.9. A check below 0.9 is waived only if it is an
 enumerated sacrifice, scored (status ok) at or above its floor score, and the candidate differs from the
 strict-phase plan only in sacrifice ``via`` columns, at least one of them that check's own. In the final
@@ -479,6 +482,8 @@ class _Search:
 
         def try_strict(cand, desc, strictly_better=False):
             nonlocal cur, cur_ev
+            if self._dropped_record_keys(cand):
+                return False, None  # infeasible (#128): never evaluated, never adopted
             ev = self.evaluate(cand)
             fails = self.failing(ev["results"])
             o_new, o_cur = self.objective(ev, cand), self.objective(cur_ev, cur)
@@ -593,7 +598,21 @@ class _Search:
                         step_reason((m["table"], m["column"]), f"{m['rung']}: joint QI move {i + 1}, enumerated sacrifice", step)
         return self.finish(cur, base, reasons, cur_ev)
 
+    def _dropped_record_keys(self, cand) -> list:
+        """Record keys a candidate fails to keep (#128): a table with any released column must release its record
+        key (``kspec["record_keys"]``) as ``id.pseudonym``, the release-scope keyed token every row map is
+        recomputed from. Such a candidate is infeasible. Returns ``table.column`` names (schema only)."""
+        out = []
+        for t, rk in sorted(((self.kspec or {}).get("record_keys") or {}).items()):
+            if not any(r != WITHHELD for (tt, _), (r, _, _) in cand.items() if tt == t):
+                continue
+            if cand.get((t, rk), (WITHHELD,))[0] != "id.pseudonym":
+                out.append(f"{t}.{rk}")
+        return out
+
     def _try_sacrifice(self, cand, cur, cur_ev, base, desc):
+        if self._dropped_record_keys(cand):
+            return None, None  # infeasible (#128): never evaluated, never adopted
         ev = self.evaluate(cand)
         ok = self.sacrifice_ok(ev["results"], cand, base) and self.objective(ev, cand) < self.objective(cur_ev, cur)
         fails = self.failing(ev["results"])
@@ -690,6 +709,7 @@ class _Search:
         problems += [f"re-check privacy target {t['id']} ({t['kind']}): {t['status']}" for t in targets
                      if t["status"] != "pass"]
         problems += self._rung_step_problems(cur, results)
+        problems += [f"record key {n} not released as a token" for n in self._dropped_record_keys(cur)]
         ok = not problems
         ev = {"results": {c: results.get(c, {"score": None, "status": "missing"}) for c in self.checks},
               "risk": {c: (0.0 if v is None else v) for c, v in rv.items()}, "cached": False}
