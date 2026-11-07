@@ -10,15 +10,69 @@ from pathlib import Path
 import pytest
 
 
-def test_committed_cs_expectation_requires_a_release(smoke_checkout):
-    """Rule: from #24 on, CS-S1 must release; exit 2 remains unknown (CLI seam)."""
+def test_committed_cs_expectation_accepts_explicit_unsupported(smoke_checkout):
+    """Rule: D46 keeps CS refused/unsupported, but its CLI must actually run (CLI seam)."""
     expectations = json.loads((Path(__file__).parent / "expectations.json").read_text(encoding="utf-8"))
-    assert expectations == {"HEALTH-S1": "released", "CS-S1": "released"}
+    assert expectations == {"HEALTH-S1": "released", "CS-S1": "refused"}
     sha = smoke_checkout.commit(cs=expectations["CS-S1"])
+    kit = smoke_checkout.kit()
+    actual = smoke_checkout.cs_cli(kit)
+    assert actual.returncode == 2
+    assert actual.stdout == ""
+    assert actual.stderr == (
+        "pets-release run: run supports only HEALTH-S1 in this build; the CS-S1 release needs ticket 23 "
+        "and its search is follow-up #96\n"
+    )
+    smoke_checkout.run(kit)
+    cs = smoke_checkout.record(sha)["scenarios"]["CS-S1"]
+    assert cs["expected"] == "refused"
+    assert set(cs["steps"]) == {"run"}
+    assert cs["steps"]["run"]["status"] == "completed"
+    assert cs["steps"]["run"]["exitCode"] == 2
+    assert cs["error"] is None
+    assert cs["pass"] is True
+    assert cs["gate"] is None  # unsupported is not a fabricated gate pass
+    assert not list((smoke_checkout.output / sha).glob("attempt-*/CS-S1"))
+
+
+@pytest.mark.parametrize("fault", ["bare-exit-two", "missing-run-cli", "extra-stdout",
+                                   "cs-process-error", "cs-planted-release", "cs-planted-scoring"])
+def test_cs_unsupported_does_not_accept_crashes_errors_or_planted_outputs(smoke_checkout, fault):
+    """Rule: only the exact observed unsupported outcome is allowed, never unknowns (CLI seam)."""
+    run_cli = smoke_checkout.path / "src/pets_release/run/cli.py"
+    if fault == "bare-exit-two":
+        run_cli.write_text("raise SystemExit(2)\n", encoding="utf-8")
+    elif fault == "missing-run-cli":
+        run_cli.unlink()
+    elif fault == "extra-stdout":
+        source = run_cli.read_text(encoding="utf-8")
+        run_cli.write_text(source.replace("from __future__ import annotations",
+                                         "from __future__ import annotations\nprint('synthetic diagnostic')", 1),
+                           encoding="utf-8")
+    sha = smoke_checkout.commit()
+    result = smoke_checkout.run(smoke_checkout.kit(), fault=fault if fault.startswith("cs-") else None)
+    record = smoke_checkout.record(sha)
+    cs = record["scenarios"]["CS-S1"]
+    if fault == "cs-process-error":
+        assert cs["steps"]["run"]["status"] == "error"
+        assert cs["steps"]["run"]["exitCode"] is None
+    else:
+        assert cs["steps"]["run"]["status"] == "completed"
+        assert cs["steps"]["run"]["exitCode"] == 2
+    assert cs["error"] == "run-unknown"
+    assert cs["pass"] is False
+    assert record["pass"] is False
+    assert result.returncode == 1
+
+
+def test_cs_unsupported_cannot_satisfy_a_released_expectation(smoke_checkout):
+    """Rule: unsupported is permitted only by the committed refused expectation (CLI seam)."""
+    sha = smoke_checkout.commit(cs="released")
     smoke_checkout.run(smoke_checkout.kit())
     cs = smoke_checkout.record(sha)["scenarios"]["CS-S1"]
-    assert cs["expected"] == "released"
-    assert set(cs["steps"]) == {"run", "verify-limited", "verify-full", "dashboard"}
+    assert cs["steps"]["run"]["exitCode"] == 2
+    assert cs["error"] == "run-unknown"
+    assert cs["pass"] is False
 
 
 def test_released_expectation_refuses_at_the_real_gate(smoke_checkout):

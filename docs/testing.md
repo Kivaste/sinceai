@@ -111,19 +111,32 @@ private scoring artefacts stay outside the checkout, in a new attempt directory.
   a plain release or a scratch candidate. Its verdict lives under
   `delivery.HEALTH-S1` in the same record and is mandatory for overall success.
 - CS-S1 follows `tests/smoke/expectations.json` **read from Git at that SHA**, not
-  from the working file or the presence of a release. This ticket merges after
-  #24: from #24 on, CS-S1's committed expectation is `released`, requiring the
-  same four steps. Until that support lands, exit 2 is `run-unknown`, never an
-  accepted refusal. The generic expected-refusal branch remains covered by
-  synthetic gate refusals; measured delivery always requires `released` (#120
-  is a defect, not an expected refusal).
+  from the working file or the presence of a release. **D46 drops CS-S1 from this
+  submission permanently**: its committed expectation is `refused` (including
+  the explicitly recognised unsupported outcome), with no later flip to
+  `released`. It must still execute the real `run --scenario CS-S1` CLI.
+  Unsupported passes only on completed exit 2, empty stdout, no release or
+  scoring path, and stderr exactly equal to this real CLI diagnostic, including
+  its final newline:
+
+  ```text
+  pets-release run: run supports only HEALTH-S1 in this build; the CS-S1 release needs ticket 23 and its search is follow-up #96
+  ```
+
+  This message is pinned at the real CLI seam. The historic ticket references
+  above are part of the current CLI diagnostic, not a promise of CS-S1 support.
+  Missing handlers, bare exit 2, extra output, process errors and planted paths
+  fail; no gate pass is invented for unsupported. Generic expected refusals
+  still require actual gate failure counts. Measured HEALTH-S1 delivery always
+  requires `released` (#120 is a defect, not an expected refusal).
 - A release needs all expected CLI exits, explicit limited/full verify messages,
   passing applicable gate checks, person-k at the policy target (where applicable),
   every policy/catalogue purpose check at its threshold or enumerated sacrifice
   floor, and a nonempty dashboard. Registry `not_applicable` is recorded separately;
   error/not-run/missing checks never pass.
 - An expected refusal needs exit 1, no published release, and actual gate failure
-  names and positive hit counts. Exit 2 is unknown, **not** a valid refusal.
+  names and positive hit counts. Exit 2 is unknown, **not** a valid refusal,
+  except for the exact CS-S1 unsupported contract above.
 - Dirty checkouts, SHA mismatch, unavailable inputs, identity drift, missing steps,
   errors and timeouts fail. In particular, a missing or errored measured CLI fails
   even when the plain release passes; there is no fallback to the plain verdict.

@@ -26,6 +26,10 @@ SCENARIOS = ("HEALTH-S1", "CS-S1")
 PINNED_KIT = Path(r"C:\Users\kivas\AI\sinceai-hackaton\Briefs\TRUSTED_PETS_PROVING_GROUND_2026 (1)"
                   r"\TRUSTED_PETS_PROVING_GROUND_2026")
 DEFAULT_OUTPUT = Path(r"C:\Users\kivas\AI\sinceai-out\smoke")
+CS_UNSUPPORTED_DIAGNOSTIC = (
+    "pets-release run: run supports only HEALTH-S1 in this build; the CS-S1 release needs ticket 23 "
+    "and its search is follow-up #96\n"
+)
 
 
 def exact(record, keys):
@@ -112,7 +116,7 @@ def cli(args, env, deadline, *, module="pets_release"):
     start = time.monotonic()
     step = {"exitCode": None, "elapsedSeconds": 0, "status": "timeout"}
     if start >= deadline:
-        return step, ""
+        return step, "", ""
     try:
         flags = {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP} if os.name == "nt" else {
             "start_new_session": True}
@@ -120,7 +124,7 @@ def cli(args, env, deadline, *, module="pets_release"):
                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
                                 encoding="utf-8", errors="replace", **flags)
         try:
-            stdout, _ = proc.communicate(timeout=max(0.001, deadline - time.monotonic()))
+            stdout, stderr = proc.communicate(timeout=max(0.001, deadline - time.monotonic()))
             step.update(exitCode=proc.returncode, status="completed")
         except subprocess.TimeoutExpired:
             if os.name == "nt":
@@ -132,11 +136,13 @@ def cli(args, env, deadline, *, module="pets_release"):
             proc.kill()
             proc.communicate(timeout=10)
             stdout = ""
+            stderr = ""
     except Exception:  # noqa: BLE001 - process errors are unknown; exception text may contain values.
         step["status"] = "error"
         stdout = ""
+        stderr = ""
     step["elapsedSeconds"] = round(time.monotonic() - start, 3)
-    return step, stdout
+    return step, stdout, stderr
 
 
 def gate_aggregates(gate):
@@ -170,10 +176,17 @@ def scenario_smoke(scenario, expected, kit, folder, sha, inputs, env, deadline, 
     try:
         args = ["--scenario", scenario, "--kit", str(kit.root), "--out", str(out),
                 "--created", "2026-11-07T00:00:00Z"]
-        step, _ = cli(args if measured else ["run", *args], env, deadline,
-                      module="pets_release.measure.wire" if measured else "pets_release")
+        step, stdout, stderr = cli(args if measured else ["run", *args], env, deadline,
+                                   module="pets_release.measure.wire" if measured else "pets_release")
         result["steps"]["run"] = step
         code = step["exitCode"]
+        # D46: this one known unsupported CLI outcome is intentional, not a gate pass.
+        # Never accept arbitrary exit 2, diagnostics with extra text, or planted release paths.
+        if (scenario == "CS-S1" and expected == "refused" and not measured
+                and step["status"] == "completed" and code == 2 and stdout == ""
+                and stderr == CS_UNSUPPORTED_DIAGNOSTIC and not out.exists() and not scoring.exists()):
+            result["pass"] = True
+            return result
         if code not in (0, 1):
             result["error"] = "run-unknown"
             return result
@@ -210,14 +223,14 @@ def scenario_smoke(scenario, expected, kit, folder, sha, inputs, env, deadline, 
         required = set(policy.purpose_checks) | set(kit.scenario(scenario)["utility_requirements"])
         utility_ok = (utility["status"] == "measured" and required <= set(result["purpose"])
                       and bool(result["purpose"]) and all(t["pass"] for t in result["purpose"].values()))
-        limited, text = cli(["verify", str(out)], env, deadline)
+        limited, text, _ = cli(["verify", str(out)], env, deadline)
         result["steps"]["verify-limited"] = limited
         limited_ok = limited["exitCode"] == 0 and text.startswith("VERIFIED (limited):")
-        full, text = cli(["verify", "--full", "--kit", str(kit.root), str(out)], env, deadline)
+        full, text, _ = cli(["verify", "--full", "--kit", str(kit.root), str(out)], env, deadline)
         result["steps"]["verify-full"] = full
         full_ok = full["exitCode"] == 0 and text.startswith("VERIFIED (full):")
         dashboard = folder / f"{scenario}.html"
-        step, _ = cli(["dashboard", str(out), "--out", str(dashboard)], env, deadline)
+        step, _, _ = cli(["dashboard", str(out), "--out", str(dashboard)], env, deadline)
         result["steps"]["dashboard"] = step
         result["dashboardWritten"] = dashboard.is_file() and dashboard.stat().st_size > 0
         counts = result["gate"]

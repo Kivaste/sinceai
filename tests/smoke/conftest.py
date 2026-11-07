@@ -46,11 +46,7 @@ def smoke_checkout(tmp_path):
             def edit(folder):
                 helpers.coarse_qis(folder)
                 if card:
-                    import pandas as pd
-                    path = folder / "ed_visits.csv"
-                    frame = pd.read_csv(path, dtype=str, keep_default_na=False, na_filter=False)
-                    frame.loc[0, "disposition"] = "4111 1111 1111 1111"
-                    frame.to_csv(path, index=False, lineterminator="\n")
+                    self.plant_card_in(folder / "ed_visits.csv")
             kit = helpers.build_kit(tmp_path / "kit", edit)
             shutil.copytree(ROOT / "tests/fixtures/minikit/customer_service", kit / "data/customer_service")
             (kit / "results").mkdir()
@@ -58,10 +54,14 @@ def smoke_checkout(tmp_path):
             return kit
 
         def plant_card(self, kit):
+            self.plant_card_in(kit / "data/health/ed_visits.csv")
+
+        def plant_card_in(self, path):
             import pandas as pd
-            path = kit / "data/health/ed_visits.csv"
             frame = pd.read_csv(path, dtype=str, keep_default_na=False, na_filter=False)
-            frame.loc[0, "disposition"] = "4111 1111 1111 1111"
+            # H-U4 requires municipality; search may withhold an unused disposition.
+            # A shared synthetic category also survives per-person k suppression.
+            frame.loc[:, "municipality"] = "4111 1111 1111 1111"
             frame.to_csv(path, index=False, lineterminator="\n")
 
         def run(self, kit, *extra, fault=None):
@@ -71,7 +71,14 @@ def smoke_checkout(tmp_path):
             return subprocess.run([*launcher, str(checkout / "scripts/release_smoke.py"),
                                    "--kit", str(kit), "--out-root", str(tmp_path / "evidence"), *extra],
                                   cwd=checkout, env=env, capture_output=True, text=True, encoding="utf-8",
-                                  timeout=180, check=False)
+                                   timeout=180, check=False)
+
+        def cs_cli(self, kit):
+            return subprocess.run([sys.executable, "-m", "pets_release", "run", "--scenario", "CS-S1",
+                                   "--kit", str(kit), "--out", str(tmp_path / "cs-cli-probe"),
+                                   "--created", "2026-11-07T00:00:00Z"], cwd=checkout,
+                                  env=dict(env, PETS_HMAC_KEY=helpers.TEST_KEY), capture_output=True,
+                                  text=True, encoding="utf-8", timeout=30, check=False)
 
         def record(self, sha):
             return json.loads((tmp_path / "evidence" / sha / "smoke.json").read_text(encoding="utf-8"))

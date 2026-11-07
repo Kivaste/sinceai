@@ -42,6 +42,16 @@ def main():
                 os._exit(86)  # Abrupt exit: no finally block or final evidence write.
         if state["fired"]:
             return
+        if command and "run" in command and "CS-S1" in command:
+            if fault == "cs-process-error":
+                state["fired"] = True
+                raise OSError("synthetic process error")
+            if fault in ("cs-planted-release", "cs-planted-scoring"):
+                state["fired"] = True
+                target = Path(command[command.index("--out") + 1])
+                if fault == "cs-planted-scoring":
+                    target = target.with_name(target.name + ".scoring")
+                target.mkdir(parents=True)
         if (fault == "existing-run-output" and command
                 and "run" in command and "HEALTH-S1" in command):
             state["fired"] = True
