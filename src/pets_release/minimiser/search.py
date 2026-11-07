@@ -602,6 +602,8 @@ class _Search:
                 cand = dict(cur)
                 for k2 in self.unit_of[key]:
                     cand[k2] = (rs["to"], canonical(pr), cur[k2][2])
+                if self._dropped_record_keys(cand):
+                    continue  # infeasible (#128): never evaluated, never adopted, on this path too
                 ev = self.evaluate(cand)
                 fails = self.failing(ev["results"])
                 ok = not fails and self.objective(ev, cand) < self.objective(cur_ev, cur)
