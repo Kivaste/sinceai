@@ -43,7 +43,7 @@ def _pet(entry) -> tuple[str, dict]:
         return "rounding", {"rung": rung}
     if rung == "num.bin":
         return "binning", {"rung": rung}
-    if rung in ("keep", "num.exact", "geo.full", "icd.full", "ts.exact"):
+    if rung in ("keep", "lab.full", "num.exact", "geo.full", "icd.full", "ts.exact"):
         return "none", {}
     return "generalisation", {"rung": rung}
 

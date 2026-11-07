@@ -97,6 +97,27 @@ def identity(s: pd.Series, params: dict) -> pd.Series:
     return s.copy()
 
 
+# ------------------------------------------------------------------ lab test (D33, #106)
+LAB_CRP_CODE = "P-CRP"  # the kit's CRP lab code; the toolkit's H-U7 selects CRP rows by test_code == this
+LAB_REF_COLUMN = "test_code"
+
+
+def lab_crp_other(s: pd.Series, params: dict, ref: pd.Series) -> pd.Series:
+    """"CRP vs other": ``CRP`` where the same row's ``ref`` (the lab code, original values) equals
+    ``params['code']`` (default ``P-CRP``), else ``other``. A null or empty source cell stays empty. The output
+    holds only the two fixed labels, never a source value."""
+    code = params.get("code", LAB_CRP_CODE)
+    if not isinstance(code, str) or not code:
+        raise LadderError("lab.crp_other code must be a non-empty string")
+    out = []
+    for v, r in zip(s.tolist(), ref.tolist()):
+        if _isnull(v) or not str(v).strip():
+            out.append("")
+        else:
+            out.append("CRP" if not _isnull(r) and str(r).strip() == code else "other")
+    return pd.Series(out, index=s.index, dtype=object)
+
+
 # ------------------------------------------------------------------ age
 def _years_between(dob: tuple[int, int, int, int], ref: tuple[int, int, int, int]) -> int:
     return ref[0] - dob[0] - ((ref[1], ref[2]) < (dob[1], dob[2]))

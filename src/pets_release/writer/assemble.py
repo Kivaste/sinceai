@@ -8,6 +8,7 @@ the whole assertion set, which the writer turns into a refusal.
 """
 from __future__ import annotations
 
+import base64
 import re
 
 from pets_release.manifest import (
@@ -70,6 +71,21 @@ def evidence_for(records, scenario: str):
 LOW_SEVERITY_KIND = "gate_low_severity"
 
 
+def low_severity_source(check: str, version: str, scope: str) -> str:
+    """Exact check provenance for a counted residual risk; independent of its opaque ID."""
+    return f"gate check {check} {version} ({scope} scope)"
+
+
+def _low_severity_risk_id(check: str, label: str) -> str:
+    risk = f"gate:{check}:{label}"
+    if len(risk) <= 64 and re.fullmatch(r"[A-Za-z0-9._:+-]+", risk):
+        return risk
+    # Hash the complete, unmodified pair, not its truncated or sanitised display.
+    # URL-safe base64 preserves all 256 bits within the schema's 64-character limit.
+    digest = bytes.fromhex(canonical_digest([check, label]))
+    return "gate-sha256:" + base64.urlsafe_b64encode(digest).decode("ascii").rstrip("=")
+
+
 def low_severity_risks(records) -> list[dict]:
     """``residualRisks`` entries for low-severity gate hits: one per (check, label), with the hit count and the
     check's denominator. Counts and schema names only. Writer and verify both derive them with this function."""
@@ -83,10 +99,10 @@ def low_severity_risks(records) -> list[dict]:
     for (check, label), (r, count) in sorted(counts.items()):
         d = {"unit": r.denominator["unit"], "n": r.denominator["n"]}
         out.append({
-            "risk": re.sub(r"[^A-Za-z0-9._:+-]", "-", f"gate:{check}:{label}")[:64], "kind": LOW_SEVERITY_KIND,
+            "risk": _low_severity_risk_id(check, label), "kind": LOW_SEVERITY_KIND,
             "label": label if label in SPAN_LABELS else None,
             "rate": {"status": "counted", "count": count, "denominator": d,
-                     "source": f"gate check {check} {r.version} ({r.scope} scope)"},
+                      "source": low_severity_source(check, r.version, r.scope)},
             "description": (f"{count} low-severity {label} hit(s) over {d['n']} {d['unit']} scanned by {check}; "
                             "below the refusal threshold, so released and disclosed here")[:500],
         })
