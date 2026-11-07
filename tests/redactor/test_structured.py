@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from pets_release.redactor import StructuredPass, Turn, redact_conversation
 
 
@@ -378,3 +380,46 @@ def test_intervening_words_do_not_reach_prose_or_plain_numbers():
 def test_validated_identifier_after_a_credential_cue_keeps_its_label():
     t = "tunnus avain on 131052-308T"
     assert found(conv(t)) == [("t0", t.index("131052"), len(t), "NATIONAL_ID")]
+
+
+# ---- review r3: spelled e-mail over the whole N-turn window -----------------------------------
+_EMAIL_SPLITS_2 = {
+    "local": ["maija piste", "m at posti piste example"],
+    "before-at": ["maija piste m", "at posti piste example"],
+    "after-at": ["maija piste m at", "posti piste example"],
+    "domain": ["maija piste m at posti", "piste example"],
+    "tld": ["maija piste m at posti piste", "example"],
+}
+_EMAIL_SPLITS_3 = {
+    "local+domain": ["maija piste", "m at posti", "piste example"],
+    "local+at": ["maija", "piste m", "at posti piste example"],
+    "at+tld": ["maija piste m", "at posti piste", "example"],
+    "after-at+tld": ["maija piste m at", "posti piste", "example"],
+    "domain+tld": ["maija piste m at posti", "piste", "example"],
+}
+
+
+@pytest.mark.parametrize("parts", list(_EMAIL_SPLITS_2.values()), ids=list(_EMAIL_SPLITS_2))
+def test_spelled_email_split_over_two_turns_with_backchannel(parts):
+    r = conv(parts[0], ("agent", "joo"), parts[1])
+    assert found(r) == [("t0", 0, len(parts[0]), "EMAIL"), ("t2", 0, len(parts[1]), "EMAIL")]
+    assert {s["placeholder"] for s in r.spans} == {"[EMAIL_1]"}
+
+
+@pytest.mark.parametrize("parts", list(_EMAIL_SPLITS_3.values()), ids=list(_EMAIL_SPLITS_3))
+def test_spelled_email_split_over_three_turns(parts):
+    r = conv(*parts)
+    assert found(r) == [(f"t{k}", 0, len(p), "EMAIL") for k, p in enumerate(parts)]
+    assert {s["placeholder"] for s in r.spans} == {"[EMAIL_1]"}
+
+
+def test_spelled_email_split_beyond_window_is_not_joined():
+    # four same-speaker turns exceed the 3-turn window: never one 4-way span set
+    r = conv("maija", "piste m", "at posti", "piste example")
+    assert "t0" not in [x[0] for x in found(r)]
+
+
+def test_sentence_final_dot_does_not_extend_an_address_into_the_next_turn():
+    a = "osoite on maija piste m at posti piste example."
+    r = conv(a, "Kiitos paljon")
+    assert found(r) == [("t0", 10, len(a) - 1, "EMAIL")]

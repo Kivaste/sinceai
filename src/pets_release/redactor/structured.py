@@ -144,10 +144,14 @@ class StructuredPass:
     def run(self, view: ConversationView) -> Iterator[Candidate]:
         hits: list[_Hit] = []
         masks: list[list[tuple[int, int]]] = []
+        email_groups: list[list[_Hit]] = []
+        join_masks: list[list[tuple[int, int]]] = []  # masks without single-turn spelled e-mails
         for i, turn in enumerate(view.turns):
             m: list[tuple[int, int]] = []
             hits.extend(self._literals(view, i, m))
-            hits.extend(self._spelled_emails(view, i, turn.text, m))
+            join_masks.append(list(m))
+            emails = self._spelled_emails(view, i, turn.text, m)
+            email_groups.extend([h] for h in emails)
             hits.extend(self._cue_tokens(view, i, m))
             masks.append(m)
         runs = [turn_runs(i, t.text, masks[i]) for i, t in enumerate(view.turns)]
@@ -158,7 +162,9 @@ class StructuredPass:
             for r in rs:
                 groups.extend(self._classify(view, [r]))
         groups.extend(self._joins(view, runs))
-        groups.extend(self._email_joins(view, masks))
+        # a turn-local reading of part of an address competes with the joined reading (longest wins)
+        groups.extend(email_groups)
+        groups.extend(self._email_joins(view, join_masks))
         hits.extend(_resolve_groups(groups))
         hits.extend(self._hetu_tails(view, runs, hits))
         for h in hits:
@@ -236,34 +242,44 @@ class StructuredPass:
         return out
 
     def _email_joins(self, view: ConversationView, masks: list[list[tuple[int, int]]]) -> list[list[_Hit]]:
-        """Spelled-out e-mails continued in the next turn of the same speaker (only backchannel turns of
-        the other party in between, window <= join_window): one span per turn, one shared key.
-
-        A match over the joined token list that crosses the boundary necessarily contains the last token
-        of the first turn and the first token of the second (the chain breaks on any other token), so
-        the first part ends its turn and the second starts its turn."""
+        """Spelled-out e-mails continued over later turns of the same speaker within the N-turn window
+        (only backchannel turns of the other party in between; window <= join_window turns, first to
+        last). Every accumulated window is matched as a whole; a match that touches more than one turn
+        gives one span per turn and one shared key. A match is a contiguous token chain, so each part
+        ends or starts its turn at the boundary it crosses."""
         turns = view.turns
         groups: list[list[_Hit]] = []
+        toks_of = [_email_tokens(t.text, masks[k]) for k, t in enumerate(turns)]
         for i in range(len(turns)):
-            a = _email_tokens(turns[i].text, masks[i])
-            if not a:
+            if not toks_of[i]:
                 continue
+            flat: list[Token] = list(toks_of[i])
+            owner: list[int] = [i] * len(toks_of[i])
             for j in range(i + 1, min(len(turns), i + self.join_window)):
                 if turns[j].speaker != turns[i].speaker:
                     if not is_backchannel(turns[j].text):
                         break
                     continue
-                b = _email_tokens(turns[j].text, masks[j])
-                for lo, hi, addr in _email_matches(a + b):
-                    if lo < len(a) <= hi:
-                        key = "email\x00" + addr
-                        groups.append([
-                            _Hit(i, a[lo].start, a[-1].end, "EMAIL", PRIORITY_VALIDATED + 5, key),
-                            _Hit(j, b[0].start, b[hi - len(a)].end, "EMAIL", PRIORITY_VALIDATED + 5, key),
-                        ])
-                break
+                if not toks_of[j]:
+                    break
+                flat += toks_of[j]
+                owner += [j] * len(toks_of[j])
+                for lo, hi, addr in _email_matches(flat):
+                    touched = sorted(set(owner[lo:hi + 1]))
+                    if len(touched) < 2 or touched[0] != i:
+                        continue  # turn-local, or found again from a later start
+                    # a typed '.' at either side of a turn boundary is sentence punctuation, not a dot-word
+                    edges = [q for q in range(lo, hi) if owner[q] != owner[q + 1]]
+                    if any(flat[q].text == "." or flat[q + 1].text == "." for q in edges):
+                        continue
+                    key = "email\x00" + addr
+                    group = []
+                    for k in touched:
+                        idx = [q for q in range(lo, hi + 1) if owner[q] == k]
+                        group.append(_Hit(k, flat[idx[0]].start, flat[idx[-1]].end, "EMAIL",
+                                          PRIORITY_VALIDATED + 5, key))
+                    groups.append(group)
         return groups
-
 
     # ------------------------------------------------------ SECRET/USERNAME
     def _cue_tokens(self, view: ConversationView, i: int, masks) -> list[_Hit]:
