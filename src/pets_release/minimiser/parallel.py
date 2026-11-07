@@ -13,8 +13,10 @@ worker that dies, a result that times out, or a speculative task that failed mak
 """
 from __future__ import annotations
 
+import contextlib
 import multiprocessing
 import os
+import re
 import sys
 from concurrent.futures import ProcessPoolExecutor
 
@@ -22,12 +24,39 @@ RESULT_TIMEOUT_S = 3600  # one candidate; far above any measured candidate
 GIB = 1 << 30
 RAM_PER_WORKER = 2 * GIB
 WORKER_FAILED = "search worker failed: no plan is picked from partial results"
+JOIN_S = 10  # bounded wait for each terminated worker
+# A worker's whole environment (allow-list, as #152's sender): OS basics and the determinism settings. No secret
+# (PETS_HMAC_KEY), no PETS_OFFLINE / PYTHONPATH hook: the worker installs the offline guard itself.
+WORKER_ENV = ("PATH", "SYSTEMROOT", "SYSTEMDRIVE", "WINDIR", "COMSPEC", "PATHEXT", "TEMP", "TMP", "TMPDIR",
+              "USERPROFILE", "HOME", "LOCALAPPDATA", "APPDATA", "HOMEDRIVE", "HOMEPATH", "NUMBER_OF_PROCESSORS",
+              "PROCESSOR_ARCHITECTURE", "LANG", "LC_ALL", "LC_CTYPE", "TZ", "PYTHONUTF8", "PYTHONIOENCODING",
+              "PYTHONHASHSEED", "PYTHONPYCACHEPREFIX", "PYTHONDONTWRITEBYTECODE", "VIRTUAL_ENV")
+SECRET_NAME = re.compile(r"KEY|SECRET|TOKEN|PASSW|CREDENTIAL", re.IGNORECASE)
 
 _W = None  # the worker's own _Search (built once per worker by the initializer)
 
 
 class WorkerFailed(Exception):
     """A pool worker failed (raised, died, timed out). Content-free."""
+
+
+def worker_env(source) -> dict:
+    """The allow-listed environment a search worker starts with (names from ``WORKER_ENV`` only)."""
+    return {k: source[k] for k in WORKER_ENV if k in source}
+
+
+@contextlib.contextmanager
+def _worker_environ():
+    """While a worker may be spawned (inside ``submit``), this process's environment is the worker allow-list;
+    restored right after. Spawned children inherit the process environment block."""
+    saved = dict(os.environ)
+    os.environ.clear()
+    os.environ.update(worker_env(saved))
+    try:
+        yield
+    finally:
+        os.environ.clear()
+        os.environ.update(saved)
 
 
 def _free_ram() -> int | None:
@@ -78,7 +107,10 @@ def _guard_active() -> bool:
 
 
 def _init_worker(payload: dict) -> None:
-    """Offline guard first (before anything is unpacked or scored), verified; then this worker's search state."""
+    """No key material in the environment (fail closed); the offline guard installed here (the worker's
+    environment carries no inherited hook) and verified; then this worker's search state, in strict mode."""
+    if any(SECRET_NAME.search(k) for k in os.environ):
+        raise RuntimeError("a search worker started with a secret in its environment")
     from pets_release import offline
 
     offline.install()
@@ -88,6 +120,7 @@ def _init_worker(payload: dict) -> None:
 
     global _W
     _W = _Search(**payload)
+    _W.strict = True
 
 
 class NoKeys:
@@ -148,7 +181,8 @@ class Pool:
 
     def _submit(self, k, cand, known, cols):
         try:
-            self.fut[k] = self.ex.submit(_score, cand, frozenset(known), cols)
+            with _worker_environ():  # submit may spawn a worker: it starts with the allow-listed environment
+                self.fut[k] = self.ex.submit(_score, cand, frozenset(known), cols)
         except Exception:  # noqa: BLE001 - a broken pool
             raise WorkerFailed(WORKER_FAILED) from None
 
@@ -187,12 +221,25 @@ class Pool:
             if ok and not failed:
                 self.ex.shutdown(wait=True, cancel_futures=True)
             else:
-                self.ex.shutdown(wait=False, cancel_futures=True)
-                kill = getattr(self.ex, "terminate_workers", None)
-                if kill is not None:
-                    try:
-                        kill()
-                    except Exception:  # noqa: BLE001, S110 - already broken
-                        pass
+                self.terminate()
         if failed:
             raise WorkerFailed(WORKER_FAILED)
+
+    def terminate(self) -> None:
+        """Failure path: kill every worker first (a hung scorer included), wait for each (bounded), then shut down.
+        shutdown() first would forget the processes and leave a hung worker running."""
+        procs = list((getattr(self.ex, "_processes", None) or {}).values())
+        kill = getattr(self.ex, "terminate_workers", None)
+        if kill is not None:
+            try:
+                kill()
+            except Exception:  # noqa: BLE001, S110 - already broken; the PIDs below are still killed
+                pass
+        for p in procs:
+            try:
+                if p.is_alive():
+                    p.kill()
+                p.join(JOIN_S)
+            except Exception:  # noqa: BLE001, S110 - already gone
+                pass
+        self.ex.shutdown(wait=False, cancel_futures=True)

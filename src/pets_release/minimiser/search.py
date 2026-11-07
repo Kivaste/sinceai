@@ -153,11 +153,29 @@ def _units(person_of: pd.Series, rows) -> int:
     return len(ident) + sum(1 for v in vals if not (isinstance(v, str) and v.strip()))
 
 
-def _call(fn, task, original, protected) -> dict:
-    """Run one purpose check; a raise is an ``error`` result (message dropped: it could carry values)."""
+class ScoringFailed(Exception):
+    """A purpose check could not be scored and the search must refuse (#127). Content-free."""
+
+
+def offline_violation(e: BaseException) -> bool:
+    """``e`` (or an exception it was raised from or during) is the offline guard's socket refusal."""
+    seen = set()
+    while e is not None and id(e) not in seen:
+        seen.add(id(e))
+        if isinstance(e, OSError) and "offline guard" in str(e):
+            return True
+        e = e.__cause__ or e.__context__
+    return False
+
+
+def _call(fn, task, original, protected, strict: bool = False) -> dict:
+    """Run one purpose check; a raise is an ``error`` result (message dropped: it could carry values). An offline
+    guard violation, or any raise when ``strict`` (a pool worker, #127), refuses instead (``ScoringFailed``)."""
     try:
         return _norm(fn(task, original, protected))
-    except Exception:  # noqa: BLE001
+    except Exception as e:  # noqa: BLE001
+        if strict or offline_violation(e):
+            raise ScoringFailed("a purpose check raised while scoring a candidate") from None
         return {"score": None, "status": "error"}
 
 
@@ -197,6 +215,7 @@ class _Search:
         self.rung_steps: dict = {}  # key -> measured record of an adopted enumerated rung sacrifice (#89)
         self.start_ev = self.base_ev = None  # set by run() once the start and the strict phases are adopted
         self.pool = None  # a parallel.Pool when search(workers > 1) (#127): scoring only, never search state
+        self.strict = False  # True in a pool worker: any purpose-check raise fails the worker, so the run refuses
         self._units()
         self._check_inputs()
 
@@ -405,7 +424,7 @@ class _Search:
             ck = input_digest(chk, self.read_sets, dig)
             cks[chk] = ck
             if ck not in known and ck not in fresh:
-                fresh[ck] = _call(self.purpose, chk, self.src, prot)
+                fresh[ck] = _call(self.purpose, chk, self.src, prot, self.strict)
         plan = self.plan_of(cand)
         rv, pk = R.risk_vector(self.p, plan, self.k_view(prot), self.src, self.kspec, self.k)
         if self.k is not None and pk is None:  # #118: under a k target every candidate carries a measured PersonK
@@ -952,7 +971,9 @@ class _Search:
         if self.purpose_all is not None:
             try:
                 raw = list(self.purpose_all(self.src, prot))
-            except Exception:  # noqa: BLE001 - the message could carry values; every check counts as error
+            except Exception as e:  # noqa: BLE001 - the message could carry values; every check counts as error
+                if offline_violation(e):
+                    raise ScoringFailed("a purpose check raised in the final re-check") from None
                 return {c: {"score": None, "status": "error"} for c in self.checks}
             # every returned task is judged; one outside the policy list is never an enumerated sacrifice
             return {r.get("id"): _norm(r) for r in raw}
@@ -1021,8 +1042,10 @@ def search(policy, tables: Mapping[str, pd.DataFrame], keys, *, purpose: Callabl
     """Run the bounded search. Raises ``MinimiserRefused`` (with the log) when no releasable plan exists.
 
     workers > 1 (#127, D44) scores candidates in a spawn-context process pool (``parallel``), capped at
-    min(cores, free RAM / 2 GiB); the result is identical at every worker count. ``purpose``, ``risk_extra``,
-    ``keys`` and ``redactor`` must then be picklable; a failed worker refuses the search.
+    min(cores, free RAM / 2 GiB); the result is identical at every worker count. ``purpose`` and ``risk_extra``
+    must then be picklable. ``keys`` and ``redactor`` never cross into a worker: key objects refuse pickling by
+    design, so keyed columns are built in this process and shipped as derived columns. A worker starts with an
+    allow-listed environment (no key material). A failed, raising or hung worker refuses the search.
 
     purpose(task_id, original, protected) -> {score, status}; purpose_all(original, protected) -> [{id, score,
     status}] runs every scenario task for the final re-check (default: ``purpose`` per policy check).
@@ -1047,7 +1070,7 @@ def search(policy, tables: Mapping[str, pd.DataFrame], keys, *, purpose: Callabl
     try:
         res = s.run()
         ok = True
-    except R.PersonKMissing as e:  # fail closed (#112, #118): a missing PersonK refuses; it is never scored
+    except (R.PersonKMissing, ScoringFailed) as e:  # fail closed (#112, #118, #127): refuses; never scored
         raise MinimiserRefused(str(e), s.log, s.stats) from None
     finally:
         if s.pool is not None:
