@@ -1,5 +1,4 @@
 beat,label,manifest_key_path,unit,value
-1,Baseline B0 - singling_out,measured.baselines.B0.singling_out,score_0_1,
 1,Baseline B2-k - utility_mean,measured.baselines.B2-k.utility_mean,score_0_1,
 2,release.scenario,release.scenario,text,
 2,release.recipient,release.recipient,text,
@@ -28,6 +27,7 @@ beat,label,manifest_key_path,unit,value
 6,Privacy before - singling_out,measured.privacy.before.singling_out,score_0_1,
 6,Privacy after - singling_out,measured.privacy.after.singling_out,score_0_1,
 6,Baseline B0 - utility_mean,measured.baselines.B0.utility_mean,score_0_1,
+6,Baseline B0 - singling_out,measured.baselines.B0.singling_out,score_0_1,
 6,Baseline B2 - utility_mean,measured.baselines.B2.utility_mean,score_0_1,
 6,Baseline B2 - singling_out,measured.baselines.B2.singling_out,score_0_1,
 6,Baseline B2-k - singling_out,measured.baselines.B2-k.singling_out,score_0_1,

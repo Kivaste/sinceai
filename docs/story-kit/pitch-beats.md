@@ -8,7 +8,7 @@ Do not type a number that has no placeholder. Each beat names the CLI command th
 ## Beat 1: The problem (30 s)
 
 - A hospital privacy officer must share ED visit data with a university research group studying crowding and revisits.
-- "Remove the names" is not anonymisation. In the challenge kit under B0, a receipt still singles out `{{measured.baselines.B0.singling_out}}` of targets.
+- "Remove the names" is not anonymisation: under the B0 baseline, people can still be singled out. (Qualitative here; the HEALTH-S1 singling-out figure appears in Beat 6. Do not quote a kit percentage from any other scenario.)
 - Blanket k-anonymity (B2-k) keeps only `{{measured.baselines.B2-k.utility_mean}}` of the mean utility, and some required analyses drop to 0.
 - Nobody can re-check an "anonymised" claim.
 - Live: `pets-release detect unseen --format unseen` (opener: it labels an unlabelled export without hints).
