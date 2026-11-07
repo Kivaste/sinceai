@@ -344,7 +344,7 @@ def _all_ok(task, orig, prot):
 @pytest.mark.parametrize("target", [
     {"id": "text-recall", "kind": "text_recall", "min": 0.98, "labels": "x"},
     {"id": "no-health-in-text", "kind": "health_in_text", "max_hits": 0},
-    {"id": "timestamps-hour", "kind": "timestamp_floor", "rung": "hour"},
+    {"id": "timestamps-hour", "kind": "timestamp_floor", "rung": "ts.hour"},
 ])
 def test_unevaluable_privacy_target_refuses(syn, target):
     pol = syn.policy()
