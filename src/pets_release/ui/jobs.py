@@ -41,7 +41,7 @@ def scenarios():
 MANIFEST = "privacy_manifest.json"
 PROOF_FIELDS = ("gate", "exportAssertions", "assertionEvidence", "measured", "sacrifices", "residualRisks",
                 "inventory", "pets", "fieldJustifications", "fitFor", "notFitFor", "personK", "targets",
-                "verification")
+                "verification", "contract", "bindings")
 
 
 def live_digests(release, root):
@@ -90,6 +90,16 @@ def proof_summary(scenario, manifest):
         "residualRisks": manifest["residualRisks"],
         **{name: manifest[name] for name in ("inventory", "pets", "fieldJustifications", "fitFor", "notFitFor")},
         "personK": person_k(manifest),
+        "contract": manifest["contract"],
+        # As on /dashboard, retain binding names but never emit opaque identifier-shaped
+        # digests. This projection is made only from the snapshot both tiers verified.
+        "bindings": {
+            **{group: {name: "bound digest" for name in manifest["bindings"][group]}
+               for group in ("files", "inputs", "lexiconDigests")},
+            "contractDigest": "bound digest",
+            "toolRevision": manifest["bindings"]["toolRevision"][:12],
+            "checkVersions": manifest["bindings"]["checkVersions"],
+        },
     }
     summary["targets"] = target_rows(scenario, manifest, summary["personK"])
     return summary
