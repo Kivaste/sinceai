@@ -285,3 +285,47 @@ def test_contract_form_unknown_rung_raises():
         contract_form("ts.nope")
     with pytest.raises(LadderError):
         contract_form("withheld")
+
+
+# ---- ts.hour_of_day (07b): date-free `HH:00`, coarser than ts.month_hour
+def test_hour_of_day_is_on_timestamp_ladder_between_month_hour_and_day():
+    from pets_release.ladders.rungs import coarseness
+
+    lad = LADDERS["timestamp"]
+    assert lad.index("ts.month_hour") < lad.index("ts.hour_of_day")
+    assert coarseness("ts.hour_of_day") > coarseness("ts.month_hour")
+    assert coarseness("ts.hour_of_day")[0] == "timestamp"
+
+
+def test_hour_of_day_form_values_and_nullable():
+    from pets_release.ladders.rungs import contract_entry
+
+    assert contract_form("ts.hour_of_day") == r"^\d{2}:00$"
+    assert contract_entry("ts.hour_of_day")["params"] == {"nullable": True}
+    out = _one("ts.hour_of_day", TS + ["not a time"])["x"]
+    assert list(out) == ["14:00", "00:00", "23:00", "08:00", "07:00", ""]
+    assert all(_matches("ts.hour_of_day", v) for v in out if v)
+
+
+def test_hour_of_day_drops_the_date_entirely():
+    out = _one("ts.hour_of_day", TS)["x"]
+    assert not out.str.contains(r"\d{4}|-").any()
+
+
+def test_hour_of_day_distribution_identical_via_pets_eval():
+    pe = pytest.importorskip("pets_eval.parse")
+    vals = [f"2025-{m:02d}-{d:02d} {h:02d}:{(m * d) % 60:02d}:11" for m in (1, 5, 9) for d in (3, 17) for h in range(24)]
+    out = _one("ts.hour_of_day", vals + ["", "junk"])["x"]
+    got = pe.to_hour(out).dropna().astype(int).value_counts().sort_index()
+    want = pe.to_hour(pd.Series(vals)).astype(int).value_counts().sort_index()
+    assert got.equals(want)
+    assert out.str.contains(r"\d{1,2}:\d{2}").iloc[: len(vals)].all()  # has_time
+
+
+def test_hour_of_day_finer_than_floor_refused():
+    plan = _plan([("t", "x", "ts.hour_of_day", None)])
+    plan[0]["floor"] = "ts.month_hour"
+    apply(plan, {"t": pd.DataFrame({"x": TS}, dtype=str)}, FakeKeys())  # coarser than floor is fine
+    plan[0].update(rung="ts.hour", floor="ts.hour_of_day")
+    with pytest.raises(LadderError):
+        apply(plan, {"t": pd.DataFrame({"x": TS}, dtype=str)}, FakeKeys())
