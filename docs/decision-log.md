@@ -557,3 +557,16 @@ CS-S1 chain done-report + 4 reviews (23 + #53/#54/#56/#92) -> merge -> #63 -> 25
 - **Decision:** All 9 items were already answered in the 14:40 entry, with issue comments and native edges. They are re-flagged because the monitor ignores native blockers on branch items (#129). #65, #66 and #69 are additionally sequenced after the #63 rebase session (ses_e49f4e82), per the 14:52 entry. CPU is at 65.3% against the 70% limit.
 - **Why:** No new information; the monitor defect is #129.
 - **Evidence:** 14:40 and 14:52 entries; #129.
+
+### Sat 15:07 - rolling review pass 3 (Spec) findings routed; #131 folded into #110/#113
+
+- **When:** Sat 15:07 EET
+- **Decision:**
+  1. Pass 3 Spec (Sol, 8e93dcf...f98cf62): 2 high and 3 medium. Four of them confirm open tickets, and each is routed to the live owner:
+     - #106 -> ses_e4a0a4c1, steered;
+     - #110 and #113 -> ses_e4a02df0, which adds the reviewer's evaluator-child probe as a regression;
+     - #118 -> ses_e4a0a7cb, steered to cover both sites, search.py:619-624 and 819-821.
+  2. New tier-1 must-fix #131 (kiteval scorecard input parsed last-wins; incomplete fix of #114) is folded into ticket/fu110-scorecard-k under the same Opus owner. Duplicate keys must fail closed, reusing #114's strict loader. That branch now carries #110, #113 and #131, and round 1 gets all 4 reviews.
+  3. Noted: the pass found no path that makes a missing check produce false. The #109 and #120 regressions pass. The Standards axis (Grok) is still running.
+- **Why:** Tier-1 fail-closed first; same-area work goes to one owner.
+- **Evidence:** newest comments on #106, #110, #113 and #118; #131.
