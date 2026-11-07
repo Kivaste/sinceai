@@ -1,0 +1,54 @@
+term,lang,label,match,boundary,notes
+katu,fi,ADDRESS,street,word,street-name ending; stems and inflected forms
+kadu,fi,ADDRESS,street,word,street-name ending; stems and inflected forms
+tie,fi,ADDRESS,street,word,street-name ending; stems and inflected forms
+kuja,fi,ADDRESS,street,word,street-name ending; stems and inflected forms
+kuji,fi,ADDRESS,street,word,street-name ending; stems and inflected forms
+polku,fi,ADDRESS,street,word,street-name ending; stems and inflected forms
+polu,fi,ADDRESS,street,word,street-name ending; stems and inflected forms
+väylä,fi,ADDRESS,street,word,street-name ending; stems and inflected forms
+väyli,fi,ADDRESS,street,word,street-name ending; stems and inflected forms
+tori,fi,ADDRESS,street,word,street-name ending; stems and inflected forms
+torin,fi,ADDRESS,street,word,street-name ending; stems and inflected forms
+puisto,fi,ADDRESS,street,word,street-name ending; stems and inflected forms
+puiston,fi,ADDRESS,street,word,street-name ending; stems and inflected forms
+raitti,fi,ADDRESS,street,word,street-name ending; stems and inflected forms
+raitin,fi,ADDRESS,street,word,street-name ending; stems and inflected forms
+aukio,fi,ADDRESS,street,word,street-name ending; stems and inflected forms
+rinne,fi,ADDRESS,street,word,street-name ending; stems and inflected forms
+rinteen,fi,ADDRESS,street,word,street-name ending; stems and inflected forms
+kaari,fi,ADDRESS,street,word,street-name ending; stems and inflected forms
+kaaren,fi,ADDRESS,street,word,street-name ending; stems and inflected forms
+mäki,fi,ADDRESS,street,word,street-name ending; stems and inflected forms
+mäen,fi,ADDRESS,street,word,street-name ending; stems and inflected forms
+penger,fi,ADDRESS,street,word,street-name ending; stems and inflected forms
+ranta,fi,ADDRESS,street,word,street-name ending; stems and inflected forms
+rannan,fi,ADDRESS,street,word,street-name ending; stems and inflected forms
+silta,fi,ADDRESS,street,word,street-name ending; stems and inflected forms
+sillan,fi,ADDRESS,street,word,street-name ending; stems and inflected forms
+bulevardi,fi,ADDRESS,street,word,street-name ending; stems and inflected forms
+esplanadi,fi,ADDRESS,street,word,street-name ending; stems and inflected forms
+allas,fi,ADDRESS,street,word,street-name ending; stems and inflected forms
+tanhua,fi,ADDRESS,street,word,street-name ending; stems and inflected forms
+tanhu,fi,ADDRESS,street,word,street-name ending; stems and inflected forms
+gatan,sv,ADDRESS,street,word,street-name ending; stems and inflected forms
+gata,sv,ADDRESS,street,word,street-name ending; stems and inflected forms
+vägen,sv,ADDRESS,street,word,street-name ending; stems and inflected forms
+väg,sv,ADDRESS,street,word,street-name ending; stems and inflected forms
+stigen,sv,ADDRESS,street,word,street-name ending; stems and inflected forms
+torget,sv,ADDRESS,street,word,street-name ending; stems and inflected forms
+backen,sv,ADDRESS,street,word,street-name ending; stems and inflected forms
+allén,sv,ADDRESS,street,word,street-name ending; stems and inflected forms
+street,en,ADDRESS,street,word,street-name ending; stems and inflected forms
+road,en,ADDRESS,street,word,street-name ending; stems and inflected forms
+avenue,en,ADDRESS,street,word,street-name ending; stems and inflected forms
+lane,en,ADDRESS,street,word,street-name ending; stems and inflected forms
+drive,en,ADDRESS,street,word,street-name ending; stems and inflected forms
+close,en,ADDRESS,street,word,street-name ending; stems and inflected forms
+way,en,ADDRESS,street,word,street-name ending; stems and inflected forms
+as.,fi,ADDRESS,apartment-marker,word,apartment marker before the flat number
+asunto,fi,ADDRESS,apartment-marker,word,apartment marker
+huoneisto,fi,ADDRESS,apartment-marker,word,apartment marker
+apt,en,ADDRESS,apartment-marker,word,apartment marker
+flat,en,ADDRESS,apartment-marker,word,apartment marker
+lgh,sv,ADDRESS,apartment-marker,word,apartment marker

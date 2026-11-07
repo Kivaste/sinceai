@@ -124,6 +124,44 @@ def _overlaps_any(span, spans):
     return any(s < span[1] and span[0] < e for s, e in spans)
 
 
+def _phone_ok(raw: str, plus: bool) -> bool:
+    digits = re.sub(r"\D", "", raw)
+    if _DATE_LIKE.match(raw.strip()):
+        return False
+    if plus:
+        return 8 <= len(digits) <= 15
+    if digits.startswith("00"):
+        return 10 <= len(digits) <= 15
+    return bool(re.fullmatch(r"0[1-9]\d{5,9}", digits))
+
+
+_PHONE_WORD = re.compile(r"[^ \t]+")
+
+
+def _split_run(text, start, end):
+    """Greedy left-to-right split of an over-long digit run into phone numbers at spaces.
+
+    Used only when the whole run is not one valid number (two numbers written side by side).
+    """
+    words = [(m.start() + start, m.end() + start) for m in _PHONE_WORD.finditer(text[start:end])]
+    out = []
+    i = 0
+    while i < len(words):
+        found = None
+        for j in range(len(words), i, -1):
+            a, b = words[i][0], words[j - 1][1]
+            raw = text[a:b]
+            if _phone_ok(raw, raw.lstrip().startswith("+")) and not (i == 0 and j == len(words)):
+                found = (a, b, j)
+                break
+        if found:
+            out.append((found[0], found[1]))
+            i = found[2]
+        else:
+            i += 1
+    return out
+
+
 def phones(text):
     hits = []
     hetus = national_ids(text)
@@ -131,18 +169,10 @@ def phones(text):
         if _overlaps_any(m.span(), hetus):
             continue
         raw = m.group(0)
-        digits = re.sub(r"\D", "", raw)
-        if _DATE_LIKE.match(raw.strip()):
-            continue
-        ok = False
-        if m.group(1):
-            ok = 8 <= len(digits) <= 15
-        elif digits.startswith("00"):
-            ok = 10 <= len(digits) <= 15
-        elif re.fullmatch(r"0[1-9]\d{5,9}", digits):
-            ok = True
-        if ok:
+        if _phone_ok(raw, bool(m.group(1))):
             hits.append((m.start(), m.end()))
+        elif not _DATE_LIKE.match(raw.strip()):
+            hits.extend(_split_run(text, m.start(), m.end()))
     return hits
 
 
@@ -283,7 +313,7 @@ def device_ids(text):
 
 # ---------------------------------------------------------------- LICENSE_PLATE
 
-_PLATE_RE = re.compile(r"(?<![\w-])([A-ZÅÄÖ]{2,3})[ \t]*-[ \t]*([1-9]\d{0,2})(?![\w-]|\.\d)")
+_PLATE_RE = re.compile(r"(?i)(?<![\w-])([A-ZÅÄÖ]{2,3})[ \t]*-[ \t]*([1-9]\d{0,2})(?![\w-]|\.\d)")
 _PLATE_DENY = {
     "UTF", "ISO", "MP", "TV", "CS", "HTTP", "SHA", "MD", "AES", "RSA", "USB", "PS", "PC",
     "CD", "DVD", "ID", "NO", "OK", "EU", "EN", "KB", "MB", "GB", "TB", "IP", "AM", "PM",
@@ -293,7 +323,7 @@ _PLATE_DENY = {
 
 
 def plates(text):
-    return [(m.start(), m.end()) for m in _PLATE_RE.finditer(text) if m.group(1) not in _PLATE_DENY]
+    return [(m.start(), m.end()) for m in _PLATE_RE.finditer(text) if m.group(1).upper() not in _PLATE_DENY]
 
 
 # ---------------------------------------------------------------- SECRET
@@ -330,7 +360,8 @@ _FILLERS = {
     "#", "-",
 }
 _VTOK = re.compile(r"[ \t]*([^\s\u00a6,;]+)")
-_TRAIL = ".!?)\"'"
+_TRAIL = ".)\"'"  # "!" and "?" stay on the value: they can be password symbols
+_TAIL_PUNCT = "!?"
 _SECRET_PATTERNS = re.compile(
     r"\bsk-[A-Za-z0-9_-]{16,}|\bAKIA[0-9A-Z]{16}\b|\bgh[pousr]_[A-Za-z0-9]{30,}|"
     r"\bxox[abprs]-[A-Za-z0-9-]{10,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|"
@@ -367,18 +398,21 @@ def _cue_value(text, pos):
         if not n:
             break
         t = n.group(1).rstrip(_TRAIL)
-        if not t or not (t.isdigit() or (len(t) == 1 and t.isalnum())):
+        core = t.rstrip(_TAIL_PUNCT)
+        if not core or not (core.isdigit() or (len(core) == 1 and core.isalnum())):
             break
         parts.append(t)
         end = n.start(1) + len(t)
         pos = n.end()
-        if n.group(1) != t:  # trailing punctuation ends the value
+        if n.group(1) != core:  # trailing punctuation ends the value
             break
     single = len(parts) >= 2 and all(len(x) == 1 for x in parts)
     return "".join(parts), end, single
 
 
 def _value_ok(kind, lo, hi, value, single):
+    if kind != "secret":
+        value = value.rstrip(_TAIL_PUNCT)
     if kind == "digits":
         digits = value.replace("-", "")
         return digits.isdigit() and lo <= len(digits) <= hi

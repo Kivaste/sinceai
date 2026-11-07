@@ -245,6 +245,8 @@ def test_never_opens_truth_or_field_catalog(tmp_path, monkeypatch):
             kit.load_table(*bad)
     with pytest.raises(KitError):
         kit.load_table("truth", "t")
+    assert opened, "open spy recorded nothing: the test would pass vacuously"
+    assert any(p.endswith(".csv") and "health" in p for p in opened), "legitimate dataset read not recorded"
     assert not [p for p in opened if "truth" in p.replace("\\", "/").split("/") or "field_catalog" in p]
 
 
@@ -380,7 +382,7 @@ def _link(link: Path, target: Path) -> None:
     except (OSError, NotImplementedError):
         pass
     if sys.platform == "win32":
-        r = subprocess.run(["cmd", "/c", "mklink", "/J", str(link), str(target)], capture_output=True)
+        r = subprocess.run(["cmd", "/c", "mklink", "/J", str(link), str(target)], capture_output=True, check=False)
         if r.returncode == 0:
             return
     pytest.skip("cannot create symlink or junction here")
@@ -430,3 +432,57 @@ def test_data_dir_junction_to_truth_is_refused(tmp_path):
     _link(root / "data", root / "truth")
     with pytest.raises(KitError):
         Kit(root).load_table("health", "ed_visits")
+
+
+def test_child_env_keeps_block_with_curated_env():
+    """A curated env= built via offline.child_env() keeps the guard."""
+    code = (
+        "from pets_release.offline import install, child_env\ninstall()\n"
+        "import os, subprocess, sys\n"
+        "env = child_env({'PATH': os.environ.get('PATH', ''), 'SystemRoot': os.environ.get('SystemRoot', '')})\n"
+        "assert env['PETS_OFFLINE'] == '1'\n"
+        f"p = subprocess.run([sys.executable, '-c', {PROBE!r}], capture_output=True, text=True, env=env)\n"
+        "sys.exit(0 if p.stdout.strip() == 'BLOCKED' else 1)\n"
+    )
+    assert _run(code).returncode == 0
+
+
+def test_child_env_pure_idempotent_and_documented():
+    import os
+
+    from pets_release import offline
+
+    base = {"PYTHONPATH": "x"}
+    env = offline.child_env(base)
+    assert base == {"PYTHONPATH": "x"}
+    assert env["PYTHONPATH"].split(os.pathsep) == [str(offline.HOOK_DIR), "x"]
+    assert env["PETS_OFFLINE"] == "1"
+    assert offline.child_env(env) == env
+    assert "child_env" in offline.__doc__
+
+
+def test_package_data_globs_are_recursive_and_cover_nested_data():
+    import tomllib
+
+    root = Path(__file__).resolve().parents[2]
+    cfg = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))
+    globs = cfg["tool"]["setuptools"]["package-data"]["*"]
+    assert "**/*.csv" in globs
+    assert "**/*.py" in globs
+
+
+def test_built_wheel_ships_hook_and_nested_data(tmp_path):
+    pytest.importorskip("setuptools")
+    pytest.importorskip("wheel")
+    import zipfile
+
+    root = Path(__file__).resolve().parents[2]
+    cmd = [sys.executable, "-m", "pip", "wheel", "--no-deps", "--no-build-isolation", "-w", str(tmp_path), str(root)]
+    r = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    assert r.returncode == 0, r.stderr[-500:]
+    names = zipfile.ZipFile(next(tmp_path.glob("*.whl"))).namelist()
+    assert "pets_release/_offline_hook/sitecustomize.py" in names
+    for d in ("checks/text/data", "redactor/lexicon/data"):
+        src = root / "src" / "pets_release" / d
+        for f in src.glob("*.csv") if src.is_dir() else []:
+            assert f"pets_release/{d}/{f.name}" in names

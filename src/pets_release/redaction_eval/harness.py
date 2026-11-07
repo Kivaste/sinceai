@@ -56,11 +56,12 @@ def evaluate_frames(frame, notes, make_predictor, precision_floor=None, person_v
         "strict_conversation_split": split_by_skeleton(frame, mode="conversation").summary(),
         "held_out": score_frame({k: frame.gold[k] for k in held}, {k: pred[k] for k in held}),
         "person_twice_held_out": _person_section(frame, split, held, dev_frame, person_variants),
+        "zero_shot_frame": {"notes": len(notes.texts), "gold_dropped": dict(notes.gold_dropped)},
         "zero_shot_clinical_notes": score_frame(notes.gold, predict_all(notes, predictor)),
     }
     if precision_floor is None:
         report["precision_floor"] = {"status": "not_set"}
-        report["passed"] = True
+        report["passed"] = None  # unknown is not a pass; callers must not read None as success
     else:
         ok = check_precision_floor(report["held_out"], precision_floor)
         report["precision_floor"] = {
@@ -69,9 +70,9 @@ def evaluate_frames(frame, notes, make_predictor, precision_floor=None, person_v
         }
         report["passed"] = ok
     if out_dir is not None:
-        export_spot_check(frame, pred, Path(out_dir) / "spot_check.csv", n=sheet_n,
-                          repo_root=repo_root, ids=sorted(held) or None)
-        report["spot_check_rows"] = min(sheet_n, len(held) or len(frame.texts))
+        report["spot_check_rows"] = export_spot_check(
+            frame, pred, Path(out_dir) / "spot_check.csv", n=sheet_n,
+            repo_root=repo_root, ids=sorted(held) or None)
         Path(out_dir).mkdir(parents=True, exist_ok=True)
         (Path(out_dir) / "report.json").write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
     return report

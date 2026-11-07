@@ -1,4 +1,4 @@
-﻿"""Fuzzy quasi-identifier matching of one adversary record against a protected table.
+"""Fuzzy quasi-identifier matching of one adversary record against a protected table.
 
 Own implementation (not the kit's). A protected cell that is blank or masked is a
 wildcard: the attacker learns nothing from it and cannot rule the row out.
@@ -20,6 +20,9 @@ _SEX = {"m": "M", "male": "M", "mies": "M", "man": "M", "f": "F", "female": "F",
         "woman": "F", "kvinna": "F", "n": "F", "k": "F"}
 
 
+KINDS = ("exact", "name", "postcode", "age", "sex", "time")
+
+
 @dataclass
 class QI:
     kind: str  # exact | name | postcode | age | sex | time
@@ -30,12 +33,15 @@ class QI:
 
 
 def qis_from_spec(spec: list, columns) -> list:
-    """QIs from kit-style spec dicts, dropping those whose protected columns are absent."""
+    """QIs from kit-style spec dicts, dropping those whose protected columns are absent.
+    An unknown kind is an error (never silently skipped: that would understate the risk)."""
     cols = set(columns)
     out = []
     for q in spec:
+        if q["kind"] not in KINDS:
+            raise ValueError(f"unknown QI kind {q['kind']!r}")
         prot = tuple(c for c in q["protected"] if c in cols)
-        if prot and q["kind"] in ("exact", "name", "postcode", "age", "sex", "time"):
+        if prot:
             out.append(QI(q["kind"], tuple(q["adversary"]), prot,
                           tuple(q["window"]) if q.get("window") else None, q.get("tol")))
     return out
@@ -94,7 +100,9 @@ _AGE_FORMS = {
 }
 _EXACT_RUNGS = frozenset({"keep", "geo.full", "geo.topn"})
 WITHHELD = "withheld"
-KIND_RUNGS = {"time": set(_TIME_FORMS), "age": set(_AGE_FORMS), "exact": set(_EXACT_RUNGS)}
+KIND_RUNGS = {"time": set(_TIME_FORMS), "age": set(_AGE_FORMS), "exact": set(_EXACT_RUNGS),
+              "name": {"keep", "text.redacted"}, "sex": {"keep"}, "postcode": {"keep", "geo.full", "geo.topn"}}
+AGE_MAX = 130.0
 
 
 def _need_rung(rungs: dict, col: str, kind: str) -> str:
@@ -235,25 +243,34 @@ class Matcher:
         self.n = len(protected)
         self.qis = qis
         self.d: dict = {}
+        self.inf: dict = {}  # QI index -> protected column has a non-wildcard cell
         for i, q in enumerate(qis):
             col = protected[q.prot[0]]
+            if q.kind in ("name", "sex", "postcode"):
+                for c in q.prot:
+                    _need_rung(rungs, c, q.kind)
             if q.kind == "exact":
                 vals = np.array([_norm(v) for v in col.tolist()], dtype=object)
                 rung = _need_rung(rungs, q.prot[0], "exact")
                 # only geo.topn groups the tail into "other"; elsewhere "other" is a literal place
                 known = set(vals) - {"", "other"} if rung == "geo.topn" else None
                 self.d[i] = (vals, known)
+                self.inf[i] = bool((vals != "").any())
             elif q.kind == "sex":
                 self.d[i] = np.array(["" if _blank(v) else _SEX.get(str(v).strip().lower(), "") for v in col.tolist()], dtype=object)
+                self.inf[i] = bool((self.d[i] != "").any())
             elif q.kind == "postcode":
                 self.d[i] = np.array([re.sub(r"\D", "", "" if _blank(v) else str(v)) for v in col.tolist()], dtype=object)
+                self.inf[i] = bool((self.d[i] != "").any())
             elif q.kind == "age":
                 self.d[i] = _age_interval(col, _need_rung(rungs, q.prot[0], "age"))
+                self.inf[i] = bool((self.d[i][0] > -1.0).any())
             elif q.kind == "time":
                 rung = _need_rung(rungs, q.prot[0], "time")
                 mh = _month_hour_keys(col) if rung == "ts.month_hour" else np.full(self.n, -1, dtype=np.int64)
                 hod = _hod_keys(col) if rung == "ts.hour_of_day" else np.full(self.n, -1, dtype=np.int64)
                 self.d[i] = parse_interval(col, rung) + (mh, hod)
+                self.inf[i] = bool((~np.isnat(self.d[i][0])).any() or (mh >= 0).any() or (hod >= 0).any())
             elif q.kind == "name":
                 full = protected[list(q.prot)].fillna("").astype(str).agg(" ".join, axis=1).tolist()
                 index: dict = {}
@@ -264,6 +281,7 @@ class Matcher:
                     for t in ts:
                         index.setdefault(t, []).append(r)
                 self.d[i] = (index, has, {})
+                self.inf[i] = bool(has.any())
 
     def _name_mask(self, i: int, text) -> np.ndarray | None:
         at = _tokens(text)
@@ -315,7 +333,9 @@ class Matcher:
                 try:
                     a = float(str(v).replace(",", "."))
                 except ValueError:
-                    continue
+                    raise RungError("adversary age value does not parse as an age") from None
+                if not (0 <= a <= AGE_MAX):
+                    raise RungError("adversary age value outside a plausible age range")
                 tol = 1.0 if q.tol is None else q.tol
                 lo, hi = self.d[i]
                 mask &= (lo < a + 1 + tol) & (hi > a - tol)
@@ -328,7 +348,7 @@ class Matcher:
                     v = parts[0] + " " + parts[1].replace(".", ":")
                 a, b = _interval_one(v)
                 if a is None:
-                    continue
+                    raise RungError("adversary time value does not parse")
                 t0, t1 = pd.Timestamp(a), pd.Timestamp(b)
                 before, after = q.window if q.window else (24, 24)
                 a0 = (t0 - pd.Timedelta(hours=before)).to_datetime64()
@@ -347,7 +367,8 @@ class Matcher:
                     hrs = pd.date_range(pd.Timestamp(a0).floor("h"), pd.Timestamp(a1), freq="h").hour
                     ok[is_hod] = np.isin(hod[is_hod], np.unique(hrs))
                 mask &= ok
-            used += 1
+            if self.inf[i]:
+                used += 1
         return np.flatnonzero(mask), used
 
 
