@@ -114,14 +114,6 @@ def test_phone_on_own_line_after_trailing_dash_is_not_glued():
     assert all(lab != "ACCOUNT_NUMBER" for _, lab in spans)
 
 
-def test_international_phone_on_own_line_is_split_from_house_number():
-    # whole run '1' + 10 digits reads as an account number next to the cue; only the newline split saves it
-    text = "tilinumero.\nKatu 1\n+44 2079 4609"
-    spans, _ = labelled(text)
-    assert ("+44 2079 4609", "PHONE") in spans
-    assert all(lab != "ACCOUNT_NUMBER" for _, lab in spans)
-
-
 def test_international_and_00_forms_of_one_number_share_a_placeholder():
     r = conv("soita +44 20 7946 0958", "tai 0044 20 7946 0958")
     phs = {s["placeholder"] for s in r.spans if s["label"] == "PHONE"}
@@ -201,3 +193,69 @@ def test_health_term_survives_a_higher_priority_name_in_its_phrase(text):
     labels = {s["label"] for s in r.spans}
     assert {"PERSON", "HEALTH"} <= labels
     assert health_terms(r.texts["h-t0"]) == [], r.texts["h-t0"]
+
+
+# ---- round 3 (review of edf51a8): the redactor is at least as broad as the gate's cue rule ---------------
+# Rule: after a cue + copula (+ hedges), the first non-prose word is the value, wherever the clause ends;
+# a credential-shaped token (the gate's own definition, incl. mixed case) is the value with or without a
+# copula; network-key cues (wifi/wlan) take a plain word only when it ends the clause.
+ROUND3 = [
+    ("username is alfred.", "alfred", "USERNAME"),
+    ("username is ahmed.", "ahmed", "USERNAME"),
+    ("password is orangeRed.", "orangeRed", "SECRET"),
+    ("password is sunflower today", "sunflower", "SECRET"),
+    ("password is sunflower for the router", "sunflower", "SECRET"),
+    ("username is maijamaa today", "maijamaa", "USERNAME"),
+    ("password is probably sunflower now", "sunflower", "SECRET"),
+    ("password HunterTwo", "HunterTwo", "SECRET"),
+    ("password HunterTwo please", "HunterTwo", "SECRET"),
+    ("password is HunterTwo today", "HunterTwo", "SECRET"),
+    ("one time code 482913", "482913", "SECRET"),
+    ("personal identification number 4821", "4821", "SECRET"),
+    ("card verification value 123", "123", "SECRET"),
+    ("wifi is sunflower.", "sunflower", "SECRET"),
+    ("wlan on kotiverkko.", "kotiverkko", "SECRET"),
+    ("pwd is sunflower.", "sunflower", "SECRET"),
+]
+
+
+@pytest.mark.parametrize("text,value,label", ROUND3, ids=[r[0] for r in ROUND3])
+def test_round3_value_is_redacted_and_gate_is_clean(text, value, label):
+    spans, redacted = labelled(text)
+    assert (value, label) in spans
+    assert not any(gate_hits(redacted).values()), gate_hits(redacted)
+
+
+ROUND3_PROSE = [
+    "the password was changed.",
+    "the password was last changed in 2023",
+    "my password is not working today",
+    "the wifi is slow in the evening",
+    "username and password please",
+]
+
+
+@pytest.mark.parametrize("text", ROUND3_PROSE)
+def test_round3_prose_stays(text):
+    spans, _ = labelled(text)
+    assert [lab for _, lab in spans if lab in ("SECRET", "USERNAME")] == [], spans
+
+
+def test_00_phone_on_own_line_is_split_from_house_number():
+    # whole run '1' + 10 digits reads as an account number next to the cue; only the newline split saves it
+    text = "tilinumero.\nKatu 1\n0044 2079 46"
+    spans, _ = labelled(text)
+    assert ("0044 2079 46", "PHONE") in spans
+    assert all(lab != "ACCOUNT_NUMBER" for _, lab in spans)
+
+
+def test_double_barrelled_name_after_a_short_cue_stem_is_not_a_secret():
+    spans, _ = labelled("Pinja Anna-Liisa soitti")
+    assert [lab for _, lab in spans if lab == "SECRET"] == [], spans
+
+
+def test_plain_word_after_copula_and_a_later_credential_are_both_redacted():
+    text = "salasana on kissa ja Koira2024"
+    spans, redacted = labelled(text)
+    assert ("kissa", "SECRET") in spans and ("Koira2024", "SECRET") in spans
+    assert not any(gate_hits(redacted).values()), gate_hits(redacted)
