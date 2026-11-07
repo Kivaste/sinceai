@@ -261,3 +261,21 @@ Each entry records:
 - **Decision:** The 3 failures in slow-split's full profile (`test_verify_full_ignores_planted_rowmap`, `test_two_runs_byte_identical`, `test_unmodified_release_verifies_in_both_tiers`; `toolRevision: mismatch`) don't reproduce. They pass in the merger's full run on `4811b16` (2357 passed, 0 failed), in the slow tier of the diagnosis lane (175 passed) and in slow-split's own fast tier at `e694598` (2248 passed). Cause: the tree moved during the profile run. slow-split may merge once both axes approve: Grok Standards and Sonnet Spec both APPROVE at `e694598`.
 - **Why:** A failure that doesn't reproduce on a clean, committed tree, and that comes with a revision-binding mismatch, is a moving-tree artefact, not a defect.
 - **Evidence:** the merger session ses_e4ae9a7e report; the diagnosis session ses_e4add289; `sinceai-out\slow-split\evidence-e69459898734603ee4c5ae25a082e94df9249d0b\`.
+
+### Sat 11:25 - merge train 1 (slow-split + #78); utilization nudge (09:08Z) handled
+
+- **When:** Sat 11:12-11:25 EET
+- **Decision:**
+  1. Merged slow-split (`e694598`) and #78 (`213e8ed`) into integration at `4ab170b`. On the exact sha (PYTHONUTF8=1, TZ=UTC, PYTHONPATH=src), the fast tier `-n 16 -m "not slow"` gave exit 0, 2264 passed, 5 skipped. The slow tier `-n 16 -m slow` gave exit 0, 123 passed. The first slow-tier attempt failed one subprocess test because the merger prompt left out `PYTHONPATH=src`, which docs/testing.md prescribes. That was an environment error in the orchestrator's prompt, not a defect. #78 closed: `check-done-report.ps1` exited 0. Worktrees and branches were removed.
+  2. Filed #102: `check-done-report.ps1` decodes gh output with the console code page, so the template's `→` fails the gate. Posted reports use `->` until #102 merges. Sol was dispatched on a branch from main.
+  3. For the nudge's 24 items:
+     - Dispatched D31 two-axis reviews for #65, #66, #69, #90, #97 (Standards = Grok, Spec = Sonnet) and #81/#83/#94 (Grok + Sol), plus a #85 round-2 fixer.
+     - Not dispatched, each reason recorded on its issue:
+       - The CS-S1 chain (#53, #54, #92, #56, #63, #88) has a single owner under D29.
+       - #62, #71 and #84 are in the live #61 wave.
+       - #80 (writer/core.py), #93 (run/purpose.py) and #96 (search files) wait on 23, the #61 wave and 25.
+       - #30 is Merge after 23 and 25.
+       - #98 is held because main `b85d1d0` already has its splat fix.
+     - Added `blocked-by` edges for #80, #93, #96, #56 and #88 so the monitor stops flagging them.
+- **Why:** Single owner for the CS-S1 files (D29); each ticket owns its files.
+- **Evidence:** merger session ses_e4abaa0a; issue comments "Orchestrator 11:20 EET" on each item; #78 close comment.
