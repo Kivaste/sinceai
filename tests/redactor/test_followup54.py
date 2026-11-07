@@ -254,6 +254,133 @@ def test_double_barrelled_name_after_a_short_cue_stem_is_not_a_secret():
     assert [lab for _, lab in spans if lab == "SECRET"] == [], spans
 
 
+# ---- round 4 (review of df43b07): the two-part-name exception applies only to ambiguous short-stem cue
+# matches ('Pinja' read as 'pin'); after an explicit cue the gate's unmodified credential shape is used, in
+# the lookahead too. Failure row: explicit cue + copula + plain word + ordinary word + Title-Title token
+# -> only the plain word was redacted, the Title-Title token stayed and both gate scans stopped early.
+ROUND4 = [
+    ("password is kissa talo Anna-Liisa", "Anna-Liisa"),
+    ("password is kissa talo Anna-Liisa!", "Anna-Liisa"),
+    ("salasana on kissa talo Anna-Liisa", "Anna-Liisa"),
+    ("password Anna-Liisa", "Anna-Liisa"),
+    ("salasana taitaa olla Anna-Liisa", "Anna-Liisa"),
+]
+
+
+@pytest.mark.parametrize("text,value", ROUND4, ids=[r[0] for r in ROUND4])
+def test_round4_title_title_credential_after_explicit_cue_is_redacted(text, value):
+    spans, redacted = labelled(text)
+    # a trailing '!' may be part of the password and is redacted with it
+    assert any(lab == "SECRET" and v.rstrip("!") == value for v, lab in spans), spans
+    assert value not in redacted
+    assert not any(gate_hits(redacted).values()), gate_hits(redacted)
+
+
+_SIX = ("rescan.secrets", "rescan.usernames", "rescan.phones", "text.secrets", "text.usernames", "text.phones")
+
+
+def _run_six(run_checks, rows, folder):
+    """Statuses of the six secret/username/phone checks via the production runner on one text column."""
+    import csv
+
+    from pets_release.checks import all_checks
+
+    folder.mkdir(parents=True)
+    with open(folder / "turns.csv", "w", encoding="utf-8", newline="") as fh:
+        w = csv.writer(fh)
+        w.writerow(["turn_id", "conversation_id", "seq", "speaker", "text"])
+        w.writerows([[f"T{n + 1}", f"C{n + 1}", "1", "customer", t] for n, t in enumerate(rows)])
+    contract = {
+        "files": {"turns.csv": {"required": ["turn_id", "conversation_id", "seq", "text"], "columns": {
+            "turn_id": {"form": "^T[0-9]+$", "params": {}},
+            "conversation_id": {"form": "^C[0-9]+$", "params": {}},
+            "seq": {"form": "integer", "params": {}},
+            "speaker": {"form": "enum", "params": {"values": ["customer", "agent"]}},
+            "text": {"form": "text", "params": {"conversation": "conversation_id", "order": "seq"}},
+        }}},
+        "qi": [], "tokens": [], "healthInTextRequired": True,
+    }
+    checks = [c for c in all_checks() if c.name in _SIX]
+    assert len(checks) == len(_SIX)
+    res = run_checks(folder, contract, {"phase": "gate"}, checks=checks)
+    by = {r.check: r for r in res.records}
+    assert sorted(by) == sorted(_SIX)
+    return {n: by[n].status for n in _SIX}
+
+
+def test_round4_title_title_credential_release_checks_are_clean(tmp_path):
+    """The production run_checks on a redacted text column finds no secret; on the raw rows it does."""
+    from pets_release.checks import run_checks
+
+    raw = _run_six(run_checks, [t for t, _ in ROUND4], tmp_path / "raw")
+    assert raw["text.secrets"] == "fail" and raw["rescan.secrets"] == "fail", raw
+    rows = [labelled(t)[1] for t, _ in ROUND4]
+    assert all(v not in r for (_, v), r in zip(ROUND4, rows))
+    red = _run_six(run_checks, rows, tmp_path / "red")
+    assert all(s == "pass" for s in red.values()), red
+
+
+# Round 4 (Grok, review of df43b07). Rules: a short cue stem that is a proper alphabetic prefix of a longer
+# word is no cue ('Pinja'), and after a cue the gate's credential shape is used unmodified (no name rule);
+# the gate's hedges and copulas are skipped before the value like fillers; 'secret key' is a strong cue
+# (bare 'secret' is not); the lookahead passes over commas like the gate.
+# Failure rows (trigger -> result at df43b07):
+#   whole-word cue + Title-Title token, no copula   -> token kept (name rule)
+#   cue + copula + non-filler hedge + plain word    -> hedge scored as the value, word kept
+#   cue + it's/its + plain word                     -> copula not recognised, word kept
+#   'secret key' + copula + plain word              -> not a strong cue, word kept
+#   cue + copula + word + ',' + credential token    -> lookahead stopped at the comma
+ROUND4_GROK = [
+    ("token Anna-Liisa", "Anna-Liisa"),
+    ("api-key Anna-Liisa please", "Anna-Liisa"),
+    ("password is maybe sunflower", "sunflower"),
+    ("password is perhaps sunflower today", "sunflower"),
+    ("salasana on ehkä kissakala", "kissakala"),
+    ("salasana on luultavasti kissakala", "kissakala"),
+    ("lösenordet är kanske solrosen", "solrosen"),
+    ("lösenordet är nog solrosen", "solrosen"),
+    ("lösenordet är typ solrosen", "solrosen"),
+    ("lösenordet är fortfarande solrosen", "solrosen"),
+    ("the password, it's sunflower", "sunflower"),
+    ("password its sunflower", "sunflower"),
+    ("secret key is sunflower", "sunflower"),
+    ("the secret key is sunflower today", "sunflower"),
+    ("password is kissa, Koira2024", "Koira2024"),
+]
+
+
+@pytest.mark.parametrize("text,value", ROUND4_GROK, ids=[r[0] for r in ROUND4_GROK])
+def test_round4_grok_value_is_redacted_and_gate_is_clean(text, value):
+    raw = gate_hits(text)
+    assert raw["rescan.secrets"] or raw["text.secrets"], ("fixture must be a gate hit", raw)
+    spans, redacted = labelled(text)
+    assert any(lab == "SECRET" and v.rstrip("!") == value for v, lab in spans), spans
+    assert value not in redacted
+    assert not any(gate_hits(redacted).values()), gate_hits(redacted)
+
+
+def test_redactor_copulas_and_hedges_cover_the_gates():
+    from pets_release.checks import _cues
+    from pets_release.redactor import structured
+
+    assert _cues.COPULAS <= structured.COPULAS
+    assert _cues.HEDGES <= structured.HEDGES
+
+
+def test_round4_grok_release_checks_are_clean(tmp_path):
+    from pets_release.checks import run_checks
+
+    rows = [labelled(t)[1] for t, _ in ROUND4_GROK]
+    red = _run_six(run_checks, rows, tmp_path / "red")
+    assert all(s == "pass" for s in red.values()), red
+
+
+@pytest.mark.parametrize("text", ["the secret is sunflower today", "Pinja Anna-Liisa soitti", "Pinja on kotona"])
+def test_round4_bare_secret_and_stem_prefix_are_no_strong_cue(text):
+    spans, _ = labelled(text)
+    assert [lab for _, lab in spans if lab == "SECRET"] == [], spans
+
+
 def test_plain_word_after_copula_and_a_later_credential_are_both_redacted():
     text = "salasana on kissa ja Koira2024"
     spans, redacted = labelled(text)
