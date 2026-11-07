@@ -7,6 +7,7 @@ exception raised here is content-free (no key text, no values).
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import hmac
 import os
@@ -54,6 +55,25 @@ class SecretKey:
 
     def hmac_sha256(self, message: bytes) -> bytes:
         return hmac.new(self._k, message, hashlib.sha256).digest()
+
+    def scannable_forms(self) -> tuple[frozenset, frozenset]:
+        """Package-internal, for ``producer.key-material`` only: the text forms of this key a leak could take.
+
+        Returns ``(exact, lowercase)``: case-sensitive forms (base64 std/url, padded or not; UTF-8 text when
+        decodable) and lower-case hex forms (matched case-insensitively), each also for the stripped bytes.
+        The raw bytes never leave this class; callers must not print or store the forms.
+        """
+        exact, lower = set(), set()
+        for b in {self._k, self._k.strip()}:
+            std = base64.b64encode(b).decode()
+            url = base64.urlsafe_b64encode(b).decode()
+            exact |= {std, std.rstrip("="), url, url.rstrip("=")}
+            try:
+                exact.add(b.decode("utf-8"))
+            except UnicodeDecodeError:
+                pass
+            lower.add(b.hex())
+        return frozenset(f for f in exact if f), frozenset(f for f in lower if f)
 
     def key_id(self) -> str:
         """Public 16-hex identifier of this key (an HMAC, not a hash of it)."""

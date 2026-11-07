@@ -48,11 +48,14 @@ def _pet(entry) -> tuple[str, dict]:
     return "generalisation", {"rung": rung}
 
 
-def build_narrative(*, policy, plan, scenario_ids, suppression: dict, k: int, purpose=None, search=None) -> dict:
+def build_narrative(*, policy, plan, scenario_ids, suppression: dict, k: int, purpose=None, search=None,
+                    rung_steps=()) -> dict:
     """``purpose``: the accepted ``run.purpose.PurposeResult``; fills ``measured.utility`` and the sacrifices'
     before/after scores (None leaves them not measured / null).
     ``search`` (ticket 25): {"justifications", "summary", "sacrifices"} from ``run.justify`` and the search
-    result; None for the hand plan. Its sacrifice scores are used only when no ``purpose`` result is given."""
+    result; None for the hand plan. Its sacrifice scores are used only when no ``purpose`` result is given.
+    ``rung_steps``: adopted enumerated rung sacrifices (``run.pipeline.rung_step``), each recorded as
+    ``rungStep`` on its check's sacrifice entry."""
     by_key = sorted(plan, key=lambda e: (e["table"], e["column"]))
     inventory = [{"dataset": policy.dataset, "table": e["table"], "column": e["column"],
                   "role": _role(policy, e["table"], e["column"]),
@@ -114,6 +117,12 @@ def build_narrative(*, policy, plan, scenario_ids, suppression: dict, k: int, pu
                           "before": scored.get(s["check"], (None, None))[0],
                           "after": scored.get(s["check"], (None, None))[1],
                           "reason": s["reason"][:500]} for s in policy.sacrifices), key=lambda s: s["check"])
+    by_check = {s["check"]: s for s in sacrifices}
+    for st in rung_steps:
+        entry = by_check[st["check"]]  # policy validation: a rung sacrifice's check has a sacrifice entry
+        if "rungStep" in entry:
+            raise ValueError("two rung steps for one sacrifice")
+        entry["rungStep"] = {k: v for k, v in st.items() if k != "check"}
     checks = ", ".join(policy.purpose_checks)
     fit = [{"scenario": policy.scenario,
             "reason": f"built and gated for {policy.scenario} purpose checks {checks}; per-person k >= {k}"}]

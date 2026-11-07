@@ -77,7 +77,7 @@ def _turn_section(frame, make_predictor) -> dict:
 
 
 def evaluate_frames(frame, notes, make_predictor, precision_floor=None, person_variants=None,
-                    out_dir=None, repo_root=None, sheet_n=200, predictor_info=None) -> dict:
+                    out_dir=None, repo_root=None, sheet_n=0, predictor_info=None) -> dict:
     """make_predictor(dev_frame) -> predictor. It receives development turns only; held-out turns are never
     passed to it. It is called once per split (conversation split, then the labelled turn relaxation).
     person_variants: {'controller_gazetteer': factory, 'dev_lexicon': factory}, same signature."""
@@ -124,9 +124,10 @@ def evaluate_frames(frame, notes, make_predictor, precision_floor=None, person_v
         }
         report["passed"] = ok
     if out_dir is not None:
-        report["spot_check_rows"] = export_spot_check(
+        # The sheet holds raw turn text: written only on an explicit opt-in (sheet_n > 0).
+        report["spot_check_rows"] = (export_spot_check(
             frame, pred, Path(out_dir) / "spot_check.csv", n=sheet_n,
-            repo_root=repo_root, ids=sorted(held) or None)
+            repo_root=repo_root, ids=sorted(held) or None) if sheet_n > 0 else 0)
         Path(out_dir).mkdir(parents=True, exist_ok=True)
         (Path(out_dir) / "report.json").write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
     return report

@@ -33,7 +33,7 @@ def main(argv: list[str]) -> int:
     try:
         a = p.parse_args(argv)
     except SystemExit as e:
-        return int(e.code or 0)
+        return 0 if e.code == 0 else 2  # --help exits 0; anything else, including None, is a usage error
     release = Path(a.release_dir)
     manifest_path = release / MANIFEST
     if not manifest_path.is_file():
