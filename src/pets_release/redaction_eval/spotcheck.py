@@ -26,7 +26,7 @@ def _find_repo(start: Path):
 def _git_ignored(path: Path, root: Path) -> bool:
     try:
         r = subprocess.run(["git", "-C", str(root), "check-ignore", "-q", str(path.resolve())],
-                           capture_output=True)
+                           capture_output=True, check=False)
     except OSError:
         return False  # git unavailable = unknown = not ignored
     return r.returncode == 0  # only exit 0 counts
@@ -58,7 +58,8 @@ def redact_text(text: str, spans) -> str:
     return "".join(out)
 
 
-def export_spot_check(frame, pred: dict, path, n: int = 200, repo_root=None, ids=None) -> Path:
+def export_spot_check(frame, pred: dict, path, n: int = 200, repo_root=None, ids=None) -> int:
+    """Write the sheet; returns the number of rows actually written."""
     path = Path(path)
     check_destination(path, repo_root)
     pool = sorted(ids if ids is not None else frame.texts)
@@ -71,4 +72,4 @@ def export_spot_check(frame, pred: dict, path, n: int = 200, repo_root=None, ids
         for tid in pick:
             text = frame.texts[tid]
             w.writerow([tid, text, redact_text(text, pred.get(tid, [])), "", ""])
-    return path
+    return len(pick)
