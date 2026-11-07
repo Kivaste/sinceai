@@ -107,12 +107,12 @@ def test_sender_environment_drops_the_offline_block_only_for_the_sender():
     from pets_release.llm.transport import sender_env
     from pets_release.offline import HOOK_DIR, child_env
 
-    base = child_env({"PATH": "p", "PYTHONPATH": "src"})
+    base = child_env({"PATH": "p", "SYSTEMROOT": "system", "TEMP": "temp", "PYTHONPATH": "src"})
     assert base["PETS_OFFLINE"] == "1"
     env = sender_env(base)
     assert "PETS_OFFLINE" not in env
     assert str(HOOK_DIR) not in env["PYTHONPATH"].split(";") + env["PYTHONPATH"].split(":")
-    assert "src" in env["PYTHONPATH"]
+    assert env["PYTHONPATH"] == str(Path(__file__).resolve().parents[2] / "src")
     assert base["PETS_OFFLINE"] == "1"  # the caller's environment is untouched
 
 

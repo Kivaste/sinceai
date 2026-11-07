@@ -72,7 +72,7 @@ class Kit:
             raise KitError("kit has no metadata/scenarios.json")
         path = self._resolve(path)
         # lazy: the manifest package imports the checks
-        from pets_release.manifest.canonical import loads_strict
+        from pets_release.strict_json import loads_strict  # leaf module: no pipeline imports (fu85)
 
         try:  # #131: strict (duplicate keys, NaN/Infinity refuse), never last-wins
             data = loads_strict(path.read_bytes())

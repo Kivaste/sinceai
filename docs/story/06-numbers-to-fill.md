@@ -251,7 +251,7 @@ not merge or measurement evidence. Markers are drafting instructions, not claims
 | Enabling issue | Finalisation condition |
 |---|---|
 | #24 | CS-S1 producer + privacy must-fixes merged; real final-SHA release, both verify tiers, per-label notes, D45 and any D29 sacrifice disclosed |
-| #32 | D39 go decision after both releases pass; front end merged and verified; no-go/unmerged becomes future work only |
+| #32 | D47's HEALTH-S1 gate + verify condition replaces D39's two-release gate; front end merged and verified on the final SHA. Describe a validated draft policy for human review; feeding the draft into the search is future work (D51). Disclose the optional Mistral API sender and that row values never leave; unmerged/unverified becomes future work only |
 | #117 | Web app merged; final-SHA evidence for display-time verification, manifest-listed file/digest binding and D41 label; real-kit row view never read by agents |
 | #127 | Parallel search merged; final-SHA determinism across worker counts, offline workers and fail-closed worker error; no timed speed claim without measurement |
 | #106 | D33 rung or disclosed threat-model exception actually merged and present in final release; H-U7 effect measured |

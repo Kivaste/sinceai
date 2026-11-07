@@ -1,0 +1,14 @@
+# D62: >=10s reported setup+call+teardown; exact node IDs, sorted.
+# Base 9b4deebe524142d081dd678082dc60ff542b576d; local durations-cli.txt, -n 8.
+# The full fast profile timed out; this completed profile covers run/test_run.py,
+# run/test_recipient_cli.py and verify/test_full.py (41 passed in 175.85s).
+# CLI setup fixtures count; existing fast fail-closed collection pins are retained.
+tests/run/test_recipient_cli.py::test_both_recipient_releases_succeed
+tests/run/test_recipient_cli.py::test_invalid_recipient_exits_2_without_output[default]
+tests/run/test_recipient_cli.py::test_manifest_records_the_recipient_scope
+tests/run/test_recipient_cli.py::test_release_tokens_are_keyed_by_the_recipient_key
+tests/run/test_recipient_cli.py::test_same_recipient_is_byte_identical
+tests/run/test_run.py::test_spelling_variant_of_a_person_id_is_one_person_via_cli
+tests/run/test_run.py::test_suppression_reported_and_person_k_clean
+tests/run/test_run.py::test_verify_full_ignores_planted_rowmap
+tests/verify/test_full.py::test_full_pass_with_runnable_checks
