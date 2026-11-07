@@ -35,7 +35,7 @@ from pets_release.ladders import (
     contract_entry,
     output_column,
 )
-from pets_release.ladders.rungs import coarseness
+from pets_release.ladders.rungs import at_least_as_coarse
 from pets_release.manifest import canonical_digest
 
 _NAME = re.compile(r"^[A-Za-z0-9_]{1,64}$")
@@ -185,15 +185,10 @@ def _check_floor(table: str, column: str, entry: Mapping[str, Any], floor: str, 
         raise ContractError(f"{table}.{column}: plan floor differs from policy floor")
     if rung == _WITHHELD:
         return
-    if floor == _WITHHELD:
+    if floor == _WITHHELD or not at_least_as_coarse(rung, floor):
         finer = True
     else:
-        try:
-            (rung_kind, rung_pos), (floor_kind, floor_pos) = coarseness(rung), coarseness(floor)
-        except LadderError:
-            finer = True
-        else:
-            finer = rung_kind != floor_kind or rung_pos < floor_pos
+        finer = False
     if finer:
         raise ContractError(f"{table}.{column}: rung finer than floor")
 

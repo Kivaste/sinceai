@@ -279,3 +279,33 @@ Each entry records:
      - Added `blocked-by` edges for #80, #93, #96, #56 and #88 so the monitor stops flagging them.
 - **Why:** Single owner for the CS-S1 files (D29); each ticket owns its files.
 - **Evidence:** merger session ses_e4abaa0a; issue comments "Orchestrator 11:20 EET" on each item; #78 close comment.
+
+### Sat 11:35 - worktree isolation breach in the main checkout; guard filed; #104
+
+- **When:** Sat 11:18-11:35 EET
+- **Decision:**
+  1. The planning session reported uncommitted ticket work in the main checkout: `tests/gen_fixtures/test_gen_fixtures.py` and `tests/kiteval/test_scorecard.py` modified, and `tests/policy/test_csv_reads.py` and `tests/checks_text/test_followup56.py` untracked. They were already there when this orchestrator started (08:37Z git status).
+  2. Hash comparison showed they belong to inherited sessions: #81 (ses_e4b3155b, finished) and the CS-S1 chain owner (ses_e4b294f0, live). Neither can be messaged.
+     - `test_gen_fixtures.py` is byte-identical to `origin/ticket/fu81-csv-determinism`.
+     - `test_scorecard.py` and `test_csv_reads.py` are strict earlier drafts of the versions committed on that branch.
+     - `test_followup56.py` in the main checkout is 0 bytes; the real file is committed on `origin/ticket/23-cs-s1`.
+  3. After confirming the owners' versions are on origin, the orchestrator backed up all four to `C:\Users\kivas\AI\orch-tmp\main-stray-backup\`. It then restored only those paths (`git checkout --` on the two modified files, deleted the two untracked ones). Main `git status` is now clean.
+  4. Added "Never edit, test or commit in C:\Users\kivas\AI\sinceai-hackaton (the main checkout); `git -C <your worktree>` only" to templates.md §1 (main `6bad0b8`), and it goes into every implementer prompt from now on. Filed #105 (Sol) for deterministic guards: `affected-tests.ps1` refuses a main checkout by Git identity, and `check-done-report.ps1` requires a `ticket/*` linked worktree. It is branched from #102 because both touch the same file.
+  5. Filed #104 (Sol) for the HEAD-moves-mid-session class from the planning lane's diagnosis. Tests pin the revision per session and fail explicitly if HEAD moves.
+- **Why:** AGENTS.md: each ticket owns its files, and a recurring defect class gets a deterministic guard, not just prose.
+- **Evidence:** planning-session report 11:18; hash comparison (orchestrator shell); main `6bad0b8`; issues #104 and #105.
+
+### Sat 11:45 - orchestrator hand-over; merge train 3 (#89); review ledger recovered; second main-checkout stray
+
+- **When:** Sat 11:27-11:45 EET
+- **Decision:**
+  1. New orchestrator session (ses_e4aaa374...) claimed the heartbeat at 11:27. The previous one (ses_e4ad88b2...) was retired: interrupted, then a queued retirement notice, which it answered with "retired". Its 18 live child sessions keep running and are polled through the API. Results that reached the retired session after 11:27 were recovered from its message stream (cursor-paged) and acted on.
+  2. Merge train 3 merged #89 (2887046) at 1a2c045: fast tier exit 0, 2289 passed, 5 skipped; slow tier exit 0, 123 passed. #89 closed (check-done-report exit 0); its worktree and branch were removed. Grok Standards r3 APPROVE and Sol Spec r3 APPROVE at 2887046. Sol's non-blocking note (search-seam test, not CLI) stands until search is wired through the CLI.
+  3. CS-S1 chain round 1 at 219db98: all four reviews (Grok and Sol on both axes) are CHANGES REQUIRED. Two #53 fail-opens: a bare network cue + copula + date/time is suppressed by the prose exception, and a glued hedge-colon value is not credential-shaped in the cell rescan. Plus #56: text applicability rests on four probe phrases (Sol, both axes). Forwarded to the owner (ses_e4aac068...) with the D29 12:00 instruction.
+  4. #49 and #90: merged in train 2 (31ffa5c) and approved on both axes, but their done-reports fail the close gate on a real gap: erify --full was never recorded at the head. Kept open. A Sol evidence task runs it at the exact heads; formatting gaps were not edited around.
+  5. #102 r1: Spec (Sonnet) APPROVE. Standards (Grok) found a high gap: the unconfined -GhExe test hook (and -BodyFile, same class) allows a close pass on a forged body. A Sol round-2 fixer was dispatched with one confinement for both (a defect class found twice).
+  6. 31 LLM r1 at ada8855: Grok Standards found a hard ADR 0002 bypass (str-subclass dispatch in the request/endpoint screen; model not exact-typed before transport). Sol Spec: evidence gaps only. An Opus round-2 fixer was dispatched with one exact-type normaliser for everything that reaches transport. It is stretch, merging only on the 14:00 go.
+  7. Second main-checkout stray: two untracked test files in the main checkout (written 11:25:36, same second). They match no commit and no worktree, and their names don't match their contents. Owner unknown, so they were left in place (possibly unique work) and recorded on #105 as the second occurrence.
+  8. AGENTS.md › Review now sets D32 for the final integration review: Standards Grok high; Spec twice, by Sol high and opencode-go/gemini-4-argon#medium. It is applied at the brief's section 4 step.
+- **Why:** Single orchestrator; close only on evidence (D31); a defect class found twice gets a guard.
+- **Evidence:** heartbeat.json session_id; merge train 3 session ses_e4aa6832; review sessions ses_e4aae4fd, ses_e4aae34e, ses_e4aabe3e, ses_e4aab95b, ses_e4aabc36, ses_e4aabab0, ses_e4aaed3b, ses_e4aaeb8d, ses_e4aab0df, ses_e4aaaf12; #89 close comment.
