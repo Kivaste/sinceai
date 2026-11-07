@@ -187,7 +187,10 @@ def _check_results(name: str, tr: dict, expected: dict, found: list) -> None:
                 raise ScorecardRejected("structure")
             n = res["n_targets_in_data"]
             if n is None:
-                if res.get("qis_used") != []:
+                # Only the kit's "every attacker column was removed" shape, and only when the release
+                # provably lacks those columns (expected linkage names the adversary as column-less).
+                absent = (expected.get("linkage") or {}).get("no_attack_columns", ())
+                if res.get("qis_used") != [] or key not in absent:
                     raise ScorecardRejected("structure")
             elif not _positive(n):
                 raise ScorecardRejected("zero_denominator")
@@ -204,6 +207,17 @@ def _check_results(name: str, tr: dict, expected: dict, found: list) -> None:
     for res in (tr.get("hash_attack") or {}).values():
         if _evaluated(res) and not _positive(res.get("n_hashes")):
             raise ScorecardRejected("zero_denominator")
+    if "l_diversity" in tr:
+        res = tr["l_diversity"]
+        if _evaluated(res) and not _positive(res.get("n_classes")):
+            raise ScorecardRejected("zero_denominator")
+    synthetic = tr.get("synthetic")
+    if synthetic is not None:
+        if not isinstance(synthetic, dict):
+            raise ScorecardRejected("structure")
+        for part, denominator in (("dcr", "n_synthetic"), ("membership_inference", "n_each")):
+            if part in synthetic and _evaluated(synthetic[part]) and not _positive(synthetic[part].get(denominator)):
+                raise ScorecardRejected("zero_denominator")
 
 
 def _check_released(name: str, tr: dict, expected: dict, found: list) -> None:

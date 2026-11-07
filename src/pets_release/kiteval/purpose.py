@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+
 import numpy as np
 import pandas as pd
 from pets_eval import io as kit_io
@@ -37,7 +39,14 @@ def _run(task, original, protected, required: bool) -> dict:
     score = res.get("score")
     if score is None:
         return {"id": task.id, "score": None, "status": "not_answerable", "required": required}
-    return {"id": task.id, "score": float(score), "status": "ok", "required": required}
+    try:
+        value = float(score)
+    except (TypeError, ValueError):
+        return {"id": task.id, "score": None, "status": "error", "required": required}
+    if math.isnan(value) or math.isinf(value):  # same rule as the report gate: never an ok score
+        return {"id": task.id, "score": None, "status": "error", "required": required}
+    return {"id": task.id, "score": value, "status": "ok", "required": required}
+
 
 def _scenario(scenario_id: str, root) -> dict:
     scen = kit_io.get_scenario(scenario_id, root)
