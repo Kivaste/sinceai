@@ -47,8 +47,9 @@ def sections(m):
     for pet in m["pets"]:
         method.append((f'{pet["table"]}.{pet["column"]}: {pet["pet"]}', _json(pet["params"])))
     method += [("Keyed pseudonym scopes", _json(m["contract"]["tokens"]))]
-    method += [("Local suppression", _json([p for p in m["pets"] if p["pet"] == "local_suppression"])
-                or "not measured")]
+    suppression = [p for p in m["pets"] if p["pet"] == "local_suppression"]
+    method += [("Local suppression", _json(suppression) if suppression
+                else "not measured: not recorded in the signed manifest")]
     privacy = measured["privacy"]
     risk = [("Privacy measurements", _measurement(privacy))]
     missing_reason = privacy.get("reason", "not recorded in the signed manifest")
@@ -56,8 +57,8 @@ def sections(m):
         risk.append((label, "not measured: " + missing_reason))
     if privacy["status"] == "measured":
         for c in privacy["components"]:
-            risk.append((c["component"], f'before={_score(c["before"], missing_reason)}; '
-                         f'after={_score(c["after"], missing_reason)}; source={privacy["source"]}'))
+            risk.append((c["component"], (f'before={_score(c["before"], missing_reason)}; '
+                         f'after={_score(c["after"], missing_reason)}; source={privacy["source"]}')))
     for r in m["residualRisks"]:
         if r["kind"] in ("linkage", "attribute_inference"):
             risk.append((r["risk"], r["description"] + "; " + _measurement(r["rate"])))
@@ -68,7 +69,7 @@ def sections(m):
             score = task["after"]
             if task["status"] != "ok":
                 status = "failed"
-            elif score is None:
+            elif score is None or task["before"] is None:
                 status = "not measured"
             elif score >= THRESHOLD:
                 status = "met"
@@ -77,8 +78,8 @@ def sections(m):
             else:
                 status = "failed"
             reason = "not recorded in the signed manifest; " + measured["utility"]["source"]
-            utility.append((task["task"], f'{status}; before={_score(task["before"], reason)}; '
-                            f'after={_score(score, reason)}'))
+            utility.append((task["task"], (f'{status}; before={_score(task["before"], reason)}; '
+                            f'after={_score(score, reason)}')))
     utility += [("Product purpose threshold (not a measured value)", str(THRESHOLD)),
                 ("Sacrifices", _json(m["sacrifices"]))]
     residual = [(r["risk"], _json(r)) for r in m["residualRisks"]]
@@ -92,6 +93,13 @@ def sections(m):
                  ("Controller verification", 'pets-release verify --full --kit "<kit>" "<release>"')]
     bodies = (purpose, [("Legal basis", CONTROLLER), ("DPIA", CONTROLLER)], method, risk, utility, residual, integrity)
     return [(heading, body) for heading, body in zip(HEADINGS, bodies)]
+
+
+def section_statuses(m):
+    """Content-free summary: a rendered section may still carry unmeasured evidence."""
+    return [(heading, "to be supplied" if heading == HEADINGS[1] else
+             "not measured" if any("not measured" in value or '"not_measured"' in value for _, value in body)
+             else "rendered") for heading, body in sections(m)]
 
 
 def render(m):

@@ -283,6 +283,21 @@ A static HTML file rendered from the manifest alone. No network assets and no ro
 .\.venv\Scripts\pets-release.exe dashboard ..\sinceai-out\health-s1 --out ..\sinceai-out\health-s1-dashboard.html
 ```
 
+### Evidence pack for a DPO / Findata
+
+Export content-free HTML and Markdown from the signed manifest only. Set the
+signing release's `PETS_HMAC_KEY`; invalid manifests or signatures refuse the export.
+The seven sections cover purpose, legal basis/DPIA, methods, measured risk, utility,
+residual risks and reproducibility. Missing measurements stay **not measured**;
+legal basis and DPIA are **To be supplied by the data controller**. This is technical
+evidence, not a permit or a DPIA. It never reads tables and does not replace `verify`.
+The example needs the signed measured release built above; its ledger skip is not a pass.
+
+<!-- docs-test: skip reason=evidence-pack-needs-signed-measured-release-and-controller-key -->
+```powershell
+.\.venv\Scripts\pets-release.exe evidence-pack ..\sinceai-out\health-s1-measured --out ..\sinceai-out\health-s1-evidence.html
+```
+
 ### 5. Submission bundle
 
 The bundle goes to `..\sinceai-out\pets_submission`, outside every repo. A complete bundle is the default. Under D46 it holds a verified HEALTH-S1 release (tables, validated row maps, manifest), the unseen labels and the gated CS eval redactions and spans (D37). CS-S1 is out of scope (deferred, D46). `submission_index.json` records that in `outOfScope`, and the packager neither needs nor accepts a CS-S1 release.

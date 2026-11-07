@@ -11,8 +11,8 @@ from pathlib import Path
 import pytest
 
 from pets_release.manifest import canonical_bytes, compute_signature, loads_strict
-from pets_release.pseudonym import MasterKey, manifest_signing_key
 from pets_release.manifest.value_scan import identifier_shape_counts
+from pets_release.pseudonym import MasterKey, manifest_signing_key
 
 FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "manifest" / "release" / "privacy_manifest.json"
 KEY = "synthetic-evidence-pack-master-key-only"
@@ -166,3 +166,26 @@ def test_purpose_statuses_and_null_measurements_are_honest(release, tmp_path):
         assert expected in text
     assert "before=not measured:" in text and "after=not measured:" in text
     assert "before=None" not in text and "after=None" not in text
+
+
+def test_missing_before_score_cannot_be_reported_met(release, tmp_path):
+    m = loads_strict((release / "privacy_manifest.json").read_bytes())
+    m["measured"]["utility"]["tasks"][0]["before"] = None
+    write_manifest(release, m)
+    out = tmp_path / "pack.md"
+    assert run_pack(release, out).returncode == 0
+    task = m["measured"]["utility"]["tasks"][0]["task"]
+    assert f"{task}: not measured" in out.read_text(encoding="utf-8")
+
+
+def test_missing_method_record_and_section_statuses_are_explicit(release, tmp_path):
+    m = loads_strict((release / "privacy_manifest.json").read_bytes())
+    m["pets"] = [p for p in m["pets"] if p["pet"] != "local_suppression"]
+    write_manifest(release, m)
+    out = tmp_path / "pack.md"
+    result = run_pack(release, out)
+    assert result.returncode == 0
+    assert "Local suppression: not measured: not recorded in the signed manifest" in out.read_text(encoding="utf-8")
+    for heading in HEADINGS:
+        assert heading in result.stdout
+    assert "Legal basis and DPIA: to be supplied" in result.stdout

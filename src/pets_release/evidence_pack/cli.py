@@ -6,7 +6,7 @@ import sys
 from html import unescape
 from pathlib import Path
 
-from pets_release.evidence_pack.render import render
+from pets_release.evidence_pack.render import render, section_statuses
 from pets_release.manifest import canonical_bytes, loads_strict, validate_manifest
 from pets_release.manifest.value_scan import identifier_shape_counts
 from pets_release.offline import entry_point
@@ -58,4 +58,6 @@ def main(argv: list[str]) -> int:
         print("evidence-pack: unreadable input or unwritable output; nothing certified", file=sys.stderr)
         return 1
     print("evidence-pack: rendered HTML and Markdown (manifest only)")
+    for heading, status in section_statuses(manifest):
+        print(f"{heading}: {status}")
     return 0
