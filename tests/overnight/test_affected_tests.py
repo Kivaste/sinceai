@@ -8,7 +8,10 @@ import pytest
 
 
 @pytest.mark.skipif(shutil.which("powershell.exe") is None, reason="Windows selector")
-@pytest.mark.parametrize("case", ["planted", "missing", "marker", "tooling", "mapped", "fallback", "incomplete", "clean"])
+@pytest.mark.parametrize(
+    "case",
+    ["planted", "missing", "marker", "tooling", "mapped", "fallback", "incomplete", "stderr", "git-failure", "clean"],
+)
 def test_affected_test_selection(case):
     root = Path(__file__).resolve().parents[2]
     result = subprocess.run(
