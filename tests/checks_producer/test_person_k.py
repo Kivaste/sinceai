@@ -2,9 +2,20 @@
 
 from __future__ import annotations
 
-from pets_release.checks.producer import CHECKS
+from pets_release.checks import all_checks, run_checks
 
-PERSON_K = {c.name: c for c in CHECKS}["person_k"]
+
+class _Via04:
+    """Runs one registered check through ticket 04's runner; returns its CheckRecord dict."""
+
+    def __init__(self, name):
+        self.check = {c.name: c for c in all_checks()}[name]
+
+    def run(self, release, contract, context):
+        return run_checks(release, contract, context, checks=[self.check]).to_dict()["records"][0]
+
+
+PERSON_K = _Via04("producer.person-k")
 
 
 def _health_ctx(h, visits, persons, labs=None, lab_visits=None):

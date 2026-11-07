@@ -32,18 +32,13 @@ from __future__ import annotations
 from collections import defaultdict
 from typing import NamedTuple
 
-from ._common import (
-    Check,
-    CheckError,
-    guarded,
-    not_run,
-    qi_by_table,
-    read_table,
-    record,
-    release_dir,
-    violation,
-)
+from pets_release.checks.records import Outcome
+from pets_release.checks.registry import register
 
+from ._common import CheckError, qi_by_table, read_table, release_dir, viol
+
+PERSON_K = "producer.person-k"
+ROW_K = "producer.row-k"
 ABSENT = "\x00absent"
 LABEL = "quasiIdentifiersBelowK"
 UNIDENTIFIED = "unidentifiedPersonRecords"
@@ -206,15 +201,12 @@ def person_k_values(release, contract, context) -> PersonK:
     return PersonK(per_person, sorted(below_rows), len(unidentified), unid_rows)
 
 
-def _person_k_check():
-    return PERSON_K
-
-
-@guarded(_person_k_check, "persons")
-def _run_person_k(release, contract, context):
+@register(name=PERSON_K, version="1.0.0", scope="producer", unit="persons")
+def run_person_k(release, contract, context) -> Outcome:
+    context = context or {}
     needed = ("k", "source", "rowmaps", "record_keys", "person")
     if any(context.get(n) is None for n in needed):
-        return not_run(PERSON_K, "persons")
+        return Outcome.not_run()
     k = _k(context)
     res = person_k_values(release, contract, context)
     n = len(res.per_person) + res.unidentified
@@ -224,36 +216,25 @@ def _run_person_k(release, contract, context):
     pt = context["person"]["table"]
     cols = "+".join(qi_by_table(contract).get(pt, [])) or "*"
     vs = []
-    if below:
-        v = violation(PERSON_K.name, LABEL, f"{pt}.csv", cols, res.below_rows)
-        v["count"] = below  # persons
-        vs.append(v)
-    if res.unidentified:
-        v = violation(PERSON_K.name, UNIDENTIFIED, f"{pt}.csv", cols, res.unidentified_rows)
-        v["count"] = res.unidentified  # unidentified units
-        vs.append(v)
-    hits = below + res.unidentified
-    return record(PERSON_K, "fail" if hits else "pass", "persons", n, hits, vs)
+    if below:  # count = persons below k
+        vs.append(viol(PERSON_K, LABEL, f"{pt}.csv", cols, below, res.below_rows))
+    if res.unidentified:  # count = unidentified units
+        vs.append(viol(PERSON_K, UNIDENTIFIED, f"{pt}.csv", cols, res.unidentified, res.unidentified_rows))
+    return Outcome(n=n, violations=tuple(vs))
 
 
-PERSON_K = Check("person_k", "1", "producer", _run_person_k)
-
-
-def _row_k_check():
-    return ROW_K
-
-
-@guarded(_row_k_check, "rows")
-def _run_row_k(release, contract, context):
+@register(name=ROW_K, version="1.0.0", scope="release", unit="rows")
+def run_row_k(release, contract, context) -> Outcome:
     """Rows of each table whose QI combination occurs fewer than k times (release only)."""
+    context = context or {}
     if context.get("k") is None:
-        return not_run(ROW_K, "rows")
+        return Outcome.not_run()
     k = _k(context)
     release_dir(release)
     qis = qi_by_table(contract)
     if not qis:
         raise CheckError("no QIs declared while k is required")
-    n = hits = 0
+    n = 0
     vs = []
     for t, cols in qis.items():
         df = read_table(release, t)
@@ -263,11 +244,7 @@ def _run_row_k(release, contract, context):
         sizes = df.groupby(cols, sort=False, dropna=False)[cols[0]].transform("size")
         rows = [int(i) for i in (sizes < k).to_numpy().nonzero()[0]]
         if rows:
-            hits += len(rows)
-            vs.append(violation(ROW_K.name, LABEL, f"{t}.csv", "+".join(cols), rows))
+            vs.append(viol(ROW_K, LABEL, f"{t}.csv", "+".join(cols), len(rows), rows))
     if n == 0:
         raise CheckError("no released rows under QIs")
-    return record(ROW_K, "fail" if hits else "pass", "rows", n, hits, vs)
-
-
-ROW_K = Check("row_k", "1", "release", _run_row_k)
+    return Outcome(n=n, violations=tuple(vs))

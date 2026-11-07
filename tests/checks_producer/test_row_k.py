@@ -2,9 +2,20 @@
 
 from __future__ import annotations
 
-from pets_release.checks.producer import CHECKS
+from pets_release.checks import all_checks, run_checks
 
-ROW_K = {c.name: c for c in CHECKS}["row_k"]
+
+class _Via04:
+    """Runs one registered check through ticket 04's runner; returns its CheckRecord dict."""
+
+    def __init__(self, name):
+        self.check = {c.name: c for c in all_checks()}[name]
+
+    def run(self, release, contract, context):
+        return run_checks(release, contract, context, checks=[self.check]).to_dict()["records"][0]
+
+
+ROW_K = _Via04("producer.row-k")
 
 
 def test_row_k_counts_rows_in_small_classes_per_table(h):

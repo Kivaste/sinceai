@@ -12,12 +12,26 @@ import json
 
 import pytest
 
-from pets_release.checks.producer import CHECKS
+from pets_release.checks import all_checks, run_checks
 
-BY_NAME = {c.name: c for c in CHECKS}
-ORIGINALS = BY_NAME["original_values"]
-HASHES = BY_NAME["reversible_hashes"]
-KEYS = BY_NAME["key_material"]
+
+class _Via04:
+    """Runs one registered check through ticket 04's runner; returns its CheckRecord dict."""
+
+    def __init__(self, name):
+        self.name = name
+        self.check = {c.name: c for c in all_checks()}[name]
+
+    def __repr__(self):
+        return self.name
+
+    def run(self, release, contract, context):
+        return run_checks(release, contract, context, checks=[self.check]).to_dict()["records"][0]
+
+
+ORIGINALS = _Via04("producer.original-values")
+HASHES = _Via04("producer.unkeyed-hashes")
+KEYS = _Via04("producer.key-material")
 
 HETUS = ["121285-987X", "010203A123B", "300377-111C"]
 NAMES = ["Testi Henkilo", "Mallin Ihminen", "Kuvitteel Lainen"]

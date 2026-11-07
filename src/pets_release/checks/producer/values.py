@@ -32,16 +32,14 @@ import json
 import re
 from collections import defaultdict
 
-from ._common import (
-    Check,
-    CheckError,
-    guarded,
-    not_run,
-    read_csv,
-    record,
-    release_dir,
-    violation,
-)
+from pets_release.checks.records import Outcome
+from pets_release.checks.registry import register
+
+from ._common import CheckError, read_csv, release_dir, viol
+
+ORIGINAL_VALUES = "producer.original-values"
+UNKEYED_HASHES = "producer.unkeyed-hashes"
+KEY_MATERIAL = "producer.key-material"
 
 MANIFEST = "privacy_manifest.json"
 MIN_NORM = 4
@@ -135,7 +133,7 @@ def _source_values(context):
     return out
 
 
-def _scan(release, check, unit, match):
+def _scan(release, check, match):
     """Run ``match(text) -> set[label]`` over every cell; build the record."""
     n, groups = _cells(release)
     if n == 0:
@@ -145,22 +143,19 @@ def _scan(release, check, unit, match):
         for text, locs in rows.items():
             for label in match(text):
                 hits_by[(file, col, label)].extend(locs if locs else [0])
-    vs = [violation(check.name, label, file, col, locs) for (file, col, label), locs in hits_by.items()]
-    hits = sum(v["count"] for v in vs)
-    return record(check, "fail" if hits else "pass", unit, n, hits, vs)
+    # count = distinct rows hit in that file/column (manifest strings count as row 0)
+    vs = [viol(check, label, file, col, len(set(locs)), locs) for (file, col, label), locs in sorted(hits_by.items())]
+    return Outcome(n=n, violations=tuple(vs))
 
 
 # --- original identifier survival -------------------------------------------------
 
 
-def _originals():
-    return ORIGINAL_VALUES
-
-
-@guarded(_originals, "cells")
-def _run_originals(release, contract, context):
+@register(name=ORIGINAL_VALUES, version="1.0.0", scope="producer", unit="cells")
+def run_original_values(release, contract, context) -> Outcome:
+    context = context or {}
     if not context.get("source") or not context.get("identifiers"):
-        return not_run(ORIGINAL_VALUES, "cells")
+        return Outcome.not_run()
     norm: dict[str, set] = defaultdict(set)
     compact: dict[str, set] = defaultdict(set)
     whole_cell: dict[str, set] = defaultdict(set)
@@ -205,17 +200,10 @@ def _run_originals(release, contract, context):
                     found |= compact[cg]
         return found
 
-    return _scan(release, ORIGINAL_VALUES, "cells", match)
-
-
-ORIGINAL_VALUES = Check("original_values", "1", "producer", _run_originals)
+    return _scan(release, ORIGINAL_VALUES, match)
 
 
 # --- reversible (unkeyed) hashes of original values ---------------------------------
-
-
-def _hashes():
-    return REVERSIBLE_HASHES
 
 
 def _variants(v: str):
@@ -225,10 +213,11 @@ def _variants(v: str):
     return {v, s, n, n.casefold(), n.upper(), c, c.casefold(), c.upper()} - {""}
 
 
-@guarded(_hashes, "cells")
-def _run_hashes(release, contract, context):
+@register(name=UNKEYED_HASHES, version="1.0.0", scope="producer", unit="cells")
+def run_unkeyed_hashes(release, contract, context) -> Outcome:
+    context = context or {}
     if not context.get("source") or not context.get("identifiers"):
-        return not_run(REVERSIBLE_HASHES, "cells")
+        return Outcome.not_run()
     digests: dict[str, set] = defaultdict(set)
     for label, vals in _source_values(context):
         for v in vals:
@@ -250,17 +239,10 @@ def _run_hashes(release, contract, context):
                         found |= digests[w]
         return found
 
-    return _scan(release, REVERSIBLE_HASHES, "cells", match)
-
-
-REVERSIBLE_HASHES = Check("reversible_hashes", "1", "producer", _run_hashes)
+    return _scan(release, UNKEYED_HASHES, match)
 
 
 # --- key material ---------------------------------------------------------------------
-
-
-def _keys():
-    return KEY_MATERIAL
 
 
 def _key_forms(key) -> tuple[set, set]:
@@ -287,11 +269,11 @@ def _key_forms(key) -> tuple[set, set]:
     return exact, lower
 
 
-@guarded(_keys, "cells")
-def _run_keys(release, contract, context):
-    keys = context.get("keys")
+@register(name=KEY_MATERIAL, version="1.0.0", scope="producer", unit="cells")
+def run_key_material(release, contract, context) -> Outcome:
+    keys = (context or {}).get("keys")
     if not keys:
-        return not_run(KEY_MATERIAL, "cells")
+        return Outcome.not_run()
     exact, lower = set(), set()
     for k in keys:
         if not k or len(k) < MIN_KEY_FORM:
@@ -310,7 +292,4 @@ def _run_keys(release, contract, context):
             return {"keyMaterial"}
         return set()
 
-    return _scan(release, KEY_MATERIAL, "cells", match)
-
-
-KEY_MATERIAL = Check("key_material", "1", "producer", _run_keys)
+    return _scan(release, KEY_MATERIAL, match)

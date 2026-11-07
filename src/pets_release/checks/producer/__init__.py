@@ -1,13 +1,9 @@
-"""Producer-scope gate checks (and the release-scope per-row k).
+"""Producer-scope gate checks (and the release-scope per-row k), registered with 04's registry.
 
-``CHECKS`` lists every check this submodule contributes to the registry.
+Checks: ``producer.person-k``, ``producer.row-k`` (release scope), ``producer.original-values``,
+``producer.unkeyed-hashes``, ``producer.key-material``. Importing this package registers them all.
 """
 
 from __future__ import annotations
 
-from .kanon import PERSON_K, ROW_K
-from .values import KEY_MATERIAL, ORIGINAL_VALUES, REVERSIBLE_HASHES
-
-CHECKS = (KEY_MATERIAL, ORIGINAL_VALUES, PERSON_K, REVERSIBLE_HASHES, ROW_K)
-
-__all__ = ["CHECKS"]
+from . import kanon, values  # noqa: F401  (registration on import)
