@@ -649,3 +649,120 @@ CS-S1 chain done-report + 4 reviews (23 + #53/#54/#56/#92) -> merge -> #63 -> 25
   4. Merge train 20 (side/video-shot-list, docs-only, planning steer) is running (ses_e49cddb6).
 - **Why:** The D46 fast track; tier-1 fail-closed reviews.
 - **Evidence:** done-reports in sessions ses_e4a27f3f (#117) and ses_e4a0a7cb (#118).
+
+### Sat 15:30-15:42 - #118 merged and closed; #30 approved, train 22; #117 r3; #80 reviews; train 20
+
+- **When:** Sat 15:30-15:42 EET (heartbeat clock)
+- **Decision:**
+  1. #118: 4/4 APPROVE at dbbd7a9. Train 21 merged it at 4ab271e: fast tier exit 0, 2585 passed, 6 skipped; slow tier exit 0, 123 passed. Done-report posted, gate exit 0, closed; worktree and branch removed. #127 now waits only on #106.
+  2. #30 round 4 (2b8ec4b, Opus): the D46 complete bundle = HEALTH-S1 + unseen + D37-gated CS eval exports, with outOfScope CS-S1. Grok and Sol delta reviews both APPROVE. Done-report posted, gate exit 0 locally. Train 22 (ses_e49c2c85) is merging it. #117 was not ready, and pets_submission at 16:00 depends on #30.
+  3. #117 round 2 (0fa353a): Grok APPROVE; Sonnet Spec high (the UI default is `--plan hand`, not the CLI's search default). Round 3 is with Sol (ses_e49cc60d). Grok's non-blocking notes go to a follow-up after the pin.
+  4. #80 (0e0fc58, Opus, core writer): all 4 round-1 reviews dispatched. Under D46 it merges after the recording.
+  5. Train 20 merged side/video-shot-list at 026e3c8 (docs: exit 0, 39 passed, 6 named skips); the branch was deleted on origin.
+- **Why:** D46 order: before the pin, only demo-path work. Close on evidence (D31).
+- **Evidence:** merger sessions ses_e49c94e2 and ses_e49cddb6; review sessions in the issue threads.
+
+### Sat 15:42 - STATUS
+
+#### Blocker -> owner -> next proof
+- #117 (the pin) -> ses_e49cc60d (Sol, round 3) -> UI default = search; red/green; real-kit UI capture with byte equality against the search-default CLI. Then a fast-track delta review, then it merges alone.
+- #132 (rung-form, high, before the pin) -> ses_e49de3e3 (Opus) -> verify-CLI red/green; real-kit run; 4 reviews.
+- #30 (packager) -> train 22 -> merged sha; then the human builds pets_submission from it (D15).
+- #32 (LLM, D47) -> ses_e49db522 (Sol) -> HEALTH-S1 evidence at 5e1bf09; the Mistral run waits on the human's key file. Both axes APPROVE at 5e1bf09. AC3 is open for the human.
+- #110 + #113 + #131 -> ses_e4a02df0 (Opus) -> measured real-kit evidence and the duplicate-key red.
+- #106 (blocks #127) -> ses_e4a0a4c1 (Opus) -> merges after the recording (D46).
+- #116 -> ses_e49e7225 (Sol, round 3) -> overall pass:true smoke with CS-S1 unsupported (D46).
+- #80, #128 -> after the recording. #130 -> ses_e49f49a4 (Sol). #127 -> after #106.
+- Parked until the pin: #124, #125, #126, #129, #133, #134. Deferred (D46): CS-S1 and its follow-ups.
+
+#### Latest exact revision with measured release evidence
+- f98cf626e1b7edf104fecbee1602b2f91cef3a8c (planning-session side lane; artefacts and a runnable commands.ps1 in C:\Users\kivas\AI\sinceai-out\proof-f98cf62\).
+  - Plain search-plan run, measured default and measured `acme`: all RELEASED. Gate 41 pass / 0 n/a / 0 fail; all 18 assertions false; toolRevision = tip.
+  - Both verify tiers pass for all three. Verify (limited) is 37 checked + 4 attested; --full re-ran 41.
+- Scorecards (measured), privacy / utility / composite: 0.1716 / 1 / 0.2752 -> 1 / 0.9283 / 0.9661. Linkage risk 0.5697 -> 0. Attribute inference: not measured.
+- Purpose checks: U2 0.9671, U4 0.7952, U6 0.9462, U7 0.9827, U8 0.9504. There are 3 sacrifices (U4, U6, U8) and 7 residual risks.
+- Person-k: min 5, median 43, below-k 0. This is provisional until #106 merges (test_name is outside k).
+- Integration tip 4ab271e (#118): fast tier exit 0 (2585 passed, 6 skipped), slow tier exit 0 (123 passed); no real-kit run on it.
+
+#### Complete-bundle status
+- At #30 head 2b8ec4b: a COMPLETE D46 bundle was built on the real kit into a throwaway folder (C:\Users\kivas\AI\sinceai-out\29-packager\evidence-2b8ec4bb727acd9f2aa22a3193eb26e315885509). The delivery folder was untouched and nothing was uploaded. The delivery build waits for train 22.
+
+#### Remaining unknowns
+- The pin does not exist yet (#117 round 3).
+- Person-k is provisional until #106 merges.
+- The #32 Mistral run (key file absent); #32 AC3.
+- The default-plan release feeding the packager (#128; the README uses --plan hand until it merges).
+- 5 README-ledger skips (named reasons; not passes).
+
+### Sat 15:44 - nudge 13:43Z; #80 round 2
+
+- **When:** Sat 15:43-15:44 EET
+- **Decision:**
+  - ticket/fu121-readme-examples (#121): approved, with a native blocked-by #117 edge and a comment from 14:40. It is flagged only because of the #129 monitor defect, which is parked until the pin. Not dispatchable.
+  - #80 round 1: Sol Standards (high, reproduced on the synthetic minikit), Sol Spec and Grok Spec all CHANGES REQUIRED. A withheld value held by 5 or more rows is exempt from the self-scan. Round 2 is with the Opus implementer (ses_e49de156): drop the frequency exemption, red first. Grok Standards is pending.
+- **Evidence:** issue #121 comment; review sessions ses_e49c2940, ses_e49c27a9, ses_e49c2662.
+
+### Sat 15:52 - train 22 red (#30); #135 filed; #132 round 2; #80 Grok
+
+- **When:** Sat 15:46-15:52 EET
+- **Decision:**
+  1. Train 22 was red on #30 at merged sha ee655fe: fast tier exit 1, 2 failed, 2653 passed. The culprits are two repo-wide guards: raw key bytes read in submission/guards.py (tests/run/test_context_keys.py), and the submission CLI entry point missing from the offline matrix (tests/offline/test_entrypoints.py). Reset, nothing pushed. Round 5 is with the Opus fixer (ses_e49d9d21). pets_submission at 16:00 slips until #30 merges.
+  2. Defect class found twice (train 15 tripped tests/policy; train 22 tripped tests/run and tests/offline guards): affected-tests.ps1 doesn't select repo-wide guard tests. Filed #135 (Sol), parked until the pin (native blocked-by #117). Stopgap: all 8 running implementers were told to also run `tests/policy tests/offline/test_entrypoints.py tests/run/test_context_keys.py` and report its exit code.
+  3. #132 round 1:
+     - Sol Spec: CHANGES REQUIRED (evidence only; the red and mutation exit codes were not cleanly captured).
+     - Sol Standards: CHANGES REQUIRED, high. Any anchored regex is accepted for `text` rungs, which hides a column from the text checks; reproduced with production code. Fail-open in verify.
+     - Both go to the Opus implementer (ses_e49de3e3): a clean rerun at eed24a7, then round 2 (exact `text` form required for text-backed rungs; red at the verify CLI). Grok's two reviews are pending.
+  4. #80: Grok Standards APPROVE (it rates the frequency cut a documented trade-off). Sol Standards high, Sol Spec and Grok Spec all CHANGES REQUIRED. The majority and the issue's Fix line stand, so round 2 continues to remove the exemption.
+- **Why:** Close and merge only on evidence; fail-closed on the verify path before the pin (D46).
+- **Evidence:** merger ses_e49c2c85; review sessions ses_e49bf33d, ses_e49bf194, ses_e49c2aa4; #135.
+
+### Sat 15:48-15:58 - orchestrator hand-over; #32 parked for a human; #121 flag; #132 Grok r1
+
+- **When:** Sat 15:48-15:58 EET
+- **Decision:**
+  1. Fresh orchestrator ses_e49bb457 claimed the heartbeat (start-orchestrator, 13:48Z). The previous orchestrator ses_e4a056b3 is not used. Inherited 11 live sessions, polled every turn: #30 r5 (ses_e49d9d21), #80 r2 (ses_e49de156), #106 (ses_e4a0a4c1), #110/#113/#131 (ses_e4a02df0), #116 r3 (ses_e49e7225), #117 r3 (ses_e49cc60d), #128 (ses_e49dde65), #130 (ses_e49f49a4), #132 r2 (ses_e49de3e3), and two that have now finished: #32 (ses_e49db522) and #132 Grok Standards r1 (ses_e49bf4ce).
+  2. Policy conflict, logged rather than resolved silently: the brief says `powershell -NoProfile -File`, but this machine's execution policy blocks unsigned scripts. Used `-ExecutionPolicy Bypass` per docs/operations/overnight.md, process scope only.
+  3. #32 done-report at 5e1bf09: HEALTH-S1 gate 41/41, both verify tiers exit 0. The Mistral run exited 2 after its bounded wait because the D47 key file is absent, and AC3 is still open. Labelled ready-for-human with a comment. It does not merge or close until both are resolved, and it does not block the pin.
+  4. #132 Grok Standards r1 at eed24a7: APPROVE. It also flags a non-blocking `text`-rung residual that overlaps Sol's high finding. Round 2 (ses_e49de3e3) supersedes that head.
+  5. Utilization flag on ticket/fu121-readme-examples (#121): not dispatchable. The native blocked-by #117 edge is recorded, and the flag is the #129 monitor defect (parked until the pin).
+- **Why:** Single orchestrator; close only on evidence (D31); D46 pre-pin scope.
+- **Evidence:** heartbeat session id; #32 comment 6707799630; session ses_e49bf4ce verdict.
+
+### Sat 16:00-16:22 - D49 pin fast path; train 23 stopped; review wave; D50/D51
+
+- **When:** Sat 16:00-16:22 EET
+- **Decision:**
+  1. **D49 (human, via the planning session):** #117 is frozen at 8a7d6a8. The round-3 delta reviews both APPROVE at 8a7d6a8 (Grok Standards, Sonnet Spec; fast track). I built the speculative pin c0ece5cd282e3b711d8c63ada55dfbbf39d6803a as a single `--no-ff` merge of 8a7d6a8 into 1c57760. It is not pushed, it lives in the detached worktree `sinceai-wt/pin-117`, and I reported it to the planning session at once. Pin train 24 (ses_e49a4f78) runs the fast tier, the slow tier and the #135 guard stopgap on that SHA.
+  2. **Deviation:** D49 says to use "the integration worktree", but that worktree was in use by train 23 (#30). To keep a single merger, I stopped train 23 before it pushed and built the pin in its own worktree. Train 23 had already gone green on b5b2470 (fast tier 2659 passed; slow tier 123 passed), but that evidence is for the old base only. #30 re-merges onto the pin, with a native blocked-by #117 edge.
+  3. **No decision-log pushes until the pin is pushed.** A push would stop c0ece5c from being a fast-forward of origin.
+  4. **Reviews recorded (per-axis comments on each issue):**
+     - #30 r5 at 9bab611: Grok Standards and Sol Spec APPROVE.
+     - #130 r1 at 796e718: Grok and Sonnet APPROVE. It waits on #117, #121 and #30.
+     - #128 r1 at 9a115ba: 4/4 APPROVE. It merges after the recording, once #30's strict xfails are removed.
+     - #80 r2 at fce77e3: Grok Standards, Sol Standards and Sol Spec APPROVE. It merges after the recording.
+     - #116 r3 at 0d1b51f: Grok APPROVE; Sonnet CHANGES REQUIRED, because the default 720 s timeout is below the measured 1128 s runtime. Round 4 went to Sol (ses_e49e7225): only the D34 lanes run by default, the measured lane becomes opt-in, and the measured timeout goes in docs/testing.md.
+     - #132: Grok Standards r1 APPROVE at eed24a7, superseded by round 2.
+  5. **#32:** the real Mistral run (D47) was done at 5e1bf09: draft exit 0, closed schema and semantic validation exit 0, request digest recorded, 0 key hits across 76 files, and the offline and guard tests pass. Sonnet's Spec evidence check gives APPROVE. D51 (human) amends AC3 to draft-only and removes ready-for-human. It merges after the pin.
+  6. **D50 (human):** app view 4 shows privacy as not_measured, so the video uses the measured dashboard from the pin proof. #136 (Sol, measured mode in the app) is dispatched after the pin.
+  7. **#106 r1** (Opus, core) at 1357e21: all 4 reviews dispatched. It took D33 branch A, and the search withholds test_name. Real kit: suppression 0.09942, minK 5, belowK 0.
+  8. **Utilization flags:** #121 and #130 have native blocked-by #117 edges, and so does #30 now. The flags come from the #129 defect.
+- **Why:** D49 makes the pin the only priority. One merger at a time. Close only on evidence (D31).
+- **Evidence:** pin worktree `sinceai-wt/pin-117`; logs in `sinceai-out/pin-c0ece5c/`; issue comments on #30, #80, #116, #117, #128 and #130; train 23 session ses_e49aa22e.
+
+### Sat 16:30 - speculative pin c0ece5c RED; #117 must-fix; #106 round 2
+
+- **When:** Sat 16:24-16:30 EET
+- **Decision:**
+  1. Pin train 24 on c0ece5c: fast tier exit 1, 2593 passed, 26 failed, 7 skipped. The guard stopgap was exit 0 (99 passed). The slow tier was not run. All the failures are in #117's own files:
+     - 25 in tests/ui/test_http.py. The offline guard blocks the tests' own loopback urllib calls in the whole-suite run, a test-isolation defect. #117's own affected run at -n 2 passed.
+     - 1 in tests/test_tiers.py. slow_tests.txt has stale README block ids.
+     - I discarded the merge and removed the pin worktree. Nothing was pushed.
+  2. I unfroze the #117 fixer (ses_e49cc60d) for exactly these two must-fixes. It works red first and reruns the full fast tier at -n 16 on its merged head. Then come a fast-track delta review, a new speculative pin and both tiers.
+  3. Planning-session steer, handled: PID 45904 (`pytest -n 2 ... tests`) was #132's affected-tests run, not the pin, so I left it alone. The pin did run at -n 16.
+  4. The merge slot is held for #117. #30 is not merged into the gap: it also edits README.md and would shift the block ids again under #117's fix.
+  5. #106 r1:
+     - Grok: Standards and Spec both APPROVE.
+     - Sol: Standards and Spec both CHANGES REQUIRED, high and reproduced. A forged `derived_from` hides a QI from detected_qi, and `verify --full` still exits 0. This is the #62 provenance class.
+     - Round 2 is with the Opus implementer (ses_e4a0a4c1).
+- **Why:** D49 (a review or test failure discards the speculative merge). Fail closed.
+- **Evidence:** `sinceai-out/pin-c0ece5c/fast-c0ece5c….log` and `.exit`; review sessions ses_e49a39d7 and ses_e49a3760; issue comments on #106 and #117.
