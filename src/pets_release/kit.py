@@ -6,7 +6,6 @@ Never opens `truth/` or `metadata/field_catalog.csv` (the latter belongs to the 
 from __future__ import annotations
 
 import hashlib
-import json
 import re
 from pathlib import Path
 
@@ -72,7 +71,13 @@ class Kit:
         if not path.is_file():
             raise KitError("kit has no metadata/scenarios.json")
         path = self._resolve(path)
-        data = json.loads(path.read_text(encoding="utf-8"))
+        # lazy: the manifest package imports the checks
+        from pets_release.manifest.canonical import loads_strict
+
+        try:  # #131: strict (duplicate keys, NaN/Infinity refuse), never last-wins
+            data = loads_strict(path.read_bytes())
+        except ValueError:
+            raise KitError("scenarios.json is not strict JSON") from None
         if not isinstance(data, list):
             raise KitError("scenarios.json is not a list")
         return sorted(data, key=lambda s: str(s.get("id", "")))

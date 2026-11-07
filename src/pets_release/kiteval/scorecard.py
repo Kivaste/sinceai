@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import os
 import subprocess
 import sys
@@ -16,6 +15,7 @@ from pets_eval import scorecard as kit_scorecard
 
 from pets_release.kiteval.report import ScorecardRejected, validate_report
 from pets_release.kiteval.rowmap import Lineage, RowMapRejected, validate_row_map
+from pets_release.manifest.canonical import loads_strict
 from pets_release.offline import child_env
 from pets_release.offline import install as install_offline_guard
 
@@ -80,7 +80,10 @@ def _expected_sections(root: Path, dataset: str, scen: dict, catalog, tables: di
     the release's columns, used to prove an input was really removed."""
     all_specs = kit_io.load_attack_specs(root)
     spec_file = root / "metadata" / "attack_specs.json"
-    trajectories = json.loads(spec_file.read_text(encoding="utf-8")).get("trajectories", []) if spec_file.exists() else []
+    try:  # #131: strict (duplicate keys, NaN/Infinity refuse), never last-wins
+        trajectories = loads_strict(spec_file.read_bytes()).get("trajectories", []) if spec_file.exists() else []
+    except (OSError, ValueError, AttributeError):
+        raise ScorecardRejected("structure") from None
     out = {}
     for name, path in tables.items():
         cols = set(_read_str(path, nrows=0).columns)
@@ -180,7 +183,7 @@ def run_scorecard(original_dir, protected_dir, *, scenario: str, root, rowmaps: 
     if proc.returncode != 0:
         raise ScorecardRejected("evaluator_failed")
     try:
-        report = json.loads((out_dir / "scorecard.json").read_text(encoding="utf-8"))
+        report = loads_strict((out_dir / "scorecard.json").read_bytes())  # #131: duplicate keys / NaN refuse
     except (OSError, ValueError):
         raise ScorecardRejected("structure") from None
     return validate_report(report, scenario=scenario, required_tasks=scen.get("utility_requirements", []),

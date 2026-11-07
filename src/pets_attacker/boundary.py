@@ -15,13 +15,14 @@ code paths exercised at import time.
 
 from __future__ import annotations
 
-import json
 import os
 import re
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
+
+from pets_release.manifest.canonical import loads_strict
 
 ATTACKER = "pets_attacker"
 PACKAGE = "pets_release"
@@ -145,7 +146,7 @@ def runtime_violations(src: Path, truth_dir: Path) -> list[str]:
     if line is None:
         return ["runtime-check-failed"]
     try:
-        res = json.loads(line[len("RESULT"):])
+        res = loads_strict(line[len("RESULT"):])  # #131: the child's record parses strictly, never last-wins
         out = [f"import-error:{m}" for m in res["errors"]]
         if res["attacker"]:
             out.append("attacker-loaded")
