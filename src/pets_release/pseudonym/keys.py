@@ -25,6 +25,23 @@ class KeyConfigError(ValueError):
     """The master key is missing or too short. CLI maps this to exit 2."""
 
 
+def encoded_forms(raw: bytes) -> tuple[set, set]:
+    """The text forms key bytes could leak as: ``(case-sensitive, lower-case hex)``, each also for the stripped
+    bytes. Case-sensitive: base64 std/url, padded or not, and the UTF-8 text when decodable. The one encoding
+    list for ``SecretKey.scannable_forms`` and the ``producer.key-material`` check; never print or store them."""
+    exact, lower = set(), set()
+    for b in {raw, raw.strip()}:
+        std = base64.b64encode(b).decode()
+        url = base64.urlsafe_b64encode(b).decode()
+        exact |= {std, std.rstrip("="), url, url.rstrip("=")}
+        try:
+            exact.add(b.decode("utf-8"))
+        except UnicodeDecodeError:
+            pass
+        lower.add(b.hex())
+    return exact, lower
+
+
 class SecretKey:
     """Opaque HMAC key. Use :func:`hmac_sha256`; never read the bytes."""
 
@@ -63,16 +80,7 @@ class SecretKey:
         decodable) and lower-case hex forms (matched case-insensitively), each also for the stripped bytes.
         The raw bytes never leave this class; callers must not print or store the forms.
         """
-        exact, lower = set(), set()
-        for b in {self._k, self._k.strip()}:
-            std = base64.b64encode(b).decode()
-            url = base64.urlsafe_b64encode(b).decode()
-            exact |= {std, std.rstrip("="), url, url.rstrip("=")}
-            try:
-                exact.add(b.decode("utf-8"))
-            except UnicodeDecodeError:
-                pass
-            lower.add(b.hex())
+        exact, lower = encoded_forms(self._k)
         return frozenset(f for f in exact if f), frozenset(f for f in lower if f)
 
     def key_id(self) -> str:

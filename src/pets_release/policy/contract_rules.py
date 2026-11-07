@@ -25,7 +25,7 @@ def _valid_k(k) -> bool:
     return isinstance(k, int) and not isinstance(k, bool) and k >= 2
 
 
-def _n(name) -> str:
+def _masked(name) -> str:
     return name if safe_name(name) else "<name>"
 
 
@@ -69,17 +69,17 @@ def provenance(contract, justifications, source_schema) -> tuple[dict, list[str]
         df = params.get("derived_from") if isinstance(params, Mapping) else None
         if df is not None:
             if not isinstance(df, str) or not df:
-                problems.append(f"contract.files: {_n(stem)}.{_n(col)}: provenance-conflict")
+                problems.append(f"contract.files: {_masked(stem)}.{_masked(col)}: provenance-conflict")
                 continue
             t, _, c = df.rpartition(".")
             sources.add((t or stem, c))
         if sources - set(source_schema):
-            problems.append(f"contract.files: {_n(stem)}.{_n(col)}: unknown-provenance")
+            problems.append(f"contract.files: {_masked(stem)}.{_masked(col)}: unknown-provenance")
             continue
         if not sources:
-            problems.append(f"contract.files: {_n(stem)}.{_n(col)}: no-provenance")
+            problems.append(f"contract.files: {_masked(stem)}.{_masked(col)}: no-provenance")
         elif len(sources) > 1:
-            problems.append(f"contract.files: {_n(stem)}.{_n(col)}: provenance-conflict")
+            problems.append(f"contract.files: {_masked(stem)}.{_masked(col)}: provenance-conflict")
         else:
             out[(stem, col)] = next(iter(sources))
     return out, problems
@@ -125,5 +125,5 @@ def contract_policy_problems(scenario: str, contract, justifications=None) -> li
     listed = {(q.get("table"), q.get("column")) for q in qi if isinstance(q, Mapping)} if isinstance(qi, list) else set()
     for table, column in released_policy_qis(policy, contract, justifications):
         if (table, column) not in listed:
-            out.append(f"contract.qi: {_n(table)}.{_n(column)}: missing-policy-qi")
+            out.append(f"contract.qi: {_masked(table)}.{_masked(column)}: missing-policy-qi")
     return sorted(set(out))
