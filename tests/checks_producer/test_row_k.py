@@ -26,7 +26,7 @@ def test_row_k_counts_rows_in_small_classes_per_table(h):
         }
     )
     c = h.contract([("ed_visits", "age_band"), ("ed_visits", "sex"), ("lab_results", "sampled_day")])
-    rec = ROW_K.run(rel, c, {"k": 5})
+    rec = ROW_K.run(rel, c, {})
     assert rec["scope"] == "release"
     assert rec["status"] == "fail"
     assert rec["hits"] == 2
@@ -34,13 +34,14 @@ def test_row_k_counts_rows_in_small_classes_per_table(h):
     (v,) = rec["violations"]
     assert (v["file"], v["column"], v["locations"]) == ("ed_visits.csv", "age_band+sex", [6, 7])
 
-    ok = ROW_K.run(rel, h.contract([("ed_visits", "sex"), ("lab_results", "sampled_day")]), {"k": 2})
+    ok = ROW_K.run(rel, h.contract([("ed_visits", "sex"), ("lab_results", "sampled_day")], k=2), {})
     assert ok["status"] == "pass"
 
 
 def test_row_k_needs_only_release_but_not_run_without_k(h):
     rel = h.release({"ed_visits": {"sex": ["F"] * 6}})
-    assert ROW_K.run(rel, h.contract([("ed_visits", "sex")]), {})["status"] == "not_run"
+    assert ROW_K.run(rel, h.contract([("ed_visits", "sex")], k=None), {"k": 5})["status"] == "not_run"
+    assert ROW_K.run(rel, h.contract([("ed_visits", "sex")]), {})["status"] == "pass"  # release only
     assert ROW_K.run(rel, h.contract([("ed_visits", "sex")]), {"k": 5})["status"] == "pass"
 
 

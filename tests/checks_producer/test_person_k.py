@@ -149,11 +149,12 @@ def test_unidentified_records_do_not_lower_others_and_suppressing_them_passes(h)
 def test_not_run_without_source_or_k(h):
     rel = h.release({"ed_visits": {"visit_tok": VISITS, "sex": ["F"] * 10}})
     full = _health_ctx(h, VISITS, PERSONS)
-    for missing in ("source", "rowmaps", "k", "person", "record_keys"):
+    for missing in ("source", "rowmaps", "person", "record_keys"):
         ctx = {k: v for k, v in full.items() if k != missing}
         rec = PERSON_K.run(rel, h.contract([("ed_visits", "sex")]), ctx)
         assert rec["status"] == "not_run", missing
     assert PERSON_K.run(rel, h.contract([("ed_visits", "sex")]), None)["status"] == "not_run"
+    assert PERSON_K.run(rel, h.contract([("ed_visits", "sex")], k=None), full)["status"] == "not_run"
 
 
 def test_fail_closed_on_bad_rowmap_or_missing_qi_column(h):

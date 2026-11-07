@@ -1,8 +1,8 @@
 {
   "failing": {
-    "contractColumns": [
+    "contract.columns": [
       {
-        "column": "visit_id",
+        "column": "unlisted-column#0",
         "count": 1,
         "file": "visits.csv",
         "locations": []

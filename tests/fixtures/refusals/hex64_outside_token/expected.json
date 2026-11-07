@@ -1,6 +1,6 @@
 {
   "failing": {
-    "tokenHex64": [
+    "release.token-hex64": [
       {
         "column": "note_text",
         "count": 1,

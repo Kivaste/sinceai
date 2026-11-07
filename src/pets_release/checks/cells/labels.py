@@ -4,28 +4,28 @@ One check per export assertion so each assertion binds to its own named check.
 """
 from __future__ import annotations
 
-from pets_release.checks.cells import validators as v
-from pets_release.checks.cells.common import scan_cells
+from pets_release.checks.cells import _validators as v
+from pets_release.checks.cells._common import scan_cells
 from pets_release.checks.records import Outcome
 from pets_release.checks.registry import register
 
 # check name (= export assertion name) -> (violation label, finder)
 LABEL_CHECKS = {
-    "nationalIds": ("NATIONAL_ID", v.national_ids),
-    "paymentCards": ("PAYMENT_CARD", v.payment_cards),
-    "ibans": ("IBAN", v.ibans),
-    "accountNumbers": ("ACCOUNT_NUMBER", v.account_numbers),
-    "emails": ("EMAIL", v.emails),
-    "phones": ("PHONE", v.phones),
-    "ipAddresses": ("IP_ADDRESS", v.ip_addresses),
-    "deviceIds": ("DEVICE_ID", v.device_ids),
-    "usernames": ("USERNAME", v.usernames),
-    "propertyIds": ("PROPERTY_ID", v.property_ids),
-    "plates": ("LICENSE_PLATE", v.plates),
-    "secrets": ("SECRET", v.secrets),
-    "urlsWithTokens": ("URL", v.urls_with_tokens),
-    "rawTimestamps": ("RAW_TIMESTAMP", v.raw_timestamps),
-    "tokenHex64": ("HEX64_OUTSIDE_TOKEN", v.hex64),
+    "rescan.national-ids": ("NATIONAL_ID", v.national_ids),
+    "rescan.payment-cards": ("PAYMENT_CARD", v.payment_cards),
+    "rescan.ibans": ("IBAN", v.ibans),
+    "rescan.account-numbers": ("ACCOUNT_NUMBER", v.account_numbers),
+    "rescan.emails": ("EMAIL", v.emails),
+    "rescan.phones": ("PHONE", v.phones),
+    "rescan.ip-addresses": ("IP_ADDRESS", v.ip_addresses),
+    "rescan.device-ids": ("DEVICE_ID", v.device_ids),
+    "rescan.usernames": ("USERNAME", v.usernames),
+    "rescan.property-ids": ("PROPERTY_ID", v.property_ids),
+    "rescan.plates": ("LICENSE_PLATE", v.plates),
+    "rescan.secrets": ("SECRET", v.secrets),
+    "rescan.urls-with-tokens": ("URL", v.urls_with_tokens),
+    "rescan.raw-timestamps": ("RAW_TIMESTAMP", v.raw_timestamps),
+    "release.token-hex64": ("HEX64_OUTSIDE_TOKEN", v.hex64),
 }
 
 
@@ -34,8 +34,8 @@ def _make(name, label, finder):
         n, viol = scan_cells(release, contract, name, label, finder)
         return Outcome(n=n, violations=viol)
 
-    run.__name__ = f"check_{name}"
-    register(name=name, version="1", scope="release", unit="cells")(run)
+    run.__name__ = "check_" + name.replace(".", "_").replace("-", "_")
+    register(name=name, version="1.0.0", scope="release", unit="cells")(run)
     return run
 
 

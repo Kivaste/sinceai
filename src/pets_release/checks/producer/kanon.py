@@ -19,7 +19,10 @@ release rows) and is in the denominator. Local suppression of those records
 clears the hit, so the rule never makes a release impossible.
 
 Context (producer scope; any missing item → ``not_run``):
-  k:            int, required k
+  k:            optional; if given it must equal the contract's k (else error)
+
+k itself comes from the release contract's top-level ``k`` (int >= 2), so recipient
+verify needs only the release. No contract ``k`` -> both k checks return not_run.
   source:       {table: DataFrame (dtype=str)} original tables
   rowmaps:      {table: DataFrame[protected_row, original_record_id]} per released QI table
   record_keys:  {table: record-key column in source}
@@ -44,12 +47,23 @@ LABEL = "quasiIdentifiersBelowK"
 UNIDENTIFIED = "unidentifiedPersonRecords"
 
 
-def _k(context) -> int:
-    k = context.get("k")
-    if k is None:
+def _valid_k(k) -> bool:
+    return isinstance(k, int) and not isinstance(k, bool) and k >= 2
+
+
+def _k(contract, context):
+    """k = contract["k"]. No contract k -> None (caller returns not_run; CS-S1 has no k target).
+
+    A present but invalid contract k is an error; a context k, if given, must equal it.
+    """
+    if "k" not in (contract or {}):
         return None
-    if isinstance(k, bool) or not isinstance(k, int) or k < 2:
-        raise CheckError("k must be an integer >= 2")
+    k = contract["k"]
+    if not _valid_k(k):
+        raise CheckError("contract k must be an integer >= 2")
+    ck = (context or {}).get("k")
+    if ck is not None and (not _valid_k(ck) or ck != k):
+        raise CheckError("context k differs from contract k")
     return k
 
 
@@ -123,7 +137,7 @@ def person_k_values(release, contract, context) -> PersonK:
 
     Raises CheckError on any fail-closed condition. Values stay in memory only.
     """
-    k = _k(context)
+    k = _k(contract, context)
     person_t = context["person"]["table"]
     person_c = context["person"]["column"]
     pk = context["record_keys"].get(person_t)
@@ -204,10 +218,10 @@ def person_k_values(release, contract, context) -> PersonK:
 @register(name=PERSON_K, version="1.0.0", scope="producer", unit="persons")
 def run_person_k(release, contract, context) -> Outcome:
     context = context or {}
-    needed = ("k", "source", "rowmaps", "record_keys", "person")
-    if any(context.get(n) is None for n in needed):
+    k = _k(contract, context)
+    needed = ("source", "rowmaps", "record_keys", "person")
+    if k is None or any(context.get(n) is None for n in needed):
         return Outcome.not_run()
-    k = _k(context)
     res = person_k_values(release, contract, context)
     n = len(res.per_person) + res.unidentified
     if n == 0:
@@ -226,10 +240,9 @@ def run_person_k(release, contract, context) -> Outcome:
 @register(name=ROW_K, version="1.0.0", scope="release", unit="rows")
 def run_row_k(release, contract, context) -> Outcome:
     """Rows of each table whose QI combination occurs fewer than k times (release only)."""
-    context = context or {}
-    if context.get("k") is None:
+    k = _k(contract, context)
+    if k is None:
         return Outcome.not_run()
-    k = _k(context)
     release_dir(release)
     qis = qi_by_table(contract)
     if not qis:
