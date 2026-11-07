@@ -71,6 +71,9 @@ HEADER_VALUE_PATHS = (
     *(("pets", _ANY, k) for k in _NAME),
     *(("pets", _ANY, "params", p) for p in _PARAM_NAMES),
     *(("sacrifices", _ANY, "rungStep", k) for k in _NAME),
+    # #146 measured.kSets: the schema's name fields only; its reason/source free text stays scanned (#149 r3)
+    *(("measured", "kSets", "sets", _ANY, "qi", _ANY, k) for k in (*_NAME, "derived_from")),
+    *(("measured", "kSets", "withheld", _ANY, k) for k in _NAME),
 )
 
 
