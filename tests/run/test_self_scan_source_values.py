@@ -102,3 +102,41 @@ def test_honest_release_with_category_in_manifest_text_releases(tmp_path, monkey
         for c, s in _read(kit, table).items():
             shared |= any(len(v) >= SCAN_MIN_LEN and n >= SOURCE_CATEGORY_MIN_ROWS and v in text for v, n in s.value_counts().items())
     assert shared
+
+
+def _kit_with_repeated_note(tmp_path, rows: int):
+    def edit(folder):
+        coarse_qis(folder)
+        p = folder / "clinical_notes.csv"
+        df = pd.read_csv(p, dtype=str, keep_default_na=False, na_filter=False)
+        df.loc[: rows - 1, "note_text"] = NOTE
+        df.to_csv(p, index=False, encoding="utf-8", lineterminator="\n")
+
+    return build_kit(tmp_path / "kit", edit)
+
+
+def _refused_for_value(tmp_path, monkeypatch, value):
+    code, out = _run(tmp_path, monkeypatch, value)
+    assert code == 1
+    assert not out.exists()
+    report = (out.parent / "rel.scoring" / "refusal_report.json").read_text(encoding="utf-8")
+    assert "selfscan:manifest-value" in json.loads(report)["reasons"]
+    assert value not in report  # content-free refusal
+
+
+@pytest.mark.parametrize("rows", [5, 6, 40])
+def test_repeated_withheld_prose_in_manifest_refuses(tmp_path, monkeypatch, capsys, rows):
+    """Frequency never makes a withheld value safe: prose shared by >= 5 note rows still refuses."""
+    _kit_with_repeated_note(tmp_path, rows)
+    _refused_for_value(tmp_path, monkeypatch, NOTE)
+    capsys.readouterr()
+
+
+def test_common_withheld_chief_complaint_in_manifest_refuses(tmp_path, monkeypatch, capsys):
+    """The most common chief complaint (a withheld column, many rows) planted in narrative text refuses."""
+    kit = build_kit(tmp_path / "kit", coarse_qis)
+    counts = _read(kit, "ed_visits")["chief_complaint"].value_counts()
+    value = next(v for v in counts.index if len(v) >= SCAN_MIN_LEN)
+    assert counts[value] >= 5
+    _refused_for_value(tmp_path, monkeypatch, value)
+    capsys.readouterr()
