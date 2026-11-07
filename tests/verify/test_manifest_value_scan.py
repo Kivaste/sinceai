@@ -11,6 +11,7 @@ Round-1 review rows (each through validate_manifest AND the dashboard CLI; card 
   card as a bindings.inputs key                                         -> PAYMENT_CARD
   card as bindings.checkVersions key (check name)                       -> PAYMENT_CARD
   card as signature.keyId                                               -> PAYMENT_CARD
+  card as release.releaseScopeId (all digits, fits the [0-9a-f]{16} pattern) -> PAYMENT_CARD (not exempt)
   unchanged real release                                                -> [] (digests, HMAC, key ID not flagged)
 """
 from __future__ import annotations
@@ -68,7 +69,14 @@ def _check_versions_key(m):
     m["bindings"]["checkVersions"][CARD] = "1.0.0"
 
 
-PLANTS = [_evidence_n, _gate_hits, _measured_number, _lexicon_key, _inputs_key, _check_versions_key]
+def _scope_id_digits(m):
+    # round-3 review (Grok): an all-digit value in a digest-pattern position is scanned, not exempt. The card's
+    # 16 digits fully match releaseScopeId's [0-9a-f]{16} pattern, so only the all-digit rule catches it.
+    m["release"]["releaseScopeId"] = CARD
+
+
+PLANTS = [_evidence_n, _gate_hits, _measured_number, _lexicon_key, _inputs_key, _check_versions_key,
+          _scope_id_digits]
 
 
 def _shape_errors(m):
