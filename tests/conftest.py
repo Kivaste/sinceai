@@ -43,25 +43,25 @@ def _dirty_paths(root: Path) -> set[str]:
 
 def _literal_test_path(node, source: Path) -> Path | None:
     """Interpret only literal pathlib expressions, never execute test source."""
-    if isinstance(node, ast.Call) and len(node.args) == 1 and not node.keywords:
-        if isinstance(node.func, ast.Name) and node.func.id == "Path":
-            arg = node.args[0]
-            if isinstance(arg, ast.Name) and arg.id == "__file__":
-                return source
-            if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
-                return Path(arg.value)
-    if isinstance(node, ast.Call) and not node.args and not node.keywords:
-        if isinstance(node.func, ast.Attribute) and node.func.attr in {"resolve", "absolute"}:
-            path = _literal_test_path(node.func.value, source)
-            return path.resolve() if path is not None else None
+    if (isinstance(node, ast.Call) and len(node.args) == 1 and not node.keywords
+            and isinstance(node.func, ast.Name) and node.func.id == "Path"):
+        arg = node.args[0]
+        if isinstance(arg, ast.Name) and arg.id == "__file__":
+            return source
+        if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+            return Path(arg.value)
+    if (isinstance(node, ast.Call) and not node.args and not node.keywords
+            and isinstance(node.func, ast.Attribute) and node.func.attr in {"resolve", "absolute"}):
+        path = _literal_test_path(node.func.value, source)
+        return path.resolve() if path is not None else None
     if isinstance(node, ast.Attribute) and node.attr == "parent":
         path = _literal_test_path(node.value, source)
         return path.parent if path is not None else None
-    if isinstance(node, ast.Subscript) and isinstance(node.value, ast.Attribute):
-        if node.value.attr == "parents" and isinstance(node.slice, ast.Constant):
-            path = _literal_test_path(node.value.value, source)
-            if path is not None:
-                return path.parents[node.slice.value]
+    if (isinstance(node, ast.Subscript) and isinstance(node.value, ast.Attribute)
+            and node.value.attr == "parents" and isinstance(node.slice, ast.Constant)):
+        path = _literal_test_path(node.value.value, source)
+        if path is not None:
+            return path.parents[node.slice.value]
     if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
         path = _literal_test_path(node.left, source)
         if path is not None and isinstance(node.right, ast.Constant) and isinstance(node.right.value, str):
@@ -79,9 +79,14 @@ def _check_test_roots(root: Path):
         tree = ast.parse(source.read_text(encoding="utf-8-sig"), filename=str(source))
         for node in ast.walk(tree):
             named_root = False
+            strict_root = False
             expression = node
             if isinstance(node, (ast.Assign, ast.AnnAssign)):
                 targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+                strict_root = any(
+                    isinstance(t, ast.Name) and t.id in {"ROOT", "REPO", "REPO_ROOT"}
+                    for t in targets
+                )
                 named_root = any(
                     isinstance(t, ast.Name) and t.id.lower() in {"root", "repo", "repo_root"}
                     for t in targets
@@ -93,6 +98,11 @@ def _check_test_roots(root: Path):
                 continue
             path = _literal_test_path(expression, source)
             if path is None:
+                if strict_root:
+                    raise pytest.UsageError(
+                        f"checkout root guard: {source.relative_to(root)}:{node.lineno} "
+                        "repo-root resolution must be a literal pathlib expression"
+                    )
                 continue  # tmp_path/kit roots and non-literal expressions are not repo resolutions.
             path = path.resolve()
             if (named_root and path != root) or (parent_ref and not path.is_relative_to(root)):

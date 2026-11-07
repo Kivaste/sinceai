@@ -67,6 +67,7 @@ def test_planted_other_checkout_file_fails(checkouts):
 
 @pytest.mark.parametrize("resolution", [
     "Path({main!r})",
+    "Path(str({main!r}))",
     "Path(__file__).resolve().parents[2]",
     "Path(__file__).resolve().parents[0]",
 ])
@@ -80,3 +81,56 @@ def test_wrong_repo_root_fails_before_test_body(checkouts, resolution):
     assert result.returncode != 0
     assert "checkout root guard" in result.stdout + result.stderr
     assert "body must not run" not in result.stdout
+
+
+@pytest.mark.parametrize("workers", [False, True], ids=["serial", "xdist"])
+@pytest.mark.parametrize("checkout", ["main", "linked"])
+@pytest.mark.parametrize("filename", ["new file.txt", "tracked.txt"])
+def test_new_dirty_paths_fail_once_in_controller(checkouts, workers, checkout, filename):
+    main, worktree = checkouts
+    target = (main if checkout == "main" else worktree) / filename
+    args = ("-p", "xdist.plugin", "-n", "2") if workers else ()
+    result = run_pytest(worktree,
+        "from pathlib import Path\n"
+        "def test_sample():\n"
+        f"    Path({str(target)!r}).write_text('synthetic change')\n",
+        *args, cwd=main)
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert result.stdout.count("checkout write guard: new dirty paths") == 1
+    assert filename in result.stdout
+
+
+@pytest.mark.parametrize("workers", [False, True], ids=["serial", "xdist"])
+def test_existing_dirty_paths_and_pytest_tmp_are_allowed(checkouts, workers):
+    main, worktree = checkouts
+    for root in (main, worktree):
+        (root / "existing untracked.txt").write_text("baseline", encoding="utf-8")
+        (root / "tracked.txt").write_text("baseline modification", encoding="utf-8")
+    args = ("-p", "xdist.plugin", "-n", "2") if workers else ()
+    result = run_pytest(worktree,
+        "from pathlib import Path\n"
+        "ROOT = Path(__file__).resolve().parents[1]\n"
+        "def test_sample(tmp_path):\n"
+        "    (tmp_path / 'allowed.txt').write_text('synthetic')\n"
+        "    assert (ROOT / 'tracked.txt').is_file()\n", *args, cwd=main)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "1 passed" in result.stdout
+
+
+def test_unassigned_parent_resolution_cannot_escape_checkout(checkouts):
+    _, worktree = checkouts
+    result = run_pytest(worktree,
+        "from pathlib import Path\n"
+        "def test_sample():\n"
+        "    assert Path(__file__).resolve().parents[2].is_dir()\n")
+    assert result.returncode != 0
+    assert "checkout root guard" in result.stdout + result.stderr
+
+
+def test_missing_git_identity_fails_closed(checkouts):
+    _, worktree = checkouts
+    # Remove only this synthetic worktree's Git pointer, never the real checkout's.
+    (worktree / ".git").unlink()
+    result = run_pytest(worktree, "def test_sample(): pass\n")
+    assert result.returncode != 0
+    assert "Git identity/status unavailable" in result.stdout + result.stderr
