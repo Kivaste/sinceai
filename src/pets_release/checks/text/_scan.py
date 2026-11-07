@@ -69,6 +69,9 @@ def _shape(items) -> tuple[bool, bool]:
             ws = ws or str(av) not in _NO_WS_CATEGORIES
             continue
         if name in ("MAX_REPEAT", "MIN_REPEAT", "POSSESSIVE_REPEAT"):
+            # a part that may repeat (+, *, {n,}, {n,m} with m > 1) builds an open language even from literal
+            # alternatives ("^(?:(A)|(B)|( ))+$"): variable. Only a finite literal language is exempt.
+            var = var or av[1] > 1
             subs = [av[2]]
         elif name == "SUBPATTERN":
             subs = [av[3]]
@@ -88,8 +91,9 @@ def _shape(items) -> tuple[bool, bool]:
 
 def _free_text_form(form) -> bool:
     """True for an anchored regex form (not a validator ID) that can carry free words in a short cell: it may
-    accept whitespace and has a variable part (a class, a category, "."). Only a form that cannot accept
-    whitespace, or accepts a closed set of literal phrases, is not text. Unreadable: text (fail closed)."""
+    accept whitespace and has a variable part (a class, a category, ".", or any repetition). Only a form that
+    cannot accept whitespace, or accepts a closed finite set of literal phrases, is not text. Unreadable or an
+    unknown parse node: text (fail closed)."""
     if not isinstance(form, str) or not form.startswith("^"):
         return False
     try:
