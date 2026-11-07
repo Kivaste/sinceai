@@ -28,7 +28,7 @@ def test_visit_keys_tokenise_one_to_one_and_keep_the_join_on_fixture():
     scope = Scope.release(rsid)
     raw, tok = {}, {}
     for t, path in files.items():
-        col = pd.read_csv(path, dtype=str, usecols=["visit_id"], keep_default_na=False)
+        col = pd.read_csv(path, dtype=str, usecols=["visit_id"], keep_default_na=False, na_filter=False)
         raw[t] = set(col["visit_id"])
         assert raw[t] and "" not in raw[t]
         tok[t] = {p.token(v, label=RECORD_KEY, scope=scope) for v in raw[t]}
