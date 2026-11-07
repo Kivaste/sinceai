@@ -50,9 +50,11 @@ def test_hetu_spoken_with_spoken_separator_and_letter_name():
 
 
 def test_split_value_does_not_join_across_non_continuation_turn():
-    # same speaker says something else in between: flushed, nothing validates
-    r = conv("henkilötunnus on 131052", "odota hetki etsin korttia nyt tästä laukusta", "-308T")
-    assert [x[3] for x in found(r)] == []
+    # same speaker says something else in between: flushed, the halves never form one phone number
+    r = conv("numero on 040 123", "odota hetki etsin sitä nyt tästä laukusta", "4567")
+    assert found(r) == []
+    joined = conv("numero on 040 123", ("agent", "mm"), "4567")
+    assert [x[3] for x in found(joined)] == ["PHONE", "PHONE"]
 
 
 # ---- PAYMENT_CARD ------------------------------------------------------------------------------
@@ -87,6 +89,19 @@ def test_hetu_tail_alone_needs_hetu_cue():
     r = conv(("agent", "kertoisitko henkilötunnuksesi loppuosan?"), "-308T")
     assert found(r) == [("t1", 0, 5, "NATIONAL_ID")]
     assert found(conv(("agent", "mikä on tuotekoodi?"), "-308T")) == []
+
+
+def test_repeated_hetu_tail_gets_the_full_hetus_placeholder():
+    r = conv("131052-308T", ("agent", "joo"), "-308T")
+    assert found(r) == [("t0", 0, 11, "NATIONAL_ID"), ("t2", 0, 5, "NATIONAL_ID")]
+    assert [s["placeholder"] for s in r.spans] == ["[NATIONAL_ID_1]", "[NATIONAL_ID_1]"]
+
+
+def test_partial_hetu_over_turns_after_cue():
+    r = conv(("agent", "saisinko henkilötunnuksesi?"), "yksi kolme", ("agent", "joo"), "-308T")
+    assert found(r) == [("t1", 0, 10, "NATIONAL_ID"), ("t3", 0, 5, "NATIONAL_ID")]
+    r2 = conv(("agent", "saisinko tilausnumeron?"), "yksi kolme", ("agent", "joo"), "-308T")
+    assert found(r2) == []
 
 
 def test_spoken_check_letter_names():
@@ -232,3 +247,18 @@ def test_secret_and_username_after_cue():
     assert found(conv(p)) == [("t0", 7, 11, "SECRET")]
     u = "käyttäjätunnukseni on maijam85"
     assert found(conv(u)) == [("t0", 22, 30, "USERNAME")]
+
+
+def test_secret_that_starts_like_a_cue_word():
+    t = "wifin salasana on varmaan Salasana123"
+    assert found(conv(t)) == [("t0", t.index("Salasana123"), len(t), "SECRET")]
+
+
+def test_two_word_username_cue():
+    t = "my user name is maijam85"
+    assert found(conv(t)) == [("t0", 16, 24, "USERNAME")]
+
+
+def test_iban_after_swedish_ar():
+    t = "Kontonumret är FI21 1234 5600 0007 85"
+    assert found(conv(t)) == [("t0", 15, len(t), "IBAN")]

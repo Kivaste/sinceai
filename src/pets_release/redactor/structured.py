@@ -99,6 +99,18 @@ def _context(view: ConversationView, turn_index: int, pos: int, n: int = CUE_WIN
     return words
 
 
+HETU_TAIL_TURNS = 3
+_HETU_TAIL_RE = re.compile(r"(?<![0-9A-Z])[-+A-FU-Y]\d{3}[0-9A-Y](?![0-9A-Z])")
+_HETU_PARTIAL_RE = re.compile(r"\d{1,6}[-+A-FU-Y]\d{3}[0-9A-Y]")
+
+
+def _wide_context(view: ConversationView, turn_index: int, pos: int, turns: int = HETU_TAIL_TURNS) -> list[str]:
+    words: list[str] = []
+    for k in range(max(0, turn_index - turns), turn_index):
+        words += _words_before(view.turns[k].text, len(view.turns[k].text))
+    return words + _words_before(view.turns[turn_index].text, pos)
+
+
 def _has_cue(words: Iterable[str], cues: tuple[str, ...]) -> bool:
     """A word matches a cue stem; stems of <= 4 letters only match short inflections ('pin-koodi', 'kortet')."""
     for w in words:
@@ -141,6 +153,7 @@ class StructuredPass:
             for r in rs:
                 hits.extend(self._classify(view, [r]))
         hits.extend(self._joins(view, runs))
+        hits.extend(self._hetu_tails(view, runs, hits))
         for h in hits:
             yield Candidate(h.turn_index, h.start, h.end, h.label, h.priority, h.key, self.name)
 
@@ -255,7 +268,9 @@ class StructuredPass:
             label = None
             if _has_cue([w], SECRET_CUES):
                 label = "SECRET"
-            elif _has_cue([w], USERNAME_CUES):
+            elif _has_cue([w], USERNAME_CUES) or (
+                w == "user" and idx + 1 < len(spans) and text[spans[idx + 1][0]:spans[idx + 1][1]].lower() in ("name", "id")
+            ):
                 label = "USERNAME"
             if label is None:
                 continue
@@ -264,7 +279,10 @@ class StructuredPass:
                 vs, ve = spans[j]
                 raw = text[vs:ve]
                 low = raw.lower().strip(_TRAIL_PUNCT)
-                if low in FILLER or _has_cue([low], SECRET_CUES + USERNAME_CUES) or not low or raw in (":", "-"):
+                # a token with a digit is a value even if it starts like a cue ('Salasana123')
+                wordlike = not any(ch.isdigit() for ch in low)
+                if wordlike and (low in FILLER or low in ("name", "id")
+                                 or _has_cue([low], SECRET_CUES + USERNAME_CUES)) or not low or raw in (":", "-"):
                     continue
                 ve = _strip_trailing(text, vs, ve)
                 val = text[vs:ve]
@@ -304,20 +322,13 @@ class StructuredPass:
                 take(a, b, "NATIONAL_ID", PRIORITY_VALIDATED, "hetu\x00" + s[a:b])
         for m in re.finditer(r"(?=([A-Z]{2}\d{2}[0-9A-Z]{10,30}))", s):
             a = m.start(1)
-            if any(used[a:a + 4]) or (a > 0 and s[a - 1].isalpha()):
+            # no letter lookbehind: Swedish 'är' reads as the letter name R right before 'FI..'
+            if any(used[a:a + 4]):
                 continue
             for b in range(min(len(s), a + 34), a + 13, -1):
                 if not any(used[a:b]) and V.iban_valid(s[a:b]):
                     take(a, b, "IBAN", PRIORITY_VALIDATED, "iban\x00" + s[a:b])
                     break
-        if not cross_only:
-            # HETU tail asked for on its own ('the last part of your ID code'): century sign, 3 digits, check
-            for m in re.finditer(r"(?<![0-9A-Z])[-+A-FU-Y]\d{3}[0-9A-Y](?![0-9A-Z])", s):
-                a, b = m.start(), m.end()
-                if any(used[a:b]):
-                    continue
-                if _has_cue(_context(view, chain[owner[a]].turn_index, syms[a].start), HETU_CUES):
-                    take(a, b, "NATIONAL_ID", PRIORITY_CUE, "hetu-tail\x00" + s[a:b])
         for m in re.finditer(r"\+?\d(?:-?\d)*", s):
             a, b = m.start(), m.end()
             if any(used[a:b]):
@@ -340,8 +351,9 @@ class StructuredPass:
                         continue
                     sub = s[lo:hi].replace("-", "")
                     r2 = _classify_digits(sub, False, ctx)
-                    # PHONE only: Luhn passes 1 in 10 random sub-strings
-                    if r2 and r2[0] == "PHONE":
+                    # Luhn passes 1 in 10 random sub-strings: card/device sub-segments need their cue
+                    if r2 and (r2[0] == "PHONE" or (r2[0] in ("DEVICE_ID", "PAYMENT_CARD") and r2[1] == PRIORITY_VALIDATED
+                                                    and _has_cue(ctx, DEVICE_CUES + CARD_CUES))):
                         take(lo, hi, r2[0], r2[1], r2[0].lower() + "\x00" + sub)
                         done = True
                 if done:
@@ -364,6 +376,39 @@ class StructuredPass:
                                  prio + (5 if len(owners) > 1 else 0), key))
         return hits
 
+    # ------------------------------------------------------ HETU tails
+    def _hetu_tails(self, view: ConversationView, runs: list[list[Run]], hits: list[_Hit]) -> list[_Hit]:
+        """A HETU tail on its own (century sign, 3 digits, check character): emitted when it repeats the
+        tail of a HETU validated in this conversation (same placeholder), or when a HETU cue occurs in
+        this or the previous HETU_TAIL_TURNS turns."""
+        known = {h.key.split("\x00", 1)[1][-5:]: h.key for h in hits
+                 if h.label == "NATIONAL_ID" and h.key and h.key.startswith("hetu\x00")}
+        out: list[_Hit] = []
+        for rs in runs:
+            for r in rs:
+                s = r.text
+                for m in _HETU_TAIL_RE.finditer(s):
+                    a, b = m.start(), m.end()
+                    first, last = r.syms[a], r.syms[b - 1]
+                    key = known.get(s[a:b])
+                    if key is None and not _has_cue(_wide_context(view, r.turn_index, first.start), HETU_CUES):
+                        continue
+                    out.append(_Hit(r.turn_index, first.start, last.end, "NATIONAL_ID", PRIORITY_CUE,
+                                    key or "hetu-tail\x00" + s[a:b]))
+        return out
+
+    def _partial_hetu(self, view: ConversationView, chain: list[Run]) -> list[_Hit]:
+        """Fragments that together end like a HETU (some leading digits, then the tail) after a HETU cue:
+        one span per fragment. The joined value cannot be checksum-validated, so a cue is required."""
+        s = "".join(r.text for r in chain)
+        if not _HETU_PARTIAL_RE.fullmatch(s):
+            return []
+        r0 = chain[0]
+        if not _has_cue(_wide_context(view, r0.turn_index, r0.syms[0].start), HETU_CUES):
+            return []
+        key = "hetu-partial\x00" + s
+        return [_Hit(r.turn_index, r.syms[0].start, r.syms[-1].end, "NATIONAL_ID", PRIORITY_CUE, key) for r in chain]
+
     # ------------------------------------------------------ N-turn joins
     def _joins(self, view: ConversationView, runs: list[list[Run]]) -> list[_Hit]:
         out: list[_Hit] = []
@@ -381,7 +426,10 @@ class StructuredPass:
                 if not runs[j] or runs[j][0].words_before > HEAD_SLACK:
                     break
                 chain = chain + [runs[j][0]]
-                out.extend(self._classify(view, chain, cross_only=True))
+                found = self._classify(view, chain, cross_only=True)
+                out.extend(found)
+                if not found:
+                    out.extend(self._partial_hetu(view, chain))
                 if len(runs[j]) > 1 or runs[j][0].words_after > TAIL_SLACK:
                     break
         return out
