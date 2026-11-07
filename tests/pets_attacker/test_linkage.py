@@ -168,3 +168,21 @@ def test_hour_buckets_are_half_open_and_exact_instants_still_match_at_the_edge()
     assert list(m.candidates({"t": "2025-03-17T09:30:00"})[0]) == [0, 1]
     m = Matcher(exact, [QI("time", ("t",), ("arrival_ts",), window=(1, 0))], {"arrival_ts": "ts.exact"})
     assert list(m.candidates({"t": "2025-03-17T10:30:00"})[0]) == [0, 1]  # instant exactly at the window start matches
+
+
+def test_hour_of_day_rung_matches_hour_of_day_any_date():
+    prot = pd.DataFrame({"arrival_ts": ["10:00", "15:00", "", "23:00"]})
+    qi = [QI("time", ("t",), ("arrival_ts",), window=(1, 1))]
+    m = Matcher(prot, qi, {"arrival_ts": "ts.hour_of_day"})
+    assert list(m.candidates({"t": "2025-07-09T10:30:00"})[0]) == [0, 2]  # 09:30..11:30 -> hours 09,10,11; blank = wildcard
+    assert list(m.candidates({"t": "2025-01-01T00:10:00"})[0]) == [2, 3]  # window wraps past midnight
+    wide = Matcher(prot, [QI("time", ("t",), ("arrival_ts",), window=(24, 24))], {"arrival_ts": "ts.hour_of_day"})
+    assert list(wide.candidates({"t": "2025-07-09T10:30:00"})[0]) == [0, 1, 2, 3]
+
+
+def test_hour_of_day_rung_refuses_a_cell_of_another_shape():
+    prot = pd.DataFrame({"arrival_ts": ["2025-03-01T10:00"]})
+    with pytest.raises(RungError):
+        Matcher(prot, [QI("time", ("t",), ("arrival_ts",))], {"arrival_ts": "ts.hour_of_day"})
+    with pytest.raises(RungError):
+        parse_interval(pd.Series(["25:00x"]), "ts.hour_of_day")
