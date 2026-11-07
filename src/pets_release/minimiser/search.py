@@ -37,9 +37,11 @@ from pets_release.ladders import LADDERS, SACRIFICE_ONLY_RUNGS, WITHHELD, apply,
 from pets_release.policy.model import validate_plan
 
 from . import risk as R
+from .parallel import NoKeys, Pool, WorkerFailed, effective_workers
 from .readsets import input_digest, series_digest
 
 LOG_KEYS = frozenset({"step", "candidate_digest", "moves", "scores", "risk", "accepted", "reason", "cached"})
+MAIN_ONLY_RUNGS = frozenset({"id.pseudonym", "text.redacted"})  # need key material or the redactor (#127)
 PASS = 0.9
 DEFAULT_BUDGET = 100
 
@@ -190,6 +192,7 @@ class _Search:
         self.rung_sacr = {(rs["table"], rs["column"]): rs for rs in policy.rung_sacrifices}
         self.rung_steps: dict = {}  # key -> measured record of an adopted enumerated rung sacrifice (#89)
         self.start_ev = self.base_ev = None  # set by run() once the start and the strict phases are adopted
+        self.pool = None  # a parallel.Pool when search(workers > 1) (#127): scoring only, never search state
         self._units()
         self._check_inputs()
 
@@ -326,22 +329,50 @@ class _Search:
 
     # ---------------------------------------------------------------- evaluation
     def evaluate(self, cand):
-        """Purpose results (cached by candidate-input digest), risk vector, person-k."""
+        """Purpose results (cached by candidate-input digest), risk vector, person-k. With a pool (#127) the
+        raw scoring runs in a worker; the cache, counters and log are only ever updated here, in search order."""
         self.stats["candidates"] += 1
+        if self.pool is None:
+            return self.commit(self.raw(cand, self.cache))
+        try:
+            return self.commit(self.pool.take(cand, self.cache))
+        except WorkerFailed as e:
+            raise MinimiserRefused(str(e), self.log, self.stats) from None
+
+    def ahead(self, cands) -> None:
+        """Score ``cands`` (the candidates the search will try next, most likely first) speculatively."""
+        if self.pool is not None:
+            room = self.budget - self.stats["candidates"]
+            try:
+                self.pool.ahead([c for c in cands if c is not None], self.cache, room)
+            except WorkerFailed as e:
+                raise MinimiserRefused(str(e), self.log, self.stats) from None
+
+    def main_columns(self, cand) -> dict:
+        """The candidate's keyed columns (``MAIN_ONLY_RUNGS``), built here: a pool worker holds no key material."""
+        out = {}
+        for key in sorted(cand):
+            rung, pj, floor = cand[key]
+            if rung in MAIN_ONLY_RUNGS:
+                self.column(key, rung, pj, floor)
+                mk = (key, rung, pj)
+                out[mk] = (self.colmemo[mk], self.digmemo[mk])
+        return out
+
+    def raw(self, cand, known, columns=None) -> dict:
+        """Pure scoring of one candidate: purpose results for the checks whose input digest is not in ``known``,
+        the risk vector and PersonK. No search state changes (runs in a pool worker too, with the keyed
+        ``columns`` the main process built)."""
+        for mk, (col, dig) in (columns or {}).items():
+            self.colmemo[mk], self.digmemo[mk] = col, dig
         prot = self.protected(cand)
         dig = self._col_digester(cand)
-        results, hits = {}, 0
+        cks, fresh = {}, {}
         for chk in self.checks:
             ck = input_digest(chk, self.read_sets, dig)
-            if ck in self.cache:
-                results[chk] = self.cache[ck]
-                hits += 1
-                self.stats["cache_hits"] += 1
-            else:
-                r = _call(self.purpose, chk, self.src, prot)
-                self.cache[ck] = r
-                results[chk] = r
-                self.stats["cache_misses"] += 1
+            cks[chk] = ck
+            if ck not in known and ck not in fresh:
+                fresh[ck] = _call(self.purpose, chk, self.src, prot)
         plan = self.plan_of(cand)
         rv, pk = R.risk_vector(self.p, plan, self.k_view(prot), self.src, self.kspec, self.k)
         if self.k is not None and pk is None:  # #118: under a k target every candidate carries a measured PersonK
@@ -356,7 +387,23 @@ class _Search:
                         raise MinimiserRefused(f"risk component {c} not measured")
                     rv[c] = float(extra[c])
         rv = {c: rv[c] for c in self.p.risk_vector}
-        return {"results": results, "risk": rv, "cached": hits == len(self.checks), "pk": pk}
+        return {"cks": cks, "fresh": fresh, "risk": rv, "pk": pk}
+
+    def commit(self, raw) -> dict:
+        """Take one raw evaluation into the cache and counters, exactly as the sequential search would."""
+        results, hits = {}, 0
+        for chk in self.checks:
+            ck = raw["cks"][chk]
+            if ck in self.cache:
+                results[chk] = self.cache[ck]
+                hits += 1
+                self.stats["cache_hits"] += 1
+            else:
+                r = raw["fresh"][ck]
+                self.cache[ck] = r
+                results[chk] = r
+                self.stats["cache_misses"] += 1
+        return {"results": results, "risk": raw["risk"], "cached": hits == len(self.checks), "pk": raw["pk"]}
 
     def objective(self, ev, cand):
         vals = list(ev["risk"].values()) or [0.0]
@@ -453,18 +500,13 @@ class _Search:
             if fl not in (WITHHELD,) and self.rung_params(key, fl) is None:
                 raise MinimiserRefused(f"no params for floor rung of {key[0]}.{key[1]}")
             start[key] = (fl, pj, fl)
+        alt = self._alt_start(start) if self.p.alt_floors else None
+        self.ahead([start, alt])
         ev = self.evaluate(start)
         ok = not self.failing(ev["results"])
         self.record(start, None, ev, ok, "start: every permitted field at its floor: "
                     + ("adopted" if ok else "rejected (" + ",".join(self.failing(ev["results"])) + ")"))
         if not ok and self.p.alt_floors:
-            alt = dict(start)
-            for key, rung in sorted(self.p.alt_floors.items()):
-                pr = self.rung_params(key, rung)
-                if pr is None:
-                    continue
-                for k2 in self.unit_of[key]:
-                    alt[k2] = (rung, canonical(pr), rung)
             ev = self.evaluate(alt)
             ok = not self.failing(ev["results"])
             self.record(alt, start, ev, ok, "start: alternative floors released: "
@@ -496,19 +538,18 @@ class _Search:
             return ok, step
 
         # withholding pass
-        for u in self.units:
+        for i, u in enumerate(self.units):
             if self.out_of_budget():
                 break
             if cur[u[0]][0] == WITHHELD:
                 continue
-            cand = dict(cur)
-            for key in u:
-                cand[key] = (WITHHELD, "{}", cur[key][2])
+            self.ahead([self._withheld(v, cur) for v in self.units[i:]])
+            cand = self._withheld(u, cur)
             ok, step = try_strict(cand, f"withhold {self._name(u)}")
             if ok:
                 step_reason(u[0], "withheld; every purpose check passes without it", step)
         # coarsening pass
-        for u in self.units:
+        for i, u in enumerate(self.units):
             ok = True
             while ok and not self.out_of_budget():
                 rung = cur[u[0]][0]
@@ -517,10 +558,10 @@ class _Search:
                 nxt = self._next_rung(u, cur)
                 if nxt is None:
                     break
-                r2, pj = nxt
-                cand = dict(cur)
-                for key in u:
-                    cand[key] = (r2, pj, cur[key][2])
+                cand = self._coarser(u, cur)
+                r2 = nxt[0]
+                # next: this candidate; if adopted, this unit one more rung; if rejected, the next units
+                self.ahead([cand, self._coarser(u, cand)] + [self._coarser(v, cur) for v in self.units[i + 1:]])
                 ok, step = try_strict(cand, f"coarsen {self._name(u)} to {r2}")
                 if ok:
                     step_reason(u[0], f"{r2}: coarsest rung at which every purpose check passes", step)
@@ -528,6 +569,7 @@ class _Search:
         for i, mv in enumerate(self.p.joint_qi_moves):
             if self.out_of_budget():
                 break
+            self.ahead([c for c in (self._joint(m, cur) for m in self.p.joint_qi_moves[i:]) if c != cur])
             cand = self._joint(mv, cur)
             if cand is None or cand == cur:
                 continue
@@ -578,6 +620,7 @@ class _Search:
                     cand = dict(cur)
                     for key in u:
                         cand[key] = (nxt[0], nxt[1], cur[key][2])
+                    self.ahead([cand, self._coarser(u, cand)])
                     ev2, step = self._try_sacrifice(cand, cur, cur_ev, base,
                                                     f"sacrifice: coarsen {self._name(u)} to {nxt[0]}")
                     if ev2 is None:
@@ -587,6 +630,7 @@ class _Search:
             for i, mv in enumerate(self.p.joint_qi_moves):
                 if not self._needs_more(cur_ev) or self.out_of_budget():
                     break
+                self.ahead([c for c in (self._joint(m, cur) for m in self.p.joint_qi_moves[i:]) if c != cur])
                 cand = self._joint(mv, cur)
                 if cand is None or cand == cur:
                     continue
@@ -596,6 +640,37 @@ class _Search:
                     for m in mv:
                         step_reason((m["table"], m["column"]), f"{m['rung']}: joint QI move {i + 1}, enumerated sacrifice", step)
         return self.finish(cur, base, reasons, cur_ev)
+
+    def _alt_start(self, start):
+        alt = dict(start)
+        for key, rung in sorted(self.p.alt_floors.items()):
+            pr = self.rung_params(key, rung)
+            if pr is None:
+                continue
+            for k2 in self.unit_of[key]:
+                alt[k2] = (rung, canonical(pr), rung)
+        return alt
+
+    def _withheld(self, u, cur):
+        """``cur`` with unit ``u`` withheld, or None if it already is."""
+        if cur[u[0]][0] == WITHHELD:
+            return None
+        cand = dict(cur)
+        for key in u:
+            cand[key] = (WITHHELD, "{}", cur[key][2])
+        return cand
+
+    def _coarser(self, u, cur):
+        """``cur`` with unit ``u`` one rung coarser (the coarsening step), or None if there is none."""
+        if cur is None or cur[u[0]][0] == WITHHELD:
+            return None
+        nxt = self._next_rung(u, cur)
+        if nxt is None:
+            return None
+        cand = dict(cur)
+        for key in u:
+            cand[key] = (nxt[0], nxt[1], cur[key][2])
+        return cand
 
     def _try_sacrifice(self, cand, cur, cur_ev, base, desc):
         ev = self.evaluate(cand)
@@ -857,8 +932,13 @@ class _Search:
 
 def search(policy, tables: Mapping[str, pd.DataFrame], keys, *, purpose: Callable, purpose_all: Callable | None = None,
            kspec: Mapping | None = None, budget: int = DEFAULT_BUDGET, read_sets: Mapping | None = None,
-           params: Mapping | None = None, redactor=None, risk_extra: Callable | None = None) -> SearchResult:
+           params: Mapping | None = None, redactor=None, risk_extra: Callable | None = None,
+           workers: int = 1) -> SearchResult:
     """Run the bounded search. Raises ``MinimiserRefused`` (with the log) when no releasable plan exists.
+
+    workers > 1 (#127, D44) scores candidates in a spawn-context process pool (``parallel``), capped at
+    min(cores, free RAM / 2 GiB); the result is identical at every worker count. ``purpose``, ``risk_extra``,
+    ``keys`` and ``redactor`` must then be picklable; a failed worker refuses the search.
 
     purpose(task_id, original, protected) -> {score, status}; purpose_all(original, protected) -> [{id, score,
     status}] runs every scenario task for the final re-check (default: ``purpose`` per policy check).
@@ -867,9 +947,26 @@ def search(policy, tables: Mapping[str, pd.DataFrame], keys, *, purpose: Callabl
     """
     if not isinstance(budget, int) or budget < 1:
         raise ValueError("budget must be a positive integer")
-    s = _Search(policy, tables, keys, purpose=purpose, purpose_all=purpose_all, kspec=kspec, budget=budget,
-                read_sets=dict(read_sets or {}), params=params, redactor=redactor, risk_extra=risk_extra)
+    if not isinstance(workers, int) or isinstance(workers, bool) or workers < 1:
+        raise ValueError("workers must be a positive integer")
+    kw = {"purpose": purpose, "purpose_all": purpose_all, "kspec": kspec, "budget": budget,
+          "read_sets": dict(read_sets or {}), "params": params, "redactor": redactor, "risk_extra": risk_extra}
+    s = _Search(policy, tables, keys, **kw)
+    n = effective_workers(workers) if workers > 1 else 1
+    if n > 1:  # workers get no keys, no redactor (keyed columns come from here) and never run the final re-check
+        s.pool = Pool(n, {"policy": policy, "tables": tables, "keys": NoKeys(), **kw, "purpose_all": None,
+                          "redactor": None}, s.main_columns)
+    ok = False
     try:
-        return s.run()
+        res = s.run()
+        ok = True
     except R.PersonKMissing as e:  # fail closed (#112, #118): a missing PersonK refuses; it is never scored
         raise MinimiserRefused(str(e), s.log, s.stats) from None
+    finally:
+        if s.pool is not None:
+            try:
+                s.pool.close(ok)
+            except WorkerFailed as e:
+                if ok:  # a speculative task failed: refuse rather than release from partial results
+                    raise MinimiserRefused(str(e), s.log, s.stats) from None
+    return res

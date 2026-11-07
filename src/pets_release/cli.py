@@ -84,11 +84,33 @@ def run_parser() -> argparse.ArgumentParser:
     p.add_argument("--recipient")
     p.add_argument("--plan")
     p.add_argument("--sample", type=int)
+    p.add_argument("--workers", type=_workers, default=None,
+                   help=f"search scoring processes (default ${WORKERS_ENV} or 1); never recorded in the release")
     return p
+
+
+WORKERS_ENV = "PETS_WORKERS"
+
+
+def _workers(value: str) -> int:
+    """A positive worker count (#127, D44); the release is identical at every count."""
+    try:
+        n = int(value, 10)
+    except (TypeError, ValueError):
+        raise argparse.ArgumentTypeError("--workers must be a positive integer") from None
+    if n < 1:
+        raise argparse.ArgumentTypeError("--workers must be a positive integer")
+    return n
 
 
 def resolve_run_context(argv: list[str]) -> RunContext:
     args = run_parser().parse_args(argv)
+    if args.workers is None:  # the web app sets the count through the environment
+        env = os.environ.get(WORKERS_ENV)
+        try:
+            args.workers = _workers(env) if env else 1
+        except argparse.ArgumentTypeError:
+            raise UsageError(f"{WORKERS_ENV} must be a positive integer") from None
     created = _created(args.created)
     key = os.environ.get("PETS_HMAC_KEY", "")
     if len(key) < MIN_KEY_LEN:

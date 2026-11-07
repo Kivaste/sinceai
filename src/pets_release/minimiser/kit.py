@@ -20,17 +20,21 @@ KSPECS = {
 }
 
 
+def kit_purpose_check(task_id, original, protected):
+    """One kit purpose check. Module-level, so a spawned search worker (#127) can unpickle it."""
+    from pets_release import kiteval
+
+    return kiteval.purpose_check(task_id, original, protected)
+
+
 def kit_purpose(scenario_id: str, root):
     """(purpose, purpose_all) callables backed by ``pets_release.kiteval`` (the only pets_eval importer)."""
     from pets_release import kiteval
 
-    def purpose(task_id, original, protected):
-        return kiteval.purpose_check(task_id, original, protected)
-
     def purpose_all(original, protected):
         return kiteval.purpose_checks(scenario_id, original, protected, root=root)
 
-    return purpose, purpose_all
+    return kit_purpose_check, purpose_all
 
 
 def params_from_plan(plan: list) -> dict:

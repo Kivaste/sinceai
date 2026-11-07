@@ -93,10 +93,12 @@ def check_search_privacy(final, policy) -> None:
         raise RunError("search privacy re-check contradicts the policy targets")
 
 
-def _search(scenario_id, policy, source, keys, kit, out: Path):
-    """The bounded search (ticket 24) on the full source; a refusal writes its report and log, then raises."""
+def _search(scenario_id, policy, source, keys, kit, out: Path, workers: int = 1):
+    """The bounded search (ticket 24) on the full source; a refusal writes its report and log, then raises.
+    ``workers`` (#127) only changes how candidates are scored, never the result; it is recorded nowhere."""
     try:
-        return search(policy, source, keys, **search_options(scenario_id, kit.root, hand_plan(scenario_id)))
+        return search(policy, source, keys, **search_options(scenario_id, kit.root, hand_plan(scenario_id)),
+                      workers=workers)
     except MinimiserRefused as e:
         sc = scoring_dir(out)
         sc.mkdir(parents=True)
@@ -199,7 +201,7 @@ def require_strict(purpose, steps):
 
 
 def run_release(*, kit, scenario: dict, created: str, key_text: str, out, plan_name: str,
-                tool_revision: str, recipient: str | None = None) -> RunOutcome:
+                tool_revision: str, recipient: str | None = None, workers: int = 1) -> RunOutcome:
     scenario_id = scenario.get("id")
     if scenario_id not in SCENARIO_SPEC:
         raise RunError("run supports only HEALTH-S1 in this build; the CS-S1 release needs ticket 23 and its "
@@ -229,7 +231,7 @@ def run_release(*, kit, scenario: dict, created: str, key_text: str, out, plan_n
     if plan_name == "hand":
         plan = hand_plan(scenario_id)
     else:
-        found = _search(scenario_id, policy, source, token_keys(master, rsid, recipient), kit, out)
+        found = _search(scenario_id, policy, source, token_keys(master, rsid, recipient), kit, out, workers)
         try:
             check_search_privacy(found.final, policy)
         except RunRefused:

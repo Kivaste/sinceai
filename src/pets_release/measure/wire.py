@@ -31,7 +31,7 @@ def _digests(folder: Path) -> dict:
 
 
 def run_measured(*, kit, scenario: dict, created: str, key_text: str, out, plan_name: str,
-                 tool_revision: str, recipient: str | None = None):
+                 tool_revision: str, recipient: str | None = None, workers: int = 1):
     """Returns the final ``RunOutcome``. Raises RunError/RunRefused (21) or MeasureRejected (19)."""
     out = Path(out).absolute()
     work = out.with_name(out.name + ".measure")
@@ -41,7 +41,8 @@ def run_measured(*, kit, scenario: dict, created: str, key_text: str, out, plan_
     scid = scenario["id"]
     scratch = work / "pass1"
     first = pipeline.run_release(kit=kit, scenario=scenario, created=created, key_text=key_text, out=scratch,
-                                 plan_name=plan_name, tool_revision=tool_revision, recipient=recipient)
+                                 plan_name=plan_name, tool_revision=tool_revision, recipient=recipient,
+                                 workers=workers)
     if first.status != "released":
         return first
     sc = first.scoring
@@ -66,7 +67,8 @@ def run_measured(*, kit, scenario: dict, created: str, key_text: str, out, plan_
     pipeline.build_narrative = with_measured
     try:
         final = pipeline.run_release(kit=kit, scenario=scenario, created=created, key_text=key_text, out=out,
-                                     plan_name=plan_name, tool_revision=tool_revision, recipient=recipient)
+                                     plan_name=plan_name, tool_revision=tool_revision, recipient=recipient,
+                                     workers=workers)
     finally:
         pipeline.build_narrative = original
     if final.status == "released" and _digests(final.out) != _digests(scratch):
@@ -121,7 +123,8 @@ def main(argv: list[str]) -> int:
             return 2
     try:
         res = run_measured(kit=ctx.kit, scenario=ctx.scenario, created=ctx.created, key_text=ctx.key,
-                           out=a.out, plan_name=a.plan, tool_revision=rev, recipient=a.recipient)
+                           out=a.out, plan_name=a.plan, tool_revision=rev, recipient=a.recipient,
+                           workers=a.workers)
     except pipeline.RunRefused as e:  # a refusal is exit 1, as in `pets-release run`; our own content-free message
         print(f"REFUSED: {str(e)[:200]}")
         return 1
