@@ -213,3 +213,27 @@ def test_key_is_required_from_server_environment_and_never_echoed(tmp_path):
             assert request(url, "/api/run", data={"scenario": "HEALTH-S1", field: TEST_KEY})[0] == 400
         assert json.loads(request(url, "/api/result")[1])["status"] == "IDLE"
     assert TEST_KEY not in "".join(proc.ui_logs)
+
+
+def test_choose_and_refused_result_views_show_purpose_and_failing_checks(tmp_path):
+    """Rule: browser can choose either scenario and see the real gate refusal, never fabricated success."""
+    def plant(folder):
+        import pandas as pd
+        coarse_qis(folder)
+        path = folder / "ed_visits.csv"
+        frame = pd.read_csv(path, dtype=str, keep_default_na=False)
+        frame.loc[0, "disposition"] = "4111 1111 1111 1111"
+        frame.to_csv(path, index=False, lineterminator="\n")
+
+    with running(tmp_path, edit=plant) as (_, url, _, _):
+        status, choose = request(url)
+        assert status == 200
+        assert all(text in choose for text in ("HEALTH-S1", "CS-S1", "Purpose checks", "Privacy floors", "Run scenario"))
+        assert request(url, "/api/run", data={"scenario": "HEALTH-S1"})[0] == 202
+        report = result(url)
+        assert report["status"] == "REFUSED"
+        assert any(r["check"] == "rescan.payment-cards" and r["hits"] > 0 for r in report["failures"])
+        status, refused = request(url, "/result")
+        assert status == 200
+        assert "REFUSED" in refused and "rescan.payment-cards" in refused
+        assert request(url, "/dashboard")[0] == 422

@@ -13,6 +13,7 @@ from urllib.parse import parse_qs, urlsplit
 from pets_release.ui.jobs import Jobs, SCENARIOS, scenarios
 from pets_release.offline import install
 from pets_release.manifest.value_scan import identifier_shape_counts
+from pets_release.ui.views import choose_page, result_page
 
 
 def local_listener(host, port):
@@ -63,6 +64,9 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store")
         self.send_header("Referrer-Policy", "no-referrer")
         self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; "
+                         "script-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; "
+                         "frame-ancestors 'none'; form-action 'none'")
         self.end_headers()
         self.wfile.write(body)
 
@@ -97,7 +101,9 @@ class Handler(BaseHTTPRequestHandler):
             started = jobs.start(node["scenario"])
             self.respond(202 if started else 409, {"started": started})
         elif self.command == "GET" and path == "/":
-            self.respond(200, "<!doctype html><title>Purpose-first PETs</title><h1>Choose a sharing scenario</h1>")
+            self.respond(200, choose_page(scenarios()))
+        elif self.command == "GET" and path == "/result":
+            self.respond(200, result_page(jobs.snapshot()))
         else:
             self.respond(404, "Not found")
 
