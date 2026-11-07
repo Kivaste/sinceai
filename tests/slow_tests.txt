@@ -13,10 +13,10 @@ tests/detect/test_detect.py::test_cli_refuses_direct_csv_in_forbidden_locations[
 tests/detect/test_detect.py::test_cli_refuses_direct_csv_in_forbidden_locations[metadata/field_catalog.csv]
 tests/detect/test_detect.py::test_headers_match_the_kit_scorer_source
 tests/docs/test_readme_commands.py::test_block[block10-run]
+tests/docs/test_readme_commands.py::test_block[block11-run]
 tests/docs/test_readme_commands.py::test_block[block3-run]
-tests/docs/test_readme_commands.py::test_block[block5-run]
 tests/docs/test_readme_commands.py::test_block[block6-run]
-tests/docs/test_readme_commands.py::test_block[block8-run]
+tests/docs/test_readme_commands.py::test_block[block7-run]
 tests/docs/test_readme_commands.py::test_block[block9-run]
 tests/e2e/test_e2e.py::test_different_key_changes_the_release
 tests/e2e/test_e2e.py::test_kit_info_independent_of_cwd

@@ -1,6 +1,6 @@
 """Extract every command block from README.md and run the ones that can run today.
 
-Each ```powershell block must be preceded by exactly one marker comment:
+Each ```powershell or ```yaml block must be preceded by exactly one marker comment:
   <!-- docs-test: run -->                    run it (`pets-release ...`, venv-qualified CLI, or `$env:X = "v"`)
   <!-- docs-test: skip reason=<name> -->     not run; the reason is named and listed in the report
   <!-- docs-test: pending ticket=NN -->      subcommand not built yet ("available after ticket NN")
@@ -31,12 +31,13 @@ ALLOWED_SKIP_REASONS = (
     "sets-secret-placeholder-only",
     "runs-the-whole-test-suite-recursively",
     "starts-a-long-running-server",
+    "pipeline-needs-real-kit-and-secret-store",
     # the CS-S1 release needs ticket 23 (turn_id check); guarded below
     "cs-s1-run-needs-ticket-23",
 )
 SUBCOMMANDS = ("run", "verify", "detect", "dashboard", "submission")
 MARKER = re.compile(r"<!--\s*docs-test:\s*(run|skip|pending)\b([^>]*?)-->")
-BLOCK = re.compile(r"(?:^(<!--.*?-->)[ \t]*\r?\n)?^```powershell[ \t]*\r?\n(.*?)^```", re.S | re.M)
+BLOCK = re.compile(r"(?:^(<!--.*?-->)[ \t]*\r?\n)?^```(?:powershell|yaml)[ \t]*\r?\n(.*?)^```", re.S | re.M)
 
 
 def _load_conftest():
@@ -101,7 +102,26 @@ def _transcript(line: str) -> None:
 
 
 def test_readme_has_command_blocks():
-    assert BLOCKS, "README has no powershell blocks; the docs check would pass vacuously"
+    assert BLOCKS, "README has no command blocks; the docs check would pass vacuously"
+
+
+def test_pipeline_example_has_named_skip_and_fail_closed_commands():
+    """README/CLI ledger seam: CI is explicit about real-kit execution and publication."""
+    text = README.read_text(encoding="utf-8")
+    assert "## Run it in your pipeline\n" in text
+    section = text.split("## Run it in your pipeline\n", 1)[1].split("\n## ", 1)[0]
+    blocks = extract_blocks(section)
+    assert len(blocks) == 1, "The Actions example must participate in the block ledger"
+    assert (blocks[0]["kind"], blocks[0]["arg"]) == (
+        "skip", "reason=pipeline-needs-real-kit-and-secret-store")
+    example = blocks[0]["body"]
+    assert "runs-on: [self-hosted, linux]" in example
+    assert "shell: bash" in example  # Actions uses bash --noprofile --norc -e -o pipefail
+    assert "python -m pets_release run --scenario HEALTH-S1" in example
+    assert 'python -m pets_release verify --full --kit "$PETS_KIT" "$PETS_RELEASE_OUT"' in example
+    assert "actions/upload-artifact@v4" in example and "/privacy_manifest.json" in example
+    assert "continue-on-error" not in example and "always()" not in example
+    assert "verified locally with the same commands" in section
 
 
 def _windows_quick_start() -> str:

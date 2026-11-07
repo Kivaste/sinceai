@@ -53,6 +53,57 @@ In the later examples, use `.\.venv\Scripts\pets-release.exe` wherever they say
 
 Exit codes: `0` success; `1` refusal or verify failure; `2` usage error or unknown state. Unknown counts as failure.
 
+## Run it in your pipeline
+
+The engine (library + CLI) is the product: a **self-hosted pipeline step** for CI,
+Airflow or dbt inside your own infrastructure, where row values stay local.
+The web app is **the approval and audit console** for one run; a self-hosted REST
+API is future work.
+
+This GitHub Actions job assumes a trusted, self-hosted Linux runner with Bash,
+the project and kit toolkit installed in its `python` environment, and `PETS_KIT`
+set to the local kit root. Supply `PETS_HMAC_KEY` from your own secret store
+(here, a GitHub Actions secret), never a command-line argument. Use a fresh output
+path outside the checkout on every attempt. Configure `PYTHONUTF8=1` and `TZ=UTC`
+on the runner. Do not run untrusted pull-request code with this key or kit.
+
+<!-- docs-test: skip reason=pipeline-needs-real-kit-and-secret-store -->
+```yaml
+jobs:
+  release:
+    runs-on: [self-hosted, linux]
+    env:
+      PETS_HMAC_KEY: ${{ secrets.PETS_HMAC_KEY }}
+      PETS_RELEASE_OUT: ../sinceai-out/pipeline-${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - uses: actions/checkout@v4
+      - shell: bash
+        run: |
+          python -m pets_release run --scenario HEALTH-S1 --out "$PETS_RELEASE_OUT" --created 2026-11-07T08:00:00Z --kit "$PETS_KIT"
+          python -m pets_release verify --full --kit "$PETS_KIT" "$PETS_RELEASE_OUT"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: signed-privacy-manifest
+          path: ${{ env.PETS_RELEASE_OUT }}/privacy_manifest.json
+          if-no-files-found: error
+```
+
+The example is **verified locally with the same commands** on the real kit;
+exit codes, elapsed times and revision-bound artefacts are recorded in issue
+[#145](https://github.com/Kivaste/sinceai/issues/145). The named skip keeps this
+long, secret-dependent run out of the synthetic README command tests.
+
+The `run` exit-code contract is **0 = released**, **1 = refused or a check failed**,
+**2 = bad input/configuration or unknown state**. Only 0 permits the next step;
+unknown is failure, never permission to publish. Actions' explicit `shell: bash`
+uses `-e -o pipefail`, so a nonzero `run` or `verify` stops this job before upload.
+Full verification re-runs producer and release checks and validates the signature
+using the kit and environment key. A recipient without them can run limited
+verification, which does not authenticate the signature. Only the content-free
+signed manifest is uploaded here, not protected tables, private scoring artefacts,
+row maps or keys. Deliver protected tables separately to the intended recipient
+inside your approved sharing boundary.
+
 ## Demo
 
 The demo has three parts: HEALTH-S1 (ED visits to a university research group) in depth, CS-S1 (contact-centre transcripts to an LLM analytics vendor) for free text, and live detection on the `unseen` export.
