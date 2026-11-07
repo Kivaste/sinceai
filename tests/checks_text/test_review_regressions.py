@@ -61,6 +61,58 @@ def test_spelled_domain_email_is_refused(gate, release, contract, turns):
     assert rec["status"] == "fail" and rec["hits"] == 1, turns
 
 
+@pytest.mark.parametrize("turns", [
+    ["the CVV is 123"],
+    ["cvc: 1234"],
+    ["turvakoodi on 987"],
+    ["my PIN is 4321"],
+    ["PIN-koodi on neljä kolme kaksi yksi"],
+    ["pin code one two three four five six"],
+    ["min PIN-kod är fyra tre två ett"],
+    ["the pin is 12345678"],
+    ["the CVV is", "one two three"],
+    ["my PIN is four three", "two one"],
+])
+def test_short_secrets_after_cues_are_refused(gate, release, contract, turns):
+    folder = release([[(C, t) for t in turns]])
+    rec = gate("text.secrets", folder, contract())
+    assert rec["status"] == "fail" and rec["hits"] == 1, turns
+
+
+@pytest.mark.parametrize("name,first,second", [
+    ("text.secrets", "my password is", "Kissa123!"),
+    ("text.account-numbers", "my customer number is", "12345678"),
+    ("text.usernames", "my username is", "matti_m84"),
+    ("text.device-ids", "the IMEI is", "352099001761481"),
+    ("text.device-ids", "serial number", "SN12345678"),
+])
+def test_value_in_the_turn_after_its_cue_is_refused(gate, release, contract, name, first, second):
+    """Defect class seen twice (CVV, then every cue detector): cue and value in adjacent turns."""
+    folder = release([[(C, first), (C, second)]])
+    rec = gate(name, folder, contract())
+    assert rec["status"] == "fail" and rec["hits"] == 1, (name, first)
+    assert rec["violations"][0]["locations"] == [0, 1]
+
+
+@pytest.mark.parametrize("text", ["the CVV is 12", "my PIN is 123", "pin code was wrong", "PIN 4321 0000 0000 99"])
+def test_out_of_range_secret_lengths_are_not_cue_hits(gate, release, contract, text):
+    folder = release([[(C, text)]])
+    rec = gate("text.secrets", folder, contract())
+    assert rec["status"] == "pass" and rec["hits"] == 0, text
+
+
+@pytest.mark.parametrize("turns", [
+    ["matti at h s dot fi"],
+    ["matti at e x a m p l e dot c o dot u k"],
+    ["matti at mail dot y l e dot f i"],
+    ["matti at h", "s dot fi"],
+])
+def test_two_letter_spelled_domain_labels_are_refused(gate, release, contract, turns):
+    folder = release([[(C, t) for t in turns]])
+    rec = gate("text.emails", folder, contract())
+    assert rec["status"] == "fail" and rec["hits"] == 1, turns
+
+
 @pytest.mark.parametrize("text", ["write to info@kesä.fi", "it is info at kesä dot fi"])
 def test_email_with_nordic_letters_is_refused(gate, release, contract, text):
     folder = release([[(C, text)]])

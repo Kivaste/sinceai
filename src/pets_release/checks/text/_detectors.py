@@ -188,7 +188,8 @@ _PART = rf"(?:{_SPELLED}|{_WORD})"
 _LSEP = rf"(?:[ \t]*[._\-{SPOKEN_DOT}][ \t]*)"
 _LOCAL = rf"{_PART}(?:{_LSEP}{_PART})*"
 _AT = rf"[ \t]*[@{SPOKEN_AT}][ \t]*"
-_DLAB = rf"(?:{_SPELLED}|[A-Za-z0-9ÅÄÖåäö](?:[A-Za-z0-9ÅÄÖåäö-]*[A-Za-z0-9ÅÄÖåäö])?)"
+_SPELLED_LABEL = r"(?:[A-Za-z0-9][ \t]+)+[A-Za-z0-9]"  # domain labels may be 2 letters ("h s")
+_DLAB = rf"(?:{_SPELLED_LABEL}|[A-Za-z0-9ÅÄÖåäö](?:[A-Za-z0-9ÅÄÖåäö-]*[A-Za-z0-9ÅÄÖåäö])?)"
 _TLD = r"(?:(?:[A-Za-z][ \t]+)+[A-Za-z]|[A-Za-z]{2,24})"
 _DSEP = rf"(?:\.|[ \t]*{SPOKEN_DOT}[ \t]*)"
 _EMAIL_RE = re.compile(
@@ -270,13 +271,13 @@ def device_ids(text):
     hits = [(m.start(), m.end()) for m in _MAC_RE.finditer(text)]
     for m in _IMEI_RE.finditer(text):
         if luhn_ok(re.sub(r"\D", "", m.group(1))):
-            hits.append(m.span(1))
+            hits.append(m.span())  # cue + value, so a value in the next turn touches the cue turn
     for m in _BARE_15_RE.finditer(text):
         if is_imei(m.group(0)) and not _overlaps_any(m.span(), hits):
             hits.append(m.span())
     for m in _SERIAL_RE.finditer(text):
         if any(ch.isdigit() for ch in m.group(1)):
-            hits.append(m.span(1))
+            hits.append(m.span())
     return hits
 
 
@@ -299,11 +300,23 @@ def plates(text):
 
 _SECRET_CUE = re.compile(
     r"(?i)\b(?:password|passwd|pwd|passcode|salasana\w*|tunnussana\w*|lösenord\w*|"
-    r"pin(?:[ -]?(?:koodi\w*|kod\w*|code))?|api[ _-]?(?:key|avain\w*|nyckel\w*)|token|"
+    r"api[ _-]?(?:key|avain\w*|nyckel\w*)|token|"
     r"access\s+code|security\s+code|verification\s+code|vahvistuskoodi\w*|turvakoodi\w*|"
-    r"kertakäyttö\w*|engångskod\w*|säkerhetskod\w*|otp|cvv|cvc)\b"
+    r"kertakäyttö\w*|engångskod\w*|säkerhetskod\w*|otp)\b"
     r"(?:[ \t]*(?:[:=]|is|was|on|oli|är|var|it's|its))*[ \t]*([^\s¦,;]{4,})"
 )
+_FILLER = r"(?:[ \t]*(?:[:=#]|is|was|on|oli|är|var|it's|its|my|minun|min|mitt))*[ \t]*"
+_DIGIT_SEQ = r"(\d(?:[ \t-]?\d)*)(?![ \t-]?\d)"
+# Short numeric secrets with cue-appropriate lengths: (cue regex, min digits, max digits).
+# Spoken digits arrive already converted by the digit view ("neljä kolme" -> "4 3").
+_SHORT_SECRETS = [
+    (re.compile(
+        r"(?i)\b(?:cvv2?|cvc2?|cvn|card\s+verification\s+(?:code|value)|turvakoodi\w*|"
+        r"turvanumero\w*|säkerhetskod\w*|security\s+code)\b" + _FILLER + _DIGIT_SEQ), 3, 4),
+    (re.compile(
+        r"(?i)\b(?:pin(?:[ -]?(?:koodi\w*|kod\w*|code|number|numero\w*|nummer\w*))?|"
+        r"tunnuslu(?:ku|vu)\w*|personal\s+identification\s+number)\b" + _FILLER + _DIGIT_SEQ), 4, 8),
+]
 _SECRET_PATTERNS = re.compile(
     r"\bsk-[A-Za-z0-9_-]{16,}|\bAKIA[0-9A-Z]{16}\b|\bgh[pousr]_[A-Za-z0-9]{30,}|"
     r"\bxox[abprs]-[A-Za-z0-9-]{10,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|"
@@ -328,7 +341,12 @@ def secrets(text):
         if _overlaps_any(m.span(), urls):
             continue
         if _secret_like(m.group(1)):
-            hits.append(m.span(1))
+            hits.append(m.span())  # cue + value: a value in the next turn still touches the cue turn
+    for cue, lo, hi in _SHORT_SECRETS:
+        for m in cue.finditer(text):
+            n = sum(ch.isdigit() for ch in m.group(1))
+            if lo <= n <= hi and not _overlaps_any(m.span(1), hits):
+                hits.append(m.span())
     return hits
 
 
@@ -377,7 +395,7 @@ def usernames(text):
     hits = [(m.start(), m.end()) for m in _HANDLE_RE.finditer(text)]
     for m in _USER_CUE.finditer(text):
         if m.group(1).lower().strip("._-") not in _USER_STOP:
-            hits.append(m.span(1))
+            hits.append(m.span())
     return hits
 
 
@@ -394,7 +412,8 @@ _ACCOUNT_CUE = re.compile(
 
 def account_numbers(text):
     iban_spans = ibans(text)
-    return [m.span(1) for m in _ACCOUNT_CUE.finditer(text) if not _overlaps_any(m.span(1), iban_spans)]
+    # cue + value span, so a value in the turn after its cue touches the cue turn
+    return [m.span() for m in _ACCOUNT_CUE.finditer(text) if not _overlaps_any(m.span(1), iban_spans)]
 
 
 # ---------------------------------------------------------------- PROPERTY_ID
