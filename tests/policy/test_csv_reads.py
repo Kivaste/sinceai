@@ -21,21 +21,27 @@ KIT_READERS = {"load_catalog", "load_tables", "read_table", "load_holdout"}
 def scan_file(path: Path) -> list[str]:
     tree = ast.parse(path.read_text(encoding="utf-8-sig"), filename=str(path))
     local = {n.name for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)}
-    imported = {a.asname or a.name for n in ast.walk(tree) if isinstance(n, ast.ImportFrom)
-                and (n.module or "").split(".")[0] == "pandas" for a in n.names}
-    kit_imported = {a.asname or a.name for n in ast.walk(tree) if isinstance(n, ast.ImportFrom)
-                    and (n.module or "").split(".")[0] == "pets_eval" for a in n.names}
+    # name bound by `from M import orig as alias` -> (root package of M, orig): aliases resolve to the original symbol
+    origin = {a.asname or a.name: ((n.module or "").split(".")[0], a.name) for n in ast.walk(tree)
+              if isinstance(n, ast.ImportFrom) for a in n.names}
     bad = []
     for n in ast.walk(tree):
         if not isinstance(n, ast.Call):
             continue
         f = n.func
-        name = f.attr if isinstance(f, ast.Attribute) else f.id if isinstance(f, ast.Name) else None
-        if name in KIT_READERS and (isinstance(f, ast.Attribute) or name in kit_imported):
+        if isinstance(f, ast.Attribute):  # pd.read_csv, p.read_csv, k.load_tables: the attribute is the original name
+            name = f.attr
+        elif isinstance(f, ast.Name):
+            if f.id in local:
+                continue  # defined in this file, not a pandas / kit call
+            root, name = origin.get(f.id, ("", f.id))
+            if root not in ("pandas", "pets_eval"):
+                continue
+        else:
+            continue
+        if name in KIT_READERS:
             bad.append(f"{path.name}:{n.lineno} {name}")
         if name != "read_csv":
-            continue
-        if isinstance(f, ast.Name) and (name in local or name not in imported):
             continue
         kw = {k.arg: k.value for k in n.keywords}
         d, na = kw.get("dtype"), kw.get("keep_default_na")
@@ -74,4 +80,29 @@ def test_scan_passes_clean_and_local_wrapper(tmp_path):
     (tmp_path / "a.py").write_text("import pandas as pd\n"
                                    "pd.read_csv('x', dtype=str, keep_default_na=False, na_filter=False)\n"
                                    "def read_csv(p):\n    return p\nread_csv('y')\n")
+    assert scan_tree(tmp_path) == []
+
+
+def test_scan_flags_aliased_pandas_read_csv(tmp_path):
+    (tmp_path / "a.py").write_text("from pandas import read_csv as rc\nrc('x')\n")
+    assert scan_tree(tmp_path) == ["a.py:2 read_csv without dtype=str", "a.py:2 read_csv without keep_default_na=False"]
+
+
+def test_scan_flags_module_aliased_pandas(tmp_path):
+    (tmp_path / "a.py").write_text("import pandas as p\np.read_csv('x')\n")
+    assert len(scan_tree(tmp_path)) == 2
+
+
+def test_scan_flags_aliased_kit_reader(tmp_path):
+    (tmp_path / "a.py").write_text("from pets_eval.io import load_tables as lt\nlt(1)\n")
+    assert scan_tree(tmp_path) == ["a.py:2 load_tables"]
+
+
+def test_scan_flags_module_aliased_kit_reader(tmp_path):
+    (tmp_path / "a.py").write_text("from pets_eval import io as k\nk.load_catalog('r')\nimport pets_eval.io as q\nq.load_holdout(1)\n")
+    assert len(scan_tree(tmp_path)) == 2
+
+
+def test_scan_ignores_aliased_names_not_from_pandas_or_kit(tmp_path):
+    (tmp_path / "a.py").write_text("from mylib import read_csv as rc, load_tables as lt\nrc('x')\nlt(1)\n")
     assert scan_tree(tmp_path) == []
