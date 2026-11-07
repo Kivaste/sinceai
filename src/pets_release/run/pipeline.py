@@ -2,7 +2,7 @@
 
 Steps: load the scenario's dataset (01's ``Kit``, dtype=str) -> validate the hand plan (09) -> ``ladders.apply``
 (07) with release-scope keyed pseudonyms (06) -> local suppression of below-k persons (policy field, here) ->
-contract (10) -> producer context (``context.producer_context``, the same function ``verify --full`` uses) ->
+contract (10) -> full re-check of every purpose check (``run.purpose``; failing refuses, scores go in the manifest) -> producer context (``context.producer_context``, the same function ``verify --full`` uses) ->
 ``write_release`` (16: gate, manifest, signature, self-scan, atomic rename, ``<out>.scoring/``).
 """
 from __future__ import annotations
@@ -24,6 +24,7 @@ from pets_release.recipient import RecipientError, validate_recipient_id
 from pets_release.run.context import DEFAULT_RECIPIENT, SCENARIO_SPEC, producer_context, token_keys
 from pets_release.run.justify import JustificationError, justify, search_summary
 from pets_release.run.narrative import build_narrative
+from pets_release.run.purpose import evaluate as evaluate_purpose
 from pets_release.run.suppress import apply_suppression
 from pets_release.writer import Candidate, ProtectedTable, scoring_dir, write_release
 
@@ -104,6 +105,12 @@ def _search(scenario_id, policy, source, keys, kit, out: Path):
         raise RunRefused("search found no acceptable plan") from None
 
 
+def _refuse(out: Path, report: dict) -> None:
+    sc = scoring_dir(out)
+    sc.mkdir(parents=True)
+    (sc / "refusal_report.json").write_bytes(canonical_bytes(report))
+
+
 def run_release(*, kit, scenario: dict, created: str, key_text: str, out, plan_name: str,
                 tool_revision: str, recipient: str | None = None) -> RunOutcome:
     scenario_id = scenario.get("id")
@@ -163,11 +170,8 @@ def run_release(*, kit, scenario: dict, created: str, key_text: str, out, plan_n
     released, finals, suppressed, sup = apply_suppression(released, finals, policy=policy, contract=contract,
                                                           base_ctx=base)
     if not sup.get("withinBound", True):
-        sc = scoring_dir(out)
-        sc.mkdir(parents=True)
-        (sc / "refusal_report.json").write_bytes(canonical_bytes(
-            {"status": "refused", "scenario": scenario_id, "reasons": ["suppression:share-above-max"],
-             "suppression": sup}))
+        _refuse(out, {"status": "refused", "scenario": scenario_id, "reasons": ["suppression:share-above-max"],
+                      "suppression": sup})
         raise RunRefused("suppression share above the policy bound")
     if found is not None:
         # The search re-checked every purpose check on its own suppressed tables; release only those rows.
@@ -190,6 +194,15 @@ def run_release(*, kit, scenario: dict, created: str, key_text: str, out, plan_n
         if rm["original_record_id"].tolist() != finals[stem]:
             raise RunError("row-map reconstruction disagrees with lineage")
 
+    # Full re-check of every purpose check on full data after suppression: a publication prerequisite.
+    purpose = evaluate_purpose(policy, source, ordered, root=kit.root)
+    if not purpose.ok:
+        _refuse(out, {"status": "refused", "scenario": scenario_id, "reasons": list(purpose.reasons),
+                      "suppression": sup, "purpose": [dict(t) for t in purpose.tasks]})
+        if found is not None:
+            (scoring_dir(out) / SEARCH_LOG).write_bytes(search_log_bytes(found.log))
+        raise RunRefused("purpose checks failed on the final release: " + ", ".join(purpose.reasons))
+
     search_info, extra = None, {}
     if found is not None:
         try:
@@ -199,7 +212,7 @@ def run_release(*, kit, scenario: dict, created: str, key_text: str, out, plan_n
             raise RunError(str(e)) from None
         extra = {SEARCH_LOG: search_log_bytes(found.log)}
     narrative = build_narrative(policy=policy, plan=plan, scenario_ids=[s["id"] for s in kit.scenarios()],
-                                suppression=sup, k=contract["k"], search=search_info)
+                                suppression=sup, k=contract["k"], purpose=purpose, search=search_info)
     cand = Candidate(
         scenario=scenario_id, recipient=recipient, tables=tuple(tables), contract=contract,
         tool_revision=tool_revision, created=created, narrative=narrative,
