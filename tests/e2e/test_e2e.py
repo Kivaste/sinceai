@@ -141,7 +141,7 @@ def test_two_cli_runs_are_byte_identical(kit, tmp_path):
     rb = run_release(kit, b, hashseed="777")
     assert ra.returncode == 0, ra.stderr
     assert rb.returncode == 0, rb.stderr
-    assert (a / "manifest.json").is_file()
+    assert (a / "privacy_manifest.json").is_file()
     assert len(tree_digest(a)) > 1
     assert diff_trees(a, b) == []
 
@@ -189,21 +189,29 @@ def test_planted_network_call_inside_run_fails_the_run(kit, tmp_path):
     assert marker.is_file(), "the planted call was never reached by `run`"
     assert r.returncode != 0
     assert "offline guard" in r.stderr
-    assert not (out / "manifest.json").exists()
+    assert not (out / "privacy_manifest.json").exists()
 
 
 @needs_21
 def test_run_child_processes_inherit_the_block(kit, tmp_path):
-    """The run exports PETS_OFFLINE and the hook path so the scorecard subprocess is blocked too."""
+    """A plain python child launched from inside the run path (as the scorecard is) cannot open a socket."""
+    marker = tmp_path / "child.marker"
     wrapper = (
-        "import os, sys\n"
-        "from pets_release import cli\n"
-        "code = cli.main(sys.argv[1:])\n"
-        "print(json_env := os.environ.get('PETS_OFFLINE'))\n"
-        "raise SystemExit(code)\n"
+        "import subprocess, sys\n"
+        "from pathlib import Path\n"
+        "from pets_release import cli, kit as kitmod\n"
+        "orig = kitmod.Kit.load_dataset\n"
+        "def planted(self, *a, **k):\n"
+        "    c = subprocess.run([sys.executable, '-c', 'import socket; socket.socket()'], capture_output=True, text=True)\n"
+        "    Path(sys.argv[1]).write_text(str(c.returncode) + '|' + str('offline guard' in c.stderr))\n"
+        "    return orig(self, *a, **k)\n"
+        "kitmod.Kit.load_dataset = planted\n"
+        "raise SystemExit(cli.main(sys.argv[2:]))\n"
     )
     out = tmp_path / "o"
     args = ["run", "--scenario", "HEALTH-S1", "--kit", str(kit), "--out", str(out), "--created", CREATED]
-    r = run_python(wrapper, *args)
+    r = run_python(wrapper, str(marker), *args)
     assert r.returncode == 0, r.stderr
-    assert r.stdout.strip().endswith("1")
+    assert marker.is_file(), "the run never reached the planted child launch"
+    rc, guard = marker.read_text().split("|")
+    assert rc != "0" and guard == "True"
