@@ -91,6 +91,18 @@ def _cross_field_errors(m: dict) -> list[str]:
     gate = {c["check"]: c for c in m["gate"]["checks"]}
     ev = m["assertionEvidence"]
 
+    # A contract cannot silently opt out by stripping the plan's requires_check parameter.
+    # Both raw keep and the pseudonym fallback must have been checked on this candidate (#66).
+    turns = m["contract"]["files"].get("turns.csv", {}).get("columns", {})
+    if "turn_id" in turns:
+        params = turns["turn_id"]["params"]
+        record = gate.get("turn-id-synthetic")
+        if (params.get("requires_check") != "turn-id-synthetic" or record is None
+                or record["status"] != "pass" or record["scope"] != "producer"
+                or record["hits"] != 0 or record["denominator"]["unit"] != "turns"
+                or record["denominator"]["n"] < 1):
+            errs.append("$.contract.files.turns.csv.columns.turn_id: turn-id-prerequisite")
+
     by_check: dict[str, list[str]] = {}
     for name, rec in ev.items():
         by_check.setdefault(rec["check"], []).append(name)

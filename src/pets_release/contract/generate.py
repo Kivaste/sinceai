@@ -96,6 +96,9 @@ def generate(policy: Any, plan: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
         if name in spec:
             raise ContractError(f"{table}.{name}: duplicate release name")
         params: dict[str, Any] = {**body["params"], "rung": entry["rung"]}
+        if (policy.dataset, table, column) == ("customer_service", "turns", "turn_id"):
+            # Identity comes from policy, not removable/adversarial plan metadata (#66).
+            params["requires_check"] = "turn-id-synthetic"
         if name != column or entry["rung"].startswith("age."):
             params["derived_from"] = column
         spec[name] = {"form": body["form"], "params": dict(sorted(params.items()))}
@@ -312,6 +315,9 @@ def _validate_contract(contract: Mapping[str, Any]) -> None:
                 raise ContractError(f"{name}.{column}: form invalid")
             if not isinstance(body["params"], Mapping):
                 raise ContractError(f"{name}.{column}: params")
+            if (name, column) == ("turns.csv", "turn_id"):
+                if body["params"].get("requires_check") != "turn-id-synthetic":
+                    raise ContractError(f"{name}.{column}: turn-id prerequisite missing or invalid")
             _check_binding(name, column, body["params"], cols, required)
     for label, keys in (("qi", _QI_KEYS), ("tokens", _TOKEN_KEYS)):
         rows = contract[label]

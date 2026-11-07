@@ -11,19 +11,53 @@ between keeping ``turn_id`` and the release-scope pseudonym fallback.
 """
 from __future__ import annotations
 
+from types import SimpleNamespace
+
+import pandas as pd
+
+from pets_release.checks import registry
 from pets_release.checks.records import Outcome, Violation, locations
 from pets_release.checks.registry import register
 
 from . import _rules
 
 NAME = "turn-id-synthetic"
-VERSION = "1.0.0"
+VERSION = "1.1.0"
 FILE, COLUMN = "turns.csv", "turn_id"
 
 
 def assess(ids, conv, source, identifiers) -> dict[str, int]:
-    """Same rules on candidate columns (before release): ``{label: rows with a hit}``; empty = pass."""
-    return {label: len(rows) for label, rows in sorted(_rules.evaluate(ids, conv, source, list(identifiers)).items())}
+    """Execute the registered prerequisite before keep; unavailable/unknown selects the fallback.
+
+    This is a plan-selection assessment, not gate evidence. The gate executes the check again on
+    the written candidate. No on-disk assessment or previous record is consulted.
+    """
+    n = max(1, len(ids))
+    try:
+        selected = [c for c in registry.all_checks() if c.name == NAME]
+        if len(selected) != 1:
+            return {"unavailable": n}
+        check = selected[0]
+        if (check.version, check.scope, check.unit) != (VERSION, "producer", "turns"):
+            return {"unavailable": n}
+        frame = pd.DataFrame({COLUMN: ids.reset_index(drop=True),
+                              "conversation_id": conv.reset_index(drop=True)})
+        table = SimpleNamespace(header=tuple(frame.columns), frame=frame)
+        release = SimpleNamespace(csv_files=(FILE,), table=lambda name: table)
+        contract = {"files": {FILE: {"columns": {COLUMN: {}, "conversation_id": {}}}}, "tokens": []}
+        out = check.run(release, contract, {"source": source, "identifiers": list(identifiers)})
+        if (not isinstance(out, Outcome) or out.skipped or out.inapplicable
+                or type(out.n) is not int or out.n != len(ids) or out.n == 0):
+            return {"undetermined": n}
+        hits: dict[str, int] = {}
+        for violation in out.violations:
+            if (not isinstance(violation, Violation) or violation.check != NAME
+                    or type(violation.count) is not int or violation.count < 1):
+                return {"undetermined": n}
+            hits[violation.label] = hits.get(violation.label, 0) + violation.count
+        return dict(sorted(hits.items()))
+    except Exception:  # noqa: BLE001 (check errors never expose values or permit raw keep)
+        return {"unavailable": n}
 
 
 @register(name=NAME, version=VERSION, scope="producer", unit="turns", applies_to=(f"column:{FILE}/{COLUMN}",))
