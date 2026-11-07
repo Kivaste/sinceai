@@ -7,7 +7,8 @@
   powershell -NoProfile -File scripts/overnight/check-done-report.ps1 -Issue 61
 #>
 param([Parameter(Mandatory = $true)][int]$Issue, [string]$Repo = 'Kivaste/sinceai', [switch]$Quiet,
-      [string]$BodyFile)   # test hook: check a local done-report file instead of the issue's comments
+      [string]$BodyFile,   # test hook: check a local done-report file instead of the issue's comments
+      [string]$GhExe = 'gh')   # test hook: a process emitting the same UTF-8 JSON as gh
 $ErrorActionPreference = 'Stop'
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $problems = New-Object System.Collections.Generic.List[string]
@@ -19,7 +20,12 @@ if ($BodyFile) {
 }
 foreach ($try in 1..3) {
   if ($raw) { break }
-  $raw = & gh issue view $Issue -R $Repo --json number,title,labels,comments 2>$null | Out-String
+  # gh emits UTF-8; PS 5.1 otherwise decodes native stdout using the console code page.
+  $previousEncoding = [Console]::OutputEncoding
+  try {
+    [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)
+    $raw = & $GhExe issue view $Issue -R $Repo --json number,title,labels,comments 2>$null | Out-String
+  } finally { [Console]::OutputEncoding = $previousEncoding }
   if ($LASTEXITCODE -eq 0 -and $raw -match '^\s*\{') { break }
   $raw = $null; Start-Sleep -Seconds (2 * $try)
 }
