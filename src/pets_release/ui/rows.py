@@ -10,6 +10,7 @@ import re
 import subprocess
 import sys
 import tempfile
+from contextlib import contextmanager
 from pathlib import Path
 
 import pandas as pd
@@ -39,6 +40,16 @@ def verified_snapshot(release: Path, root: Path, env: dict, kit):
     The bytes returned are the bytes that passed ``verify --full`` with the server key, so a
     writer cannot swap a table or the manifest between the verify and the read.
     """
+    with snapshot(release, root) as (copy, manifest_bytes, payloads):
+        _verify_full(copy, env, kit)
+    return manifest_bytes, payloads
+
+
+@contextmanager
+def snapshot(release: Path, root: Path):
+    """Yield ``(folder, manifest_bytes, payloads)``: a private copy of the manifest and exactly
+    its listed files, read once from the live release. Callers verify and project only this copy;
+    the live folder is never re-read, so an A->B->A writer cannot change what was verified."""
     if release.is_symlink() or release.is_junction():
         raise ValueError("Release unavailable")
     release = release.resolve(strict=True)
@@ -67,18 +78,15 @@ def verified_snapshot(release: Path, root: Path, env: dict, kit):
     # Verify the exact immutable bytes we will parse. No check result is cached or manufactured.
     payloads = {}
     with tempfile.TemporaryDirectory(prefix="pets-ui-verify-") as temporary:
-        snapshot = Path(temporary)
-        (snapshot / "privacy_manifest.json").write_bytes(manifest_bytes)
+        copy = Path(temporary)
+        (copy / "privacy_manifest.json").write_bytes(manifest_bytes)
         for filename, digest in sorted(files.items()):
             payload = (release / filename).read_bytes()
             if hashlib.sha256(payload).hexdigest() != digest:
                 raise ValueError("Preview digest mismatch")
-            (snapshot / filename).write_bytes(payload)
+            (copy / filename).write_bytes(payload)
             payloads[filename] = payload
-        if manifest_path.read_bytes() != manifest_bytes:
-            raise ValueError("Manifest changed during preview")
-        _verify_full(snapshot, env, kit)
-    return manifest_bytes, payloads
+        yield copy, manifest_bytes, payloads
 
 
 def protected_rows(release: Path, root: Path, env: dict, kit, *, name=None, limit=10):

@@ -2,10 +2,12 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import io
 import subprocess
 import sys
 import threading
+import time
 from pathlib import Path
 
 import pandas as pd
@@ -16,6 +18,7 @@ from pets_release.offline import child_env
 from pets_release.policy import get_policy
 from pets_release.run.context import SCENARIO_SPEC
 from pets_release.ui.rows import protected_rows, verified_snapshot
+from pets_release.ui.rows import snapshot as release_snapshot
 from pets_release.ui.targets import target_rows
 
 SCENARIOS = ("HEALTH-S1", "CS-S1")
@@ -33,6 +36,27 @@ SCENARIO_DETAILS = {
 def scenarios():
     return [{**get_policy(name).to_json(), **SCENARIO_DETAILS[name], "recipient": RECIPIENTS[name],
              "supported": name in SCENARIO_SPEC} for name in SCENARIOS]
+
+
+MANIFEST = "privacy_manifest.json"
+PROOF_FIELDS = ("gate", "exportAssertions", "assertionEvidence", "measured", "sacrifices", "residualRisks",
+                "inventory", "pets", "fieldJustifications", "fitFor", "notFitFor", "personK", "targets",
+                "verification")
+
+
+def live_digests(release, root):
+    """sha256 of every entry in the live release folder; raises on links, junctions or folders."""
+    if release is None or release.is_symlink() or release.is_junction():
+        raise ValueError("Release unavailable")
+    release = release.resolve(strict=True)
+    if release.parent != root:
+        raise ValueError("Release outside root")
+    out = {}
+    for entry in release.iterdir():
+        if entry.is_symlink() or not entry.is_file():
+            raise ValueError("Unexpected release entry")
+        out[entry.name] = hashlib.sha256(entry.read_bytes()).hexdigest()
+    return out
 
 
 def gate_summary(checks):
@@ -80,11 +104,31 @@ class Jobs:
         self.lock = threading.Lock()
         self.number = 0
         self.release = None
+        self.verified = None  # name -> sha256 of the snapshot bytes both tiers verified
         self.state = {"status": "IDLE", "steps": []}
 
     def snapshot(self):
         with self.lock:
             return copy.deepcopy(self.state)
+
+    def proof_view(self):
+        """State for proof-bearing responses. RELEASED proof is shown only while the live folder
+        still holds exactly the bytes verified at run time (cheap re-hash, no full verify). Any
+        changed, missing or extra file withdraws the proof; the reason is content-free."""
+        with self.lock:
+            state, verified, release = copy.deepcopy(self.state), self.verified, self.release
+        if state["status"] != "RELEASED":
+            return state
+        try:
+            current = live_digests(release, self.root)
+        except Exception:  # noqa: BLE001 - unknown is a change; never reflect paths or values
+            current = None
+        if verified is not None and current == verified:
+            return state
+        for field in PROOF_FIELDS:
+            state.pop(field, None)
+        state["status"] = "CHANGED"
+        return state
 
     def update(self, **values):
         with self.lock:
@@ -96,6 +140,7 @@ class Jobs:
                 return False
             self.number += 1
             self.release = self.root / f"run-{self.number}"
+            self.verified = None
             self.state = {"status": "RUNNING", "scenario": scenario, "steps": [],
                           "supported": scenario in SCENARIO_SPEC, "targets": target_rows(scenario),
                           "policy": next(s for s in scenarios() if s["scenario"] == scenario)}
@@ -133,15 +178,26 @@ class Jobs:
             if validate_manifest_file(release):
                 self.update(status="FAILED")
                 return
-            manifest_bytes = (release / "privacy_manifest.json").read_bytes()
-            limited = self.command("verify (limited)", ["verify", release])
-            full = self.command("verify --full", ["verify", "--full", "--kit", args.kit, release])
-            # Proof is published only together with RELEASED, and only from the manifest bytes
-            # both tiers just verified. Any failure or change publishes no gate, scores or targets.
-            if limited != 0 or full != 0 or (release / "privacy_manifest.json").read_bytes() != manifest_bytes:
+            # Both tiers verify one private snapshot of the manifest and its listed files; the
+            # proof is projected from that snapshot's manifest bytes only. The live folder is
+            # never re-read for proof. Any failure publishes no gate, scores or targets.
+            with release_snapshot(release, self.root) as (folder, manifest_bytes, payloads):
+                limited = self.command("verify (limited)", ["verify", folder])
+                full = self.command("verify --full", ["verify", "--full", "--kit", args.kit, folder])
+            if limited != 0 or full != 0:
                 self.update(status="FAILED")
                 return
-            self.update(status="RELEASED", **proof_summary(scenario, loads_strict(manifest_bytes)))
+            manifest = loads_strict(manifest_bytes)
+            verified = {MANIFEST: hashlib.sha256(manifest_bytes).hexdigest(),
+                        **{name: hashlib.sha256(payload).hexdigest() for name, payload in payloads.items()}}
+            # Date and run number only: a minute-precision time is a raw-timestamp shape that the
+            # response scan (rightly) refuses.
+            stamp = {"at": time.strftime("%Y-%m-%d", time.gmtime()) + f" (run {release.name.split('-')[-1]}"
+                           " of this server session)",
+                     "revision": str(manifest["bindings"]["toolRevision"])[:12]}
+            with self.lock:
+                self.verified = verified
+                self.state.update(status="RELEASED", verification=stamp, **proof_summary(scenario, manifest))
         except Exception:  # noqa: BLE001 - unknown is failure; never reflect child output or values
             # Child output, exception strings and paths can contain values or key material.
             self.update(status="FAILED")

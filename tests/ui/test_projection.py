@@ -31,6 +31,7 @@ def test_views_never_label_not_applicable_as_passed():
     state = {"status": "RELEASED", "scenario": "HEALTH-S1", "steps": [{"name": "run", "exit": 0},
              {"name": "verify (limited)", "exit": 0}, {"name": "verify --full", "exit": 0}],
              "gate": gate_summary(CHECKS), "exportAssertions": {}, "assertionEvidence": {},
+             "verification": {"at": "2026-11-07 (run 1 of this server session)", "revision": "abcdef123456"},
              "measured": {"utility": {"status": "not_measured", "reason": "synthetic"}}, "sacrifices": [],
              "residualRisks": [], "personK": None, "targets": []}
     page = result_page(state)

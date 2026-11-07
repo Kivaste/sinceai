@@ -102,9 +102,10 @@ class Handler(BaseHTTPRequestHandler):
         if self.command == "GET" and path == "/api/scenarios":
             self.respond(200, scenarios())
         elif self.command == "GET" and path == "/api/result":
-            self.respond(200, jobs.snapshot())
+            # Proof-bearing: shown only while the live bytes equal the run-time verified snapshot.
+            self.respond(200, jobs.proof_view())
         elif self.command == "GET" and path.startswith("/demo/") and path[6:] in DEMONSTRATIONS:
-            self.respond(200, demonstration_page(jobs.snapshot(), path[6:], self.server.banner))
+            self.respond(200, demonstration_page(jobs.proof_view(), path[6:], self.server.banner))
         elif self.command == "GET" and path in ("/rows", "/api/rows"):
             try:
                 query = parse_qs(urlsplit(self.path).query, keep_blank_values=True)
@@ -141,7 +142,7 @@ class Handler(BaseHTTPRequestHandler):
         elif self.command == "GET" and path == "/":
             self.respond(200, choose_page(scenarios(), self.server.banner))
         elif self.command == "GET" and path == "/result":
-            self.respond(200, result_page(jobs.snapshot(), self.server.banner))
+            self.respond(200, result_page(jobs.proof_view(), self.server.banner))
         else:
             self.respond(404, "Not found")
 

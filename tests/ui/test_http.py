@@ -539,6 +539,8 @@ def test_protected_rows_require_current_verification_and_manifest_membership(tmp
         # A fresh display must fail too, even though the original run verified successfully.
         if case in {"tampered", "missing", "extra", "rowmap", "truth", "bad-contract"}:
             assert request(url, "/rows")[0] == 422
+            # A changed, missing or extra entry withdraws the run-time proof as well.
+            assert json.loads(request(url, "/api/result")[1])["status"] == "CHANGED"
 
 
 def test_targets_show_measured_values_and_never_assume_missing_results_pass(tmp_path):
@@ -672,9 +674,25 @@ def test_digest_consistent_cell_swap_with_stale_signature_is_never_served(tmp_pa
         assert result(url)["status"] == "RELEASED"
         assert request(url, "/api/rows?limit=2")[0] == 200
         assert request(url, "/dashboard")[0] == 200
+        page = request(url, "/result")[1]
+        assert "Verified (limited + full) at" in page and "checks passed" in page
         swap_cells_and_rebind_digest(out / "run-1", kit)
         for path in ("/api/rows?limit=2", "/api/rows?file=ed_visits.csv", "/rows", "/dashboard"):
             assert request(url, path)[0] == 422, path
+        # Proof pages never re-run full verify, so they must not reuse the run-time pass for
+        # bytes that changed since: no RELEASED, gate, assertions, person-k or met targets.
+        state = json.loads(request(url, "/api/result")[1])
+        assert state["status"] == "CHANGED"
+        for field in ("gate", "exportAssertions", "assertionEvidence", "personK", "targets", "measured"):
+            assert field not in state, field
+        page = request(url, "/result")[1]
+        assert "changed since verification" in page
+        for text in ("The gate passed", "checks passed", "Export assertions", "below k", ">met<"):
+            assert text not in page, text
+        for item in ("risks", "pets", "protected", "measurements", "limitations"):
+            demo = request(url, "/demo/" + item)[1]
+            for text in ("Gate ", ">met<", "accepted sacrifice", "keyed_pseudonym", "age.band10"):
+                assert text not in demo, (item, text)
 
 
 def test_planted_schema_valid_manifest_claim_is_not_rendered_as_dashboard(tmp_path):
