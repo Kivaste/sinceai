@@ -593,3 +593,29 @@ CS-S1 chain done-report + 4 reviews (23 + #53/#54/#56/#92) -> merge -> #63 -> 25
   5. #32: Grok delta APPROVE. Sonnet Spec CHANGES REQUIRED on AC3, which awaits a human decision (15:00 entry).
 - **Why:** Close and merge only on evidence (D31); one combined fix round per ticket.
 - **Evidence:** merger ses_e49e4d31; review sessions ses_e49e776e, ses_e49e75de, ses_e49e84b0, ses_e49e7a78, ses_e49e791c, ses_e49e7da5, ses_e49e7bf8, ses_e49e80f0, ses_e49e7f95.
+
+### Sat 15:10 - D46 applied (demoable cut); nudge 13:08Z handled
+
+- **When:** Sat 15:07-15:12 EET (heartbeat clock). Correction: the entry above headed "15:15" was written at about 15:05.
+- **Decision:**
+  1. **CS-S1 dropped (D46).** The #63 rebase lane (ses_e49f4e82) was interrupted. #65, #66 and #69 were never dispatched. "Deferred, D46" comments were posted on #24, #53, #54, #56, #63, #65, #66, #88 and #92, and their ready-for-agent labels removed (this stops the utilization monitor flagging them). The planning session told the chain owner to push its WIP and stop. The CS eval exports still ship under D37 (#30).
+     - #116 r3 fixer steered: the CS-S1 expectation stays refused/unsupported permanently. A crash exit must not pass, and the "unsupported" outcome is pinned by a test.
+     - #130 steered: the README states CS-S1 is unsupported, with skip reason `cs-s1-deferred-d46`.
+  2. **Tooling parked until the pin (#117 merge):** #124 and #125+#126 round-2 fixers (ses_e49e3870, ses_e49e4418) interrupted. #124, #125, #126 and #129 commented and unlabelled.
+  3. **Queued after the pin:** #133 and #134 natively blocked by #117.
+  4. **Dispatched (Opus, from integration e24fa05):**
+     - #132: rung-form check for validator-ID rungs. High, demo path, before the pin; 4 reviews in round 1.
+     - #80: writer self-scan of withheld source values. It merges after the recording, unless it is green on the real kit before the pin.
+     - #128: search keeps record keys. It merges after the recording and after #118, and avoids #118's lines in search.py.
+     - #128 was relabelled ready-for-agent + model:opus.
+  5. **#30 round 3** finished at 5a6b82f (Opus). Reviews dispatched: Grok Standards and Sol Spec. The Spec reviewer is asked what "complete bundle" means under D46.
+  6. **#117 fast track (D46):** when its round-2 head is ready, only high findings against D35/D41 block. It merges alone, ahead of the queue, and its merge commit is the pin.
+  7. **#32:** not merged and not closed; the human decides (D47).
+  8. **Nudge 13:08Z:**
+     - #131 is in ticket/fu110-scorecard-k (live owner ses_e4a02df0).
+     - #94 closes on the final proof.
+     - #121 waits on #117.
+     - #29-packager reviews are now dispatched.
+     - The remaining CS items are deferred (above).
+- **Why:** D46 (human, 15:05): a demoable HEALTH-S1 web-app cut pinned on the #117 merge by about 17:00.
+- **Evidence:** interrupt responses {"interrupted":true} x3; issue comments; sessions ses_e49de3e3 (#132), ses_e49de156 (#80), ses_e49dde65 (#128), ses_e49ddc6a / ses_e49dda89 (#30 reviews).
