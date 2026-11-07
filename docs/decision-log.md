@@ -82,3 +82,10 @@ Each entry records:
 - **Decision:** (1) Review rounds were not converging (each GPT round finds a new edge case). From the next round on, a reviewer returns CHANGES REQUIRED only for high-severity defects that break an acceptance criterion, the fail-closed rule, or leak values; everything else is listed as non-blocking and filed as a follow-up issue at merge. (2) Merged 14 (`0008cdc`, 22 tests green) and 01 (`83efaa0`, 62 green); follow-ups #40 and #41 filed; ticket 20 (detector, #21) dispatched on Sonnet once 01 landed. (3) 02 now merges after 04, because the assertion→check binding is enforced by importing 04's map (no duplicated table, no "when importable" fallback).
 - **Why:** Sat 09:00 story kit needs 04/06 → 16/17 → 21 → 22; endless rounds on non-critical edges put that at risk.
 - **Evidence:** #15 and #2 done-reports; follow-up issues #40, #41.
+
+### Sat 02:53 — model switch: GPT reviewer → xai/grok-4.7#medium
+
+- **When:** Sat 02:53 EET
+- **Decision:** `openai/gpt-6.1-sol` returned `subscription_sharing_usage_limit_exceeded`. New ticket reviews pair `opencode-go/deepseek-v4.1-flash` with `xai/grok-4.7#medium` (a third family, not Claude, so still independent of every implementer). GPT reviews already returned stay valid for their heads. Retry GPT for the final integration `/code-review` if the limit has reset.
+- **Why:** Two-family review is mandatory; Grok is the roster's remaining non-Claude family.
+- **Evidence:** 08 r5 GPT review session error.
