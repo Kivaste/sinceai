@@ -49,6 +49,32 @@ Exit codes: `0` success; `1` refusal or verify failure; `2` usage error or unkno
 
 The demo has three parts: HEALTH-S1 (ED visits to a university research group) in depth, CS-S1 (contact-centre transcripts to an LLM analytics vendor) for free text, and live detection on the `unseen` export.
 
+### Local web app
+
+Set `PETS_KIT` and `PETS_HMAC_KEY` in the server's environment as above. The key is never
+entered in, returned to, or logged by the browser. Choose a **new** output directory for
+each server launch; existing directories are refused rather than reused.
+
+<!-- docs-test: skip reason=starts-a-long-running-server -->
+```powershell
+python -m pets_release.ui --kit "$env:PETS_KIT" --out ..\sinceai-out\ui-demo --created 2026-11-07T08:00:00Z
+```
+
+Open the token-bearing URL printed at startup. The server binds only `127.0.0.1`
+(`--port 8765` by default; `--port 0` chooses a free port). Every request needs that
+launch's random token. Stop with Ctrl+C. Do not share the startup URL.
+
+Choose HEALTH-S1 to run the unchanged production CLI, see gate counts, both verification
+tiers, purpose scores, sacrifices and residual risks, then open the manifest-only dashboard.
+The UI has no external assets, row previews, table downloads, or row-map routes. The offline
+guard blocks new sockets in the server and its CLI children; only the pre-bound loopback
+listener accepts incoming connections. Release bytes match the CLI for the same inputs,
+key, creation time, plan and tool revision.
+
+CS-S1's policy is selectable, but this integration revision's production `run` pipeline
+supports only HEALTH-S1. A CS-S1 attempt is shown as **FAILED**, never as a release.
+The UI cannot bypass the production pipeline's refusal or an unavailable check.
+
 ### 1. Live detection on `unseen`
 
 <!-- docs-test: run -->

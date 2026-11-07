@@ -7,10 +7,10 @@ import sys
 import threading
 from pathlib import Path
 
+from pets_release.dashboard.render import render_html
 from pets_release.manifest import loads_strict, validate_manifest_file
 from pets_release.offline import child_env
 from pets_release.policy import get_policy
-from pets_release.dashboard.render import render_html
 
 SCENARIOS = ("HEALTH-S1", "CS-S1")
 RECIPIENTS = {"HEALTH-S1": "University research group", "CS-S1": "External LLM analytics vendor"}
@@ -88,7 +88,7 @@ class Jobs:
             limited = self.command("verify (limited)", ["verify", release])
             full = self.command("verify --full", ["verify", "--full", "--kit", args.kit, release])
             self.update(status="RELEASED" if limited == full == 0 else "FAILED")
-        except Exception:
+        except Exception:  # noqa: BLE001 - unknown is failure; never reflect child output or values
             # Child output, exception strings and paths can contain values or key material.
             self.update(status="FAILED")
 

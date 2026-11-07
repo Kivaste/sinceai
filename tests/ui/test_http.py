@@ -6,18 +6,17 @@ import os
 import subprocess
 import sys
 import time
-import pytest
 from contextlib import contextmanager
 from pathlib import Path
 from urllib.error import HTTPError
 from urllib.parse import parse_qs, urlsplit
 from urllib.request import Request, urlopen
 
+from pets_release.manifest import canonical_bytes
 from pets_release.manifest.value_scan import identifier_shape_counts
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "run"))
-from run_helpers import CREATED, ROOT, TEST_KEY, build_kit, coarse_qis
-from run_helpers import cli, run_args
+from run_helpers import CREATED, ROOT, TEST_KEY, build_kit, cli, coarse_qis, run_args
 
 
 def launch_args(kit, out, *extra):
@@ -96,7 +95,7 @@ def test_non_loopback_bind_is_refused(tmp_path):
     kit = build_kit(tmp_path / "kit", coarse_qis)
     for host in ("0.0.0.0", "192.0.2.1", "localhost", "::1"):
         proc = subprocess.run(launch_args(kit, tmp_path / "out", "--host", host), env=server_env(),
-                              cwd=ROOT, capture_output=True, text=True, timeout=20)
+                              cwd=ROOT, capture_output=True, text=True, timeout=20, check=False)
         assert proc.returncode == 2
         assert "only 127.0.0.1" in proc.stderr
 
@@ -172,7 +171,7 @@ def test_server_and_children_are_offline_while_loopback_http_works(tmp_path):
 
 def test_only_aggregate_routes_and_scanned_dashboard_are_served(tmp_path):
     """Rule: no filesystem routes, even planted files; dashboard uses current scanned manifest."""
-    with running(tmp_path) as (_, url, kit, out):
+    with running(tmp_path) as (_, url, _kit, out):
         for path in ("/kit/data/health/ed_visits.csv", "/ed_visits.csv", "/rowmap_ed_visits.csv",
                      "/../kit/metadata/scenarios.json", "/%2e%2e/kit/metadata/scenarios.json",
                      "/privacy_manifest.json", "/out/run-1/ed_visits.csv"):
@@ -187,8 +186,8 @@ def test_only_aggregate_routes_and_scanned_dashboard_are_served(tmp_path):
         assert "file:///" not in dashboard
         manifest_path = out / "run-1" / "privacy_manifest.json"
         manifest = json.loads(manifest_path.read_text())
-        manifest["residualRisks"][0]["note"] = "planted.person@example.test"
-        manifest_path.write_text(json.dumps(manifest))
+        manifest["residualRisks"][0]["description"] = "planted.person@example.test"
+        manifest_path.write_bytes(canonical_bytes(manifest))
         # Production scan must actually see the planted identifier; this is not an inert fixture.
         assert identifier_shape_counts(manifest).get("EMAIL", 0) > 0
         assert request(url, "/dashboard")[0] == 422
@@ -237,3 +236,51 @@ def test_choose_and_refused_result_views_show_purpose_and_failing_checks(tmp_pat
         assert status == 200
         assert "REFUSED" in refused and "rescan.payment-cards" in refused
         assert request(url, "/dashboard")[0] == 422
+
+
+def test_unsupported_methods_and_non_ascii_tokens_still_fail_closed(tmp_path):
+    """Rule: every verb authenticates; malformed credentials never produce reflected default errors."""
+    with running(tmp_path) as (_, url, _, _):
+        for verb in ("HEAD", "OPTIONS", "PUT", "DELETE", "TRACE", "BREW"):
+            assert request(url, "/api/run", auth=False, method=verb)[0] == 403
+            assert request(url, "/api/run", method=verb)[0] == 405
+        assert request(url, "/?token=%C3%A4", auth=False)[0] == 403
+        assert request(url, "/?" + urlsplit(url).query + "&token=", auth=False)[0] == 403
+
+
+def test_planted_server_key_in_manifest_cannot_reach_browser(tmp_path):
+    """Rule: even an identifier-shape-free key planted into an otherwise valid artefact is refused."""
+    with running(tmp_path) as (_, url, _, out):
+        assert request(url, "/api/run", data={"scenario": "HEALTH-S1"})[0] == 202
+        assert result(url)["status"] == "RELEASED"
+        path = out / "run-1" / "privacy_manifest.json"
+        manifest = json.loads(path.read_text())
+        manifest["residualRisks"][0]["description"] = TEST_KEY
+        assert identifier_shape_counts(TEST_KEY) == {}
+        path.write_bytes(canonical_bytes(manifest))
+        from pets_release.manifest import validate_manifest_file
+        assert validate_manifest_file(path.parent) == []
+        # Read directly so the precise regression is the response, not the helper's key assertion.
+        target = url.replace("/?", "/dashboard?")
+        try:
+            response = urlopen(target, timeout=30)
+        except HTTPError as exc:
+            response = exc
+        with response:
+            assert response.status == 422, "planted environment key reached an HTTP artefact"
+            body = response.read().decode()
+            assert TEST_KEY not in body and identifier_shape_counts(body) == {}
+
+
+def test_cs_attempt_reports_the_production_cli_failure_without_a_release(tmp_path):
+    """Coverage for the fenced upstream limitation: CS policy is selectable, not falsely RELEASED."""
+    with running(tmp_path) as (_, url, kit, out):
+        reference = cli("run", "--scenario", "CS-S1", "--kit", str(kit), "--out", str(tmp_path / "reference"),
+                        "--created", CREATED)
+        assert reference.returncode == 2  # this mini-kit has only health tables, even after CS support lands
+        assert request(url, "/api/run", data={"scenario": "CS-S1"})[0] == 202
+        report = result(url)
+        assert report["status"] == "FAILED"
+        assert report["steps"] == [{"name": "run", "exit": reference.returncode}]
+        assert not (out / "run-1").exists()
+        assert "FAILED" in request(url, "/result")[1]

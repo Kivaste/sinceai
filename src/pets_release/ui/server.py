@@ -1,18 +1,20 @@
 """Loopback UI command."""
-import argparse
-import hmac
-import secrets
-import json
-import socket
 import _socket
+import argparse
+import base64
+import hmac
+import html
+import json
 import os
-from socketserver import TCPServer
+import secrets
+import socket
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from socketserver import TCPServer
 from urllib.parse import parse_qs, urlsplit
 
-from pets_release.ui.jobs import Jobs, SCENARIOS, scenarios
-from pets_release.offline import install
 from pets_release.manifest.value_scan import identifier_shape_counts
+from pets_release.offline import install
+from pets_release.ui.jobs import SCENARIOS, Jobs, scenarios
 from pets_release.ui.views import choose_page, result_page
 
 
@@ -51,12 +53,25 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, *_):
         pass  # Requests carry capabilities; never log URLs or browser input.
 
+    def authorized(self):
+        try:
+            supplied = parse_qs(urlsplit(self.path).query, keep_blank_values=True).get("token", [])
+            return len(supplied) == 1 and hmac.compare_digest(supplied[0].encode(), self.server.token.encode())
+        except (ValueError, AttributeError):
+            return False
+
+    def send_error(self, code, message=None, explain=None):
+        # The stdlib error page reflects browser input and bypasses dispatch for unknown verbs.
+        self.respond(403 if not self.authorized() else (405 if code == 501 else code), "Request refused")
+
     def respond(self, status, body, content_type="text/html"):
         if identifier_shape_counts(body):
             status, body, content_type = 422, "Unsafe artefact refused", "text/plain"
         if not isinstance(body, str):
             body = json.dumps(body, sort_keys=True, separators=(",", ":"), allow_nan=False)
             content_type = "application/json"
+        if any(secret in html.unescape(body) for secret in self.server.key_shapes):
+            status, body, content_type = 422, "Unsafe artefact refused", "text/plain"
         body = body.encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", content_type + "; charset=utf-8")
@@ -68,11 +83,11 @@ class Handler(BaseHTTPRequestHandler):
                          "script-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; "
                          "frame-ancestors 'none'; form-action 'none'")
         self.end_headers()
-        self.wfile.write(body)
+        if self.command != "HEAD":
+            self.wfile.write(body)
 
     def dispatch(self):
-        supplied = parse_qs(urlsplit(self.path).query).get("token", [])
-        if len(supplied) != 1 or not hmac.compare_digest(supplied[0], self.server.token):
+        if not self.authorized():
             self.respond(403, "Forbidden")
             return
         path = urlsplit(self.path).path
@@ -84,7 +99,7 @@ class Handler(BaseHTTPRequestHandler):
         elif self.command == "GET" and path == "/dashboard":
             try:
                 dashboard = jobs.dashboard()
-            except Exception:
+            except Exception:  # noqa: BLE001 - fail closed without reflecting artefact contents
                 dashboard = None
             self.respond(200 if dashboard else 422, dashboard or "Dashboard unavailable")
         elif self.command == "POST" and path == "/api/run":
@@ -134,6 +149,8 @@ def serve(argv=None):
     install()
     server.jobs = Jobs(args)
     server.token = secrets.token_urlsafe(32)
+    key = os.environ["PETS_HMAC_KEY"]
+    server.key_shapes = (key, key.encode().hex(), base64.b64encode(key.encode()).decode())
     print(f"http://127.0.0.1:{server.server_port}/?token={server.token}", flush=True)
     try:
         server.serve_forever()
