@@ -7,7 +7,8 @@ import pytest
 from pets_release.kiteval.report import ScorecardRejected, validate_report
 
 REQUIRED = ("H-U2", "H-U4")
-TABLES = ("ed_visits", "lab_results")
+TABLES = {"ed_visits": 4, "lab_results": 3}  # original table -> original rows, as the adapter read them
+RELEASED = {"ed_visits": 4}  # protected table really in the release -> protected rows
 
 
 def _passing_report() -> dict:
@@ -85,7 +86,7 @@ def _validate(report: dict) -> dict:
         report,
         scenario="HEALTH-S1",
         required_tasks=REQUIRED,
-        tables=TABLES,
+        tables=TABLES, released=RELEASED,
     )
 
 
@@ -320,7 +321,7 @@ EXPECTED = {"ed_visits": {"free_text": ["chief_complaint"], "linkage": {"attacks
 
 
 def _validate_expecting(report):
-    return validate_report(report, scenario="HEALTH-S1", required_tasks=REQUIRED, tables=TABLES,
+    return validate_report(report, scenario="HEALTH-S1", required_tasks=REQUIRED, tables=TABLES, released=RELEASED,
                            expected_sections=EXPECTED)
 
 
@@ -402,7 +403,7 @@ def test_complete_report_passes_with_expected_sections():
 
 
 def _expecting(report, expected):
-    return validate_report(report, scenario="HEALTH-S1", required_tasks=REQUIRED, tables=TABLES,
+    return validate_report(report, scenario="HEALTH-S1", required_tasks=REQUIRED, tables=TABLES, released=RELEASED,
                            expected_sections={"ed_visits": expected})
 
 
@@ -617,3 +618,93 @@ def test_l_diversity_and_synthetic_need_a_positive_denominator(section, part, go
 
 def test_synthetic_section_must_be_an_object():
     _rejected(_extra(_passing_report(), "synthetic", [1]), {}, "structure")
+
+
+# ---- must-fix #64: the report's table status and counts must match the real release ----
+
+
+def _validate_against(report, *, tables=TABLES, released=RELEASED, expected=None):
+    return validate_report(report, scenario="HEALTH-S1", required_tasks=REQUIRED, tables=tables,
+                           released=released, expected_sections=expected)
+
+
+def _withheld_ed(report):
+    report["tables"]["ed_visits"] = {"table": "ed_visits", "status": "withheld", "rows_original": 4}
+    report["risk_components"] = {}
+
+
+def test_released_table_reported_as_withheld_is_a_fail():
+    """The H7 reproduction: scored H-U2, ed_visits marked withheld although it is in the release."""
+    report = _passing_report()
+    _withheld_ed(report)
+    with pytest.raises(ScorecardRejected) as caught:
+        _validate_against(report, expected={"ed_visits": {"columns": ["arrival_ts", "triage"]}})
+    assert caught.value.reason == "status_mismatch"
+
+
+def test_withheld_table_reported_as_released_is_a_fail():
+    report = _passing_report()
+    lab = dict(_ed(report), table="lab_results", rows_original=3)
+    report["tables"]["lab_results"] = lab
+    report["risk_components"]["lab_results: records with k<5"] = 0.5
+    _rejected_for(report, "status_mismatch")
+
+
+def _rejected_for(report, reason, **kw):
+    with pytest.raises(ScorecardRejected) as caught:
+        _validate_against(report, **kw)
+    assert caught.value.reason == reason
+
+
+def test_protected_row_count_must_match_the_release():
+    _rejected_for(_passing_report(), "row_count_mismatch", released={"ed_visits": 5})
+
+
+def test_original_row_count_must_match_the_original_tables():
+    _rejected_for(_passing_report(), "row_count_mismatch", tables={"ed_visits": 4, "lab_results": 9})
+    _rejected_for(_passing_report(), "row_count_mismatch", tables={"ed_visits": 7, "lab_results": 3})
+
+
+def test_report_table_the_original_does_not_have_is_a_fail():
+    report = _passing_report()
+    report["tables"]["ghost"] = {"table": "ghost", "status": "withheld", "rows_original": 1}
+    _rejected_for(report, "unknown_table")
+
+
+def test_released_table_the_original_does_not_have_is_a_fail():
+    _rejected_for(_passing_report(), "unknown_table", released={"ed_visits": 4, "ghost": 1})
+
+
+def test_a_release_with_no_released_table_is_a_fail_not_privacy_one():
+    report = _passing_report()
+    _withheld_ed(report)
+    report["summary"]["privacy"] = 1.0
+    _rejected_for(report, "no_released_table", released={})
+
+
+def test_empty_risk_components_are_not_proof_for_a_released_table():
+    report = _passing_report()
+    report["risk_components"] = {}
+    _rejected_for(report, "missing_section")
+
+
+def test_released_table_with_empty_risks_is_a_fail():
+    report = _passing_report()
+    _ed(report)["risks"] = {}
+    report["risk_components"] = {}
+    _rejected_for(report, "missing_section")
+
+
+def test_risk_components_must_be_exactly_the_released_tables_risks():
+    report = _passing_report()
+    report["risk_components"]["ed_visits: records with k<5"] = 0.1  # disagrees with the table record
+    _rejected_for(report, "risk_mismatch")
+    report = _passing_report()
+    report["risk_components"]["lab_results: records with k<5"] = 0.0  # a withheld table has no risks
+    _rejected_for(report, "risk_mismatch")
+
+
+@pytest.mark.parametrize("bad", [None, ("ed_visits",), {"ed_visits": "4"}, {"ed_visits": True}, {"ed_visits": -1}])
+def test_released_and_tables_must_be_name_to_row_count_maps(bad):
+    _rejected_for(_passing_report(), "structure", released=bad)
+    _rejected_for(_passing_report(), "structure", tables=bad)

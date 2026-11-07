@@ -15,6 +15,8 @@ from pets_eval import scorecard as kit_scorecard
 
 from pets_release.kiteval.report import ScorecardRejected, validate_report
 from pets_release.kiteval.rowmap import Lineage, RowMapRejected, validate_row_map
+from pets_release.offline import child_env
+from pets_release.offline import install as install_offline_guard
 
 
 def _tables(folder: Path) -> dict[str, Path]:
@@ -91,7 +93,11 @@ def run_scorecard(original_dir, protected_dir, *, scenario: str, root, rowmaps: 
     can only be checked structurally, not for swapped or wrongly suppressed records.
     All paths are resolved to absolute before the child starts (its cwd is out_dir).
 
-    Raises ScorecardRejected / RowMapRejected; nothing missing, errored or empty passes."""
+    Raises ScorecardRejected / RowMapRejected; nothing missing, errored or empty passes.
+
+    Offline: installs the guard in this process and launches the evaluator with `child_env`, whatever
+    route the caller came in by."""
+    install_offline_guard()
     original_dir, protected_dir, root, out_dir = (Path(p).resolve() for p in (original_dir, protected_dir, root, out_dir))
     rowmaps = {t: Path(p).resolve() for t, p in rowmaps.items()}
     if _inside(out_dir, protected_dir) or _inside(protected_dir, out_dir):
@@ -107,6 +113,8 @@ def run_scorecard(original_dir, protected_dir, *, scenario: str, root, rowmaps: 
     prot_files = _tables(protected_dir)
     catalog = kit_io.load_catalog(root)
     catalog = catalog[catalog.dataset == original_dir.name]
+    orig_rows = {name: len(pd.read_csv(f, dtype=str, keep_default_na=False)) for name, f in orig_files.items()}
+    prot_rows_by_table: dict[str, int] = {}
     for name, pfile in prot_files.items():
         if name not in orig_files:
             raise ScorecardRejected("unknown_table")
@@ -119,6 +127,7 @@ def run_scorecard(original_dir, protected_dir, *, scenario: str, root, rowmaps: 
         if key is None:
             raise RowMapRejected("no_source_key")
         prot_rows = len(pd.read_csv(pfile, dtype=str, keep_default_na=False))
+        prot_rows_by_table[name] = prot_rows
         validate_row_map(rowmaps[name], protected_rows=prot_rows, source_keys=orig[key], expected_lineage=lineage[name])
     if set(rowmaps) - set(prot_files):
         raise RowMapRejected("map_without_table")
@@ -132,7 +141,7 @@ def run_scorecard(original_dir, protected_dir, *, scenario: str, root, rowmaps: 
            "--out", str(out_dir)]
     for table in sorted(rowmaps):
         cmd += ["--rowmap", f"{table}={rowmaps[table]}"]
-    env = {**os.environ, "PYTHONUTF8": "1", "PYTHONDONTWRITEBYTECODE": "1", "TZ": "UTC"}
+    env = child_env({**os.environ, "PYTHONUTF8": "1", "PYTHONDONTWRITEBYTECODE": "1", "TZ": "UTC"})
     proc = subprocess.run(cmd, env=env, capture_output=True, check=False, cwd=str(out_dir))
     (out_dir / "evaluator.log").write_bytes(proc.stdout + b"\n--- stderr ---\n" + proc.stderr)
     if proc.returncode != 0:
@@ -142,7 +151,7 @@ def run_scorecard(original_dir, protected_dir, *, scenario: str, root, rowmaps: 
     except (OSError, ValueError):
         raise ScorecardRejected("structure") from None
     return validate_report(report, scenario=scenario, required_tasks=scen.get("utility_requirements", []),
-                           tables=orig_files, expected_sections=_expected_sections(
+                           tables=orig_rows, released=prot_rows_by_table, expected_sections=_expected_sections(
                                root, original_dir.name, scen, catalog, orig_files,
                                {n: pd.read_csv(p, dtype=str, nrows=0).columns for n, p in prot_files.items()}))
 
