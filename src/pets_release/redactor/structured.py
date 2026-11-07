@@ -367,7 +367,7 @@ class StructuredPass:
                         # the clause: mid-clause words after them are prose on the labelled train split
                         copula = _copula_then_hedges(text[s:e], [text[a:b] for a, b in spans[start:j]])
                         if label == "USERNAME" or strong_phrase or _has_cue(cue_words, STRONG_SECRET_CUES):
-                            ok = copula
+                            ok = copula or (label == "USERNAME" and j == start and _gate_username_word(val))
                         elif _has_cue(cue_words, NETWORK_KEY_CUES):
                             ok = copula and _clause_end(text, ve, spans, j, masks)
                         if ok:
@@ -674,6 +674,14 @@ def _credential_shaped(val: str) -> bool:
     return not re.search(r"\s", val) and gate_credential_shaped(val)
 
 
+def _gate_username_word(val: str) -> bool:
+    """A plain word directly after a username cue that the gate counts as the value (the gate's own rule,
+    shared rather than copied: handle-shaped, 3-64 characters, not prose or a stop word)."""
+    from pets_release.checks.text._detectors import _value_ok
+
+    return _value_ok("username", 3, 64, val, False, False, True)
+
+
 def _cue_word(w: str, cues: tuple[str, ...]) -> bool:
     """A token is a value cue: it matches a stem exactly, starts with a stem longer than 4 letters, or with a
     short stem followed by a non-letter ('pin-koodi', 'wpa2') or by an inflection ending ('wifin', 'pins'). A
@@ -718,15 +726,17 @@ def _phrase_cue(text: str, spans: list[tuple[int, int]], idx: int) -> int:
 
 
 def _credential_ahead(text: str, spans: list[tuple[int, int]], j: int, stop: int, masks=()) -> int | None:
-    """Index of a credential-shaped token (letters with digits/symbols/mixed case) after token ``j`` in the same
-    clause and scan window, or None. A comma does not end the clause: the gate's scan passes over it."""
+    """Index of a credential-shaped token (letters with digits/symbols/mixed case, or 3+ digits as the gate counts
+    them; never a date or clock time) after token ``j`` in the same clause and scan window, or None. A comma does
+    not end the clause: the gate's scan passes over it."""
     for k in range(j + 1, min(stop, len(spans))):
         if text[spans[k - 1][1] - 1] in _SENTENCE_END + ";":
             return None
         if any(spans[k][0] < b and a < spans[k][1] for a, b in masks):
             return None  # another identifier (e-mail, URL) ends the clause
         tok = text[spans[k][0]:_strip_trailing(text, spans[k][0], spans[k][1])]
-        if any(c.isalpha() for c in tok) and _credential_shaped(tok):
+        numeric = tok.isdigit() and len(tok) >= 3  # #54 r5: a digit-only credential counts too
+        if (any(c.isalpha() for c in tok) or numeric) and _credential_shaped(tok):
             return k
     return None
 
