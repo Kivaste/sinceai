@@ -24,7 +24,20 @@ param(
   [int]$Workers = 2
 )
 $ErrorActionPreference = 'Stop'
-$changed = @(git -C $Worktree diff --name-only "$Base...HEAD" 2>$null) + @(git -C $Worktree diff --name-only HEAD 2>$null) + @(git -C $Worktree ls-files --others --exclude-standard 2>$null)
+function Get-GitPaths([string[]]$Arguments) {
+  # Windows PowerShell turns native stderr into errors even for exit-0 warnings.
+  # Scope Continue to this call; only Git's exit status can authorize its paths.
+  try {
+    $ErrorActionPreference = 'Continue'
+    # Native commands update the global slot; null also fails if Git cannot start.
+    $global:LASTEXITCODE = $null
+    $output = @(& git -C $Worktree @Arguments 2>$null)
+    $code = $LASTEXITCODE
+  } finally { $ErrorActionPreference = 'Stop' }
+  if ($null -eq $code -or $code -ne 0) { throw "git $($Arguments -join ' ') failed (exit $code); cannot select affected tests" }
+  return $output
+}
+$changed = @(Get-GitPaths @('diff', '--name-only', "$Base...HEAD")) + @(Get-GitPaths @('diff', '--name-only', 'HEAD')) + @(Get-GitPaths @('ls-files', '--others', '--exclude-standard'))
 $changed = @($changed | Where-Object { $_ } | ForEach-Object { $_ -replace '\\', '/' } | Sort-Object -Unique)
 $sel = New-Object System.Collections.Generic.HashSet[string]
 $whole = $false

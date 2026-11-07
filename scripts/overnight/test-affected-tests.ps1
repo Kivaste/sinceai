@@ -1,5 +1,5 @@
 <# Exercise the production selector CLI with synthetic changed-file lists from a temporary Git repo. #>
-param([ValidateSet('planted', 'missing', 'marker', 'tooling', 'mapped', 'fallback', 'incomplete', 'clean', 'all')][string]$Case = 'all')
+param([ValidateSet('planted', 'missing', 'marker', 'tooling', 'mapped', 'fallback', 'incomplete', 'stderr', 'git-failure', 'clean', 'all')][string]$Case = 'all')
 $ErrorActionPreference = 'Stop'
 $selector = Join-Path $PSScriptRoot 'affected-tests.ps1'
 if ($Case -eq 'clean') {
@@ -56,10 +56,10 @@ function Plant([string]$Path, [string]$Text = '') {
   New-Item -ItemType Directory -Force -Path (Split-Path $full) | Out-Null
   [IO.File]::WriteAllText($full, $Text)
 }
-function Select-Tests {
+function Select-Tests([string]$Base = 'main') {
   try {
     $ErrorActionPreference = 'Continue'
-    $output = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $selector -Worktree $repo -Base main 2>&1 | Out-String
+    $output = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $selector -Worktree $repo -Base $Base 2>&1 | Out-String
     $code = $LASTEXITCODE
   } finally { $ErrorActionPreference = 'Stop' }
   return [pscustomobject]@{ code = $code; output = $output }
@@ -81,6 +81,34 @@ try {
     'tests/run/test_run.py', 'tests/run/test_unrelated.py', 'tests/verify/test_full.py', 'tests/e2e/test_e2e.py')) { Plant $path }
   Invoke-TestGit @('add', '.')
   Invoke-TestGit @('-c', 'user.name=test', '-c', 'user.email=test@example.invalid', 'commit', '-q', '-m', 'synthetic')
+  if ($Case -in @('stderr', 'all')) {
+    # Rule: successful Git stderr warnings never abort or contaminate selection.
+    # Failure row: autocrlf + tracked LF edit -> NativeCommandError, exit 1.
+    Invoke-TestGit @('config', 'core.autocrlf', 'true')
+    Plant 'tests/overnight/test_affected_tests.py' "# synthetic LF edit`n"
+    $warningPath = Join-Path $root 'git-warning.txt'
+    try {
+      $ErrorActionPreference = 'Continue'
+      $null = & git -C $repo diff --name-only HEAD 2>$warningPath
+      $code = $LASTEXITCODE
+    } finally { $ErrorActionPreference = 'Stop' }
+    Assert ($code -eq 0) 'warning fixture must be a successful Git command'
+    Assert ((Get-Content -LiteralPath $warningPath -Raw) -match 'LF will be replaced by CRLF') 'fixture did not produce the real Git stderr warning'
+    $result = Select-Tests
+    Assert ($result.code -eq 0) "selector must tolerate Git warnings: $($result.output)"
+    Assert ($result.output.Trim() -ceq 'changed files: 1; selection: tests/overnight/test_affected_tests.py') "warning changed selection: $($result.output)"
+    Plant 'tests/overnight/test_affected_tests.py'
+    Invoke-TestGit @('config', 'core.autocrlf', 'false')
+    Write-Output 'PASS stderr: real Git warning preserves successful exact selection'
+  }
+  if ($Case -in @('git-failure', 'all')) {
+    # Rule: a failed changed-file query must not return a partial/smoke selection.
+    # Preserved row: unknown base ref -> non-zero exit, no selection.
+    $result = Select-Tests -Base 'missing-base-ref'
+    Assert ($result.code -ne 0) "selector must fail closed on Git failure: $($result.output)"
+    Assert (-not $result.output.Contains('selection:')) "failed Git query must not publish a selection: $($result.output)"
+    Write-Output 'PASS git-failure: unknown base ref fails closed without selection'
+  }
   if ($Case -in @('mapped', 'all')) {
     # Rule: a known source file selects its tests/CLI consumers, not whole folders.
     # Failure row: writer/core.py -> entire writer + run + verify + e2e folders.
