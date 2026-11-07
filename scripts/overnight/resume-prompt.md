@@ -89,7 +89,9 @@ Every implementer and fixer uses **templates.md §1** and reports with **§4**. 
   - `verify` (limited) and `verify --full` for each;
   - the pets-eval scorecards;
   - `submission`.
-- **Record** the SHA, commands, exit codes and artefact paths in the decision log and the PR. Then the PR merge (§2.8).
+- **Record** the SHA, commands, exit codes and artefact paths in the decision log and the PR.
+- **Story finalisation, #103 (Sol; Standards = Grok, Spec = Sonnet):** resolve the conditional blocks in `docs/story/` against what merged, fill every `{{manifest.path}}` from the final-SHA manifests, and write `docs/story/final/`. The Sunday wizard reads only those files and refuses markers, placeholders and over-limit text.
+- **Then the PR merge** (§2.8), so the finalised story reaches `main`.
 - **Then `retro`** (read its SKILL.md) against this run's session logs. Prioritise automated safeguards and clearer navigation over longer steering files.
 
 ## 5. Always
