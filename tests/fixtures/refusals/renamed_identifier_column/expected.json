@@ -1,0 +1,19 @@
+{
+  "failing": {
+    "contract.columns": [
+      {
+        "column": "unlisted-column#0",
+        "count": 1,
+        "file": "visits.csv",
+        "locations": []
+      },
+      {
+        "column": "visit_token",
+        "count": 1,
+        "file": "visits.csv",
+        "locations": []
+      }
+    ]
+  },
+  "refused": true
+}
