@@ -150,14 +150,15 @@ class StructuredPass:
             hits.extend(self._cue_tokens(view, i, m))
             masks.append(m)
         runs = [turn_runs(i, t.text, masks[i]) for i, t in enumerate(view.turns)]
-        single: list[_Hit] = []
-        for i, rs in enumerate(runs):
+        # standalone and joined candidates compete as whole groups (see _resolve_groups): a split value
+        # beats a standalone reading of one of its fragments unless that reading has a stronger validator
+        groups: list[list[_Hit]] = []
+        for rs in runs:
             for r in rs:
-                single.extend(self._classify(view, [r]))
-        hits.extend(single)
-        # symbols inside a validated single-turn value are not available to cross-turn joins
-        claimed = {(h.turn_index, p) for h in single if h.priority >= PRIORITY_VALIDATED for p in range(h.start, h.end)}
-        hits.extend(self._joins(view, runs, claimed))
+                groups.extend(self._classify(view, [r]))
+        groups.extend(self._joins(view, runs))
+        groups.extend(self._email_joins(view, masks))
+        hits.extend(_resolve_groups(groups))
         hits.extend(self._hetu_tails(view, runs, hits))
         for h in hits:
             yield Candidate(h.turn_index, h.start, h.end, h.label, h.priority, h.key, self.name)
@@ -220,52 +221,43 @@ class StructuredPass:
 
     # ------------------------------------------------------- spelled emails
     def _spelled_emails(self, view: ConversationView, i: int, text: str, masks) -> list[_Hit]:
-        toks = [t for t in tokenize(text) if not any(t.start < b and a < t.end for a, b in masks)]
-        # merge 'snabel-a' / 'at-merkki' style tokens: word '-' word with no spaces
-        merged: list[Token] = []
-        j = 0
-        while j < len(toks):
-            t = toks[j]
-            if (j + 2 < len(toks) and toks[j + 1].text == "-" and toks[j + 1].start == t.end
-                    and toks[j + 2].start == toks[j + 1].end):
-                cand = (t.text + "-" + toks[j + 2].text).lower()
-                if cand in AT_WORDS:
-                    merged.append(Token(t.index, t.start, toks[j + 2].end, cand))
-                    j += 3
-                    continue
-            merged.append(t)
-            j += 1
-        toks = merged
+        toks = _email_tokens(text, masks)
         out: list[_Hit] = []
-        for k, t in enumerate(toks):
-            if t.text.lower() not in AT_WORDS or t.text == "@":
-                continue
-            # local part: word (joiner word)* ending just before the at-word
-            left = k - 1
-            if left < 0 or not _is_email_word(toks[left]):
-                continue
-            parts = [toks[left].text]
-            while left - 2 >= 0 and _joiner(toks[left - 1]) and _is_email_word(toks[left - 2]):
-                parts = [toks[left - 2].text, _joiner(toks[left - 1])] + parts
-                left -= 2
-            # domain: word (dot-word word)+
-            right = k + 1
-            if right >= len(toks) or not _is_email_word(toks[right]):
-                continue
-            dom = [toks[right].text]
-            ndots = 0
-            while right + 2 < len(toks) and _joiner(toks[right + 1]) and _is_email_word(toks[right + 2]):
-                if toks[right + 1].text.lower() in DOT_WORDS:
-                    ndots += 1
-                dom += [_joiner(toks[right + 1]), toks[right + 2].text]
-                right += 2
-            if ndots == 0:
-                continue
-            s, e = toks[left].start, toks[right].end
-            addr = ("".join(parts) + "@" + "".join(dom)).lower()
+        for lo, hi, addr in _email_matches(toks):
+            s, e = toks[lo].start, toks[hi].end
             out.append(_Hit(i, s, e, "EMAIL", PRIORITY_VALIDATED, "email\x00" + addr))
             masks.append((s, e))
         return out
+
+    def _email_joins(self, view: ConversationView, masks: list[list[tuple[int, int]]]) -> list[list[_Hit]]:
+        """Spelled-out e-mails continued in the next turn of the same speaker (only backchannel turns of
+        the other party in between, window <= join_window): one span per turn, one shared key.
+
+        A match over the joined token list that crosses the boundary necessarily contains the last token
+        of the first turn and the first token of the second (the chain breaks on any other token), so
+        the first part ends its turn and the second starts its turn."""
+        turns = view.turns
+        groups: list[list[_Hit]] = []
+        for i in range(len(turns)):
+            a = _email_tokens(turns[i].text, masks[i])
+            if not a:
+                continue
+            for j in range(i + 1, min(len(turns), i + self.join_window)):
+                if turns[j].speaker != turns[i].speaker:
+                    if not is_backchannel(turns[j].text):
+                        break
+                    continue
+                b = _email_tokens(turns[j].text, masks[j])
+                for lo, hi, addr in _email_matches(a + b):
+                    if lo < len(a) <= hi:
+                        key = "email\x00" + addr
+                        groups.append([
+                            _Hit(i, a[lo].start, a[-1].end, "EMAIL", PRIORITY_VALIDATED + 5, key),
+                            _Hit(j, b[0].start, b[hi - len(a)].end, "EMAIL", PRIORITY_VALIDATED + 5, key),
+                        ])
+                break
+        return groups
+
 
     # ------------------------------------------------------ SECRET/USERNAME
     def _cue_tokens(self, view: ConversationView, i: int, masks) -> list[_Hit]:
@@ -318,15 +310,15 @@ class StructuredPass:
         return out
 
     # ------------------------------------------------------ run classifier
-    def _classify(self, view: ConversationView, chain: list[Run], cross_only: bool = False,
-                  claimed: frozenset | set = frozenset()) -> list[_Hit]:
+    def _classify(self, view: ConversationView, chain: list[Run], cross_only: bool = False) -> list[list[_Hit]]:
+        """Validated/cued values in one run (or a cross-turn chain of runs); one group per value."""
         syms: list[Sym] = []
         owner: list[int] = []  # index into chain
         for ci, r in enumerate(chain):
             syms.extend(r.syms)
             owner.extend([ci] * len(r.syms))
         s = "".join(x.ch for x in syms)
-        used = [(chain[owner[q]].turn_index, syms[q].start) in claimed for q in range(len(s))]
+        used = [False] * len(s)
         found: list[tuple[int, int, str, int, str]] = []  # a, b, label, priority, key
 
         def take(a: int, b: int, label: str, prio: int, key: str) -> None:
@@ -382,7 +374,7 @@ class StructuredPass:
                 if done:
                     break
 
-        hits: list[_Hit] = []
+        groups: list[list[_Hit]] = []
         for a, b, label, prio, key in found:
             owners = sorted(set(owner[a:b]))
             if cross_only:
@@ -392,12 +384,14 @@ class StructuredPass:
                 per = [sum(1 for q in range(a, b) if owner[q] == ci) for ci in owners]
                 if min(per) < (4 if label in ("PAYMENT_CARD", "DEVICE_ID", "ACCOUNT_NUMBER") else 1):
                     continue
+            group = []
             for ci in owners:
                 idx = [q for q in range(a, b) if owner[q] == ci]
                 first, last = syms[idx[0]], syms[idx[-1]]
-                hits.append(_Hit(chain[ci].turn_index, first.start, last.end, label,
-                                 prio + (5 if len(owners) > 1 else 0), key))
-        return hits
+                group.append(_Hit(chain[ci].turn_index, first.start, last.end, label,
+                                  prio + (5 if len(owners) > 1 else 0), key))
+            groups.append(group)
+        return groups
 
     # ------------------------------------------------------ HETU tails
     def _hetu_tails(self, view: ConversationView, runs: list[list[Run]], hits: list[_Hit]) -> list[_Hit]:
@@ -420,7 +414,7 @@ class StructuredPass:
                                     key or "hetu-tail\x00" + s[a:b]))
         return out
 
-    def _partial_hetu(self, view: ConversationView, chain: list[Run]) -> list[_Hit]:
+    def _partial_hetu(self, view: ConversationView, chain: list[Run]) -> list[list[_Hit]]:
         """Fragments that together end like a HETU (some leading digits, then the tail) after a HETU cue:
         one span per fragment. The joined value cannot be checksum-validated, so a cue is required."""
         s = "".join(r.text for r in chain)
@@ -430,11 +424,11 @@ class StructuredPass:
         if not _has_cue(_wide_context(view, r0.turn_index, r0.syms[0].start), HETU_CUES):
             return []
         key = "hetu-partial\x00" + s
-        return [_Hit(r.turn_index, r.syms[0].start, r.syms[-1].end, "NATIONAL_ID", PRIORITY_CUE, key) for r in chain]
+        return [[_Hit(r.turn_index, r.syms[0].start, r.syms[-1].end, "NATIONAL_ID", PRIORITY_CUE, key) for r in chain]]
 
     # ------------------------------------------------------ N-turn joins
-    def _joins(self, view: ConversationView, runs: list[list[Run]], claimed: set) -> list[_Hit]:
-        out: list[_Hit] = []
+    def _joins(self, view: ConversationView, runs: list[list[Run]]) -> list[list[_Hit]]:
+        out: list[list[_Hit]] = []
         turns = view.turns
         for i, rs in enumerate(runs):
             if not rs or rs[-1].words_after > TAIL_SLACK:
@@ -449,7 +443,7 @@ class StructuredPass:
                 if not runs[j] or runs[j][0].words_before > HEAD_SLACK:
                     break
                 chain = chain + [runs[j][0]]
-                found = self._classify(view, chain, cross_only=True, claimed=claimed)
+                found = self._classify(view, chain, cross_only=True)
                 out.extend(found)
                 if not found:
                     out.extend(self._partial_hetu(view, chain))
@@ -518,6 +512,79 @@ def _alpha_credential(val: str) -> bool:
     if low in CREDENTIAL_PROSE or low in FILLER:
         return False
     return not re.search(r"(?:ttu|tty|nut|nyt|ttiin|tetty|tettu)$", low)
+
+
+def _email_tokens(text: str, masks) -> list[Token]:
+    """Unmasked tokens of a turn, with 'snabel-a' / 'at-merkki' style words merged into one token."""
+    toks = [t for t in tokenize(text) if not any(t.start < b and a < t.end for a, b in masks)]
+    merged: list[Token] = []
+    j = 0
+    while j < len(toks):
+        t = toks[j]
+        if (j + 2 < len(toks) and toks[j + 1].text == "-" and toks[j + 1].start == t.end
+                and toks[j + 2].start == toks[j + 1].end):
+            cand = (t.text + "-" + toks[j + 2].text).lower()
+            if cand in AT_WORDS:
+                merged.append(Token(t.index, t.start, toks[j + 2].end, cand))
+                j += 3
+                continue
+        merged.append(t)
+        j += 1
+    return merged
+
+
+def _email_matches(toks: list[Token]) -> list[tuple[int, int, str]]:
+    """Spelled-out addresses: local part (word (joiner word)*) + at-word + domain (word (joiner word)+ with
+    at least one dot-word). Returns (first token index, last token index, assembled address)."""
+    out: list[tuple[int, int, str]] = []
+    for k, t in enumerate(toks):
+        if t.text.lower() not in AT_WORDS or t.text == "@":
+            continue
+        left = k - 1
+        if left < 0 or not _is_email_word(toks[left]):
+            continue
+        parts = [toks[left].text]
+        while left - 2 >= 0 and _joiner(toks[left - 1]) and _is_email_word(toks[left - 2]):
+            parts = [toks[left - 2].text, _joiner(toks[left - 1])] + parts
+            left -= 2
+        right = k + 1
+        if right >= len(toks) or not _is_email_word(toks[right]):
+            continue
+        dom = [toks[right].text]
+        ndots = 0
+        while right + 2 < len(toks) and _joiner(toks[right + 1]) and _is_email_word(toks[right + 2]):
+            if toks[right + 1].text.lower() in DOT_WORDS:
+                ndots += 1
+            dom += [_joiner(toks[right + 1]), toks[right + 2].text]
+            right += 2
+        if ndots == 0:
+            continue
+        out.append((left, right, ("".join(parts) + "@" + "".join(dom)).lower()))
+    return out
+
+
+def _strength(h: _Hit) -> int:
+    """Validator strength for resolving standalone vs joined candidates: checksum (HETU mod-31, IBAN
+    mod-97) > Luhn > structure-only (phone, e-mail, ...) > cue-only."""
+    if h.priority < PRIORITY_VALIDATED:
+        return 0
+    return {"NATIONAL_ID": 3, "IBAN": 3, "PAYMENT_CARD": 2, "DEVICE_ID": 2}.get(h.label, 1)
+
+
+def _resolve_groups(groups: list[list[_Hit]]) -> list[_Hit]:
+    """Pick non-overlapping groups (a group = all fragments of one value). Stronger validator first,
+    then the longest span across the window, then earliest position. A group is kept or dropped whole."""
+    order = sorted(groups, key=lambda g: (-max(_strength(h) for h in g), -sum(h.end - h.start for h in g),
+                                          min((h.turn_index, h.start) for h in g), len(g)))
+    taken: dict[int, list[tuple[int, int]]] = {}
+    out: list[_Hit] = []
+    for g in order:
+        if any(h.start < e and s < h.end for h in g for s, e in taken.get(h.turn_index, [])):
+            continue
+        for h in g:
+            taken.setdefault(h.turn_index, []).append((h.start, h.end))
+        out.extend(g)
+    return out
 
 
 def _is_email_word(t: Token) -> bool:
