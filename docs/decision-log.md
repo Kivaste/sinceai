@@ -638,3 +638,14 @@ CS-S1 chain done-report + 4 reviews (23 + #53/#54/#56/#92) -> merge -> #63 -> 25
   - #121: the native #117 edge already exists. The branch flag is the #129 monitor defect.
 - **Why:** None of them can be dispatched. The edges and labels stop repeat flags.
 - **Evidence:** issue comments on #69, #94 and #131.
+
+### Sat 15:30 - nudge 13:28Z: #117 r2 and #118 r1 reviews dispatched; trains 20 running
+
+- **When:** Sat 15:28-15:30 EET
+- **Decision:**
+  1. #117 round 2 finished at 0fa353a (Sol). Real kit: HEALTH-S1 RELEASED, gate 41/41, both verify tiers exit 0, using explicit hand plans. Fast-track reviews (D46: only high findings against D35/D41 block): Grok Standards (ses_e49cd713) and Sonnet Spec (ses_e49cd51a). On approval it merges alone, and that merge commit is the pin.
+  2. #118 finished at dbbd7a9 (Opus, core). All 4 round-1 reviews dispatched: Grok and Sol on both axes. #118 blocks #127 (with #106).
+  3. #121 has a native blocked-by #117 edge; the branch flag is the #129 defect.
+  4. Merge train 20 (side/video-shot-list, docs-only, planning steer) is running (ses_e49cddb6).
+- **Why:** The D46 fast track; tier-1 fail-closed reviews.
+- **Evidence:** done-reports in sessions ses_e4a27f3f (#117) and ses_e4a0a7cb (#118).
