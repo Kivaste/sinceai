@@ -27,8 +27,12 @@ def test_redaction_measured_on_held_out_with_residual_risks(prepared, kit):
     red = M.redaction(kit, prepared.spans)
     assert measured_errors(_block(redaction=red["measured"])) == []
     assert red["measured"]["mode"] == "exact" and red["held"]
-    risks = {r["label"]: r for r in red["risks"]}
+    risks = {r["label"]: r for r in red["risks"] if r["kind"] == "text_recall"}
     assert set(risks) == set(M.RESIDUAL_LABELS)
+    # plus one per-label recall note per CS-S1 target label and SECRET precision (Sol r1 Spec)
+    notes = {r["risk"] for r in red["risks"] if r["kind"] == "note"}
+    assert notes == {"target-recall-iban", "target-recall-national-id", "target-recall-payment-card",
+                     "target-recall-secret", "target-precision-secret"}
     person = risks["PERSON"]["rate"]
     assert person["status"] == "measured" and 0 <= person["value"] <= 1
     assert person["denominator"] == {"unit": "turns", "n": len(red["held"])}
