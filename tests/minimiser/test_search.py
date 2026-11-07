@@ -145,6 +145,20 @@ def test_errors_never_waived(syn):
             assert e["scores"]["U-TOWN"] is not None and e["scores"]["U-TOWN"] >= 0.9
 
 
+def test_raising_check_is_an_error_never_waived(syn):
+    def purpose(task, orig, prot):
+        if task == "U-TOWN" and "town" in prot["visits"].columns and prot["visits"]["town"].nunique() < 6:
+            raise ValueError("boom")
+        return syn.purpose(task, orig, prot)
+
+    pol = syn.policy(sacrifices=(dict(syn.sacrifice, floor_score=0.0),))
+    log, _ = _log_or_refusal(lambda: _run(syn, pol, purpose=purpose))
+    assert any(e["scores"]["U-TOWN"] is None for e in log)  # the raising candidate was logged, not fatal
+    for e in log:
+        if e["accepted"]:
+            assert e["scores"]["U-TOWN"] is not None and e["scores"]["U-TOWN"] >= 0.9
+
+
 def test_full_recheck_after_suppression(syn):
     calls = []
 

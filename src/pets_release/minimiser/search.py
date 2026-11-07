@@ -97,6 +97,14 @@ def _norm(res) -> dict:
     return {"score": None, "status": status if status in ("not_answerable", "missing") else "error"}
 
 
+def _call(fn, task, original, protected) -> dict:
+    """Run one purpose check; a raise is an ``error`` result (message dropped: it could carry values)."""
+    try:
+        return _norm(fn(task, original, protected))
+    except Exception:  # noqa: BLE001
+        return {"score": None, "status": "error"}
+
+
 def _strict(r) -> bool:
     return r["status"] == "ok" and r["score"] is not None and r["score"] >= PASS
 
@@ -275,7 +283,7 @@ class _Search:
                 hits += 1
                 self.stats["cache_hits"] += 1
             else:
-                r = _norm(self.purpose(chk, self.src, prot))
+                r = _call(self.purpose, chk, self.src, prot)
                 self.cache[ck] = r
                 results[chk] = r
                 self.stats["cache_misses"] += 1
@@ -616,10 +624,13 @@ class _Search:
 
     def _final_purpose(self, prot) -> dict:
         if self.purpose_all is not None:
-            raw = self.purpose_all(self.src, prot)
+            try:
+                raw = list(self.purpose_all(self.src, prot))
+            except Exception:  # noqa: BLE001 - the message could carry values; every check counts as error
+                return {c: {"score": None, "status": "error"} for c in self.checks}
             # every returned task is judged; one outside the policy list is never an enumerated sacrifice
             return {r.get("id"): _norm(r) for r in raw}
-        return {c: _norm(self.purpose(c, self.src, prot)) for c in self.checks}
+        return {c: _call(self.purpose, c, self.src, prot) for c in self.checks}
 
     def suppress(self, full, plan):
         """Local suppression to reach k: drop all rows of persons below k (and their joined rows) to a fixpoint."""
