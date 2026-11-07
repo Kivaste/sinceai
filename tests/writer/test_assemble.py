@@ -11,7 +11,9 @@ import pytest
 from pets_release.checks import Outcome, Violation, all_checks, run_checks
 from pets_release.checks.registry import Check
 from pets_release.manifest import ASSERTION_EVIDENCE, required_assertions
+from pets_release.writer import write_release
 from pets_release.writer.assemble import evidence_for
+from writer_helpers import MASTER, make_candidate, make_kit, producer_context
 
 SCEN = "HEALTH-S1"
 
@@ -23,18 +25,17 @@ def stub(name, outcome, unit=None, applies_to=()):
 
 
 def _records(tmp_path, replace=None):
-    d = tmp_path / "r"
-    d.mkdir()
-    (d / "t.csv").write_text("a\n1\n", encoding="utf-8")
-    contract = {"files": {"t.csv": {"required": ["a"], "columns": {"a": {"form": "integer", "params": {}}}}},
-                "qi": [], "tokens": []}
+    """Records from the REAL registry (every producer.* check included) over a real written release folder,
+    with the synthetic producer context. Only checks named in ``replace`` are substituted, to force a status."""
+    cand = make_candidate()
+    kit = make_kit(tmp_path / "kit", cand)
+    ctx = producer_context(cand)
+    out = tmp_path / "rel"
+    res = write_release(cand, out, MASTER, kit, context=ctx)
+    assert res.status == "released", res.reasons
     checks = {c.name: c for c in all_checks()}
-    for name, c in list(checks.items()):  # producer checks need source context this toy folder lacks
-        if name.startswith("producer."):
-            checks[name] = Check(name=name, version=c.version, scope=c.scope, unit=c.unit,
-                                 run=lambda release, contract, context: Outcome(n=3))
     checks.update(replace or {})
-    return run_checks(d, contract, {"phase": "gate"}, checks=list(checks.values())).records
+    return run_checks(out, cand.contract, {**ctx, "phase": "gate"}, checks=list(checks.values())).records
 
 
 def test_clean_records_give_all_false_assertions(tmp_path):
