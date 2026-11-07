@@ -72,18 +72,19 @@ def done_report_cli(tmp_path):
     runner = tmp_path / "run.ps1"
     # Reproduce the non-UTF-8 console code page even on UTF-8 developer machines.
     runner.write_text(
-        "param([string]$Script, [string]$BodyFile, [string]$GhExe)\n"
+        "param([string]$Script, [string]$BodyFile, [string]$GhExe, [switch]$TestMode)\n"
         "$ErrorActionPreference = 'Stop'\n"
         "[Console]::OutputEncoding = [Text.Encoding]::GetEncoding(1252)\n"
-        "if ($BodyFile) { & $Script -Issue 102 -BodyFile $BodyFile }\n"
-        "else { & $Script -Issue 102 -GhExe $GhExe }\n"
+        "$mode = @{}; if ($TestMode) { $mode.TestMode = $true }\n"
+        "if ($BodyFile) { & $Script -Issue 102 -BodyFile $BodyFile @mode }\n"
+        "else { & $Script -Issue 102 -GhExe $GhExe @mode }\n"
         "$result = $LASTEXITCODE\n"
         "if ([Console]::OutputEncoding.CodePage -ne 1252) { throw 'Console encoding leaked' }\n"
         "exit $result\n",
         encoding="ascii",
     )
 
-    def run(report, *, via_gh, unreadable=False):
+    def run(report, *, via_gh, unreadable=False, test_mode=True):
         body_file = tmp_path / "body.md"
         body_file.write_text(report, encoding="utf-8")
         payload.write_text(
@@ -101,12 +102,31 @@ def done_report_cli(tmp_path):
             [
                 POWERSHELL, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(runner),
                 str(script), *(["-GhExe", str(gh)] if via_gh else ["-BodyFile", str(body_file)]),
+                *(["-TestMode"] if test_mode else []),
             ],
             check=False, capture_output=True, text=True, encoding="utf-8", errors="replace",
             env=env, timeout=60,
         )
 
     return body, run
+
+
+def test_gh_substitute_requires_explicit_test_mode_despite_planted_file(done_report_cli, tmp_path):
+    body, run = done_report_cli
+    (tmp_path / "repo" / ".test-mode").write_text("enabled", encoding="ascii")
+    result = run(body.replace("ARROW", "->"), via_gh=True, test_mode=False)
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert "UNKNOWN: -GhExe requires -TestMode" in result.stdout
+    assert "PASS #102" not in result.stdout
+
+
+def test_body_substitute_requires_explicit_test_mode_despite_planted_file(done_report_cli, tmp_path):
+    body, run = done_report_cli
+    (tmp_path / "repo" / ".test-mode").write_text("enabled", encoding="ascii")
+    result = run(body.replace("ARROW", "->"), via_gh=False, test_mode=False)
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert "UNKNOWN: -BodyFile requires -TestMode" in result.stdout
+    assert "PASS #102" not in result.stdout
 
 
 @pytest.mark.parametrize("arrow", ["\u2192", "->"], ids=["unicode", "ascii"])
