@@ -2,6 +2,7 @@
 
 import base64
 import hashlib
+import hmac
 import logging
 import pickle
 
@@ -11,6 +12,7 @@ from pets_release.pseudonym import (
     KeyConfigError,
     MasterKey,
     Scope,
+    SecretKey,
     hkdf_sha256,
     manifest_signing_key,
     pseudonymiser_for,
@@ -32,6 +34,41 @@ def test_key_from_env_requires_at_least_32_chars():
     with pytest.raises(KeyConfigError):
         MasterKey.from_env({"PETS_HMAC_KEY": "x" * 31})
     MasterKey.from_env({"PETS_HMAC_KEY": "x" * 32})
+
+
+def _exception_texts(exc: BaseException) -> str:
+    """str/repr of the exception and every chained cause/context."""
+    parts, seen = [], set()
+    while exc is not None and id(exc) not in seen:
+        seen.add(id(exc))
+        parts += [str(exc), repr(exc), repr(exc.args)]
+        exc = exc.__cause__ or exc.__context__
+    return "\n".join(parts)
+
+
+def test_unencodable_key_raises_content_free_config_error():
+    # unpaired surrogate: not encodable as UTF-8
+    bad = "synthetic-key-" + "\ud800" + "-padding-0123456789abcdef"
+    for call in (
+        lambda: MasterKey.from_text(bad),
+        lambda: MasterKey.from_env({"PETS_HMAC_KEY": bad}),
+    ):
+        with pytest.raises(KeyConfigError) as e:
+            call()
+        text = _exception_texts(e.value)
+        assert "synthetic-key-" not in text
+        assert "padding-0123456789abcdef" not in text
+        # no chained codec error (it would hold the key text)
+        assert e.value.__cause__ is None and e.value.__context__ is None
+
+
+@pytest.mark.parametrize("n", [0, 1, 31])
+def test_raw_key_constructors_enforce_the_minimum_length(n):
+    with pytest.raises(KeyConfigError):
+        MasterKey(b"k" * n)
+    with pytest.raises(KeyConfigError):
+        SecretKey(b"k" * n, "test")
+    MasterKey(b"k" * 32)
 
 
 def test_key_from_env_reads_process_environment(monkeypatch):
@@ -67,10 +104,8 @@ def test_recipient_and_signing_keys_follow_the_pinned_derivation():
     master = MasterKey.from_text(TEST_KEY)
     ikm = TEST_KEY.encode()
     msg = b"probe"
-    import hmac as _h
-
-    expected_r = _h.new(hkdf_sha256(ikm, info=b"uni"), msg, hashlib.sha256).digest()
-    expected_s = _h.new(
+    expected_r = hmac.new(hkdf_sha256(ikm, info=b"uni"), msg, hashlib.sha256).digest()
+    expected_s = hmac.new(
         hkdf_sha256(ikm, info=b"manifest-signature"), msg, hashlib.sha256
     ).digest()
     assert recipient_key(master, "uni").hmac_sha256(msg) == expected_r
@@ -139,6 +174,32 @@ def test_release_scope_id_rejects_non_digest_inputs():
         )
 
 
+def test_release_scope_id_rejects_digest_with_trailing_newline():
+    with pytest.raises(ValueError):
+        release_scope_id(
+            scenario="S",
+            recipient=None,
+            input_digests={"t": D1 + "\n"},
+            tool_revision="r",
+        )
+
+
+def test_release_scope_id_canonical_bytes_are_utf8_sorted_compact():
+    # pinned bytes: sorted keys, separators (",", ":"), raw UTF-8 (no \\u escapes)
+    canonical = (
+        '{"inputs":{"t":"' + D1 + '"},"recipient":null,'
+        '"scenario":"HÄLSA-S1","toolRevision":"rév"}'
+    ).encode("utf-8")
+    expected = hashlib.sha256(canonical).hexdigest()[:16]
+    got = release_scope_id(
+        scenario="HÄLSA-S1",
+        recipient=None,
+        input_digests={"t": D1},
+        tool_revision="rév",
+    )
+    assert got == expected
+
+
 # --- the key never leaks ----------------------------------------------------
 
 
@@ -177,7 +238,7 @@ def test_key_never_appears_in_returned_structures_logs_or_exceptions(caplog):
     def capture(fn):
         try:
             fn()
-        except Exception as e:  # noqa: BLE001 - the text is what we scan
+        except (TypeError, ValueError) as e:
             texts.append(f"{type(e).__name__}: {e!s} {e!r}")
         else:
             raise AssertionError("expected an exception")
