@@ -86,6 +86,35 @@ def _order(errs: list[str], path: str, items: list, key) -> None:
         errs.append(f"{path}: order")
 
 
+def _rung_step_errors(m: dict) -> list[str]:
+    """#89: a released sacrifice-only rung needs exactly one sacrifice ``rungStep`` for that column and rung,
+    whose measured k at ``from`` exceeds the budget and whose check still scores >= 0.9 (fail closed); every
+    ``rungStep`` must match a released field at its ``to`` rung."""
+    from pets_release.ladders import SACRIFICE_ONLY_RUNGS
+    from pets_release.run.purpose import THRESHOLD
+
+    errs = []
+    steps = [(i, s) for i, s in enumerate(m["sacrifices"]) if "rungStep" in s]
+    released = {(f["table"], f["column"]): f["rung"] for f in m["fieldJustifications"] if f["decision"] == "released"}
+    for (t, c), rung in sorted(released.items()):
+        if rung not in SACRIFICE_ONLY_RUNGS:
+            continue
+        match = [s for _, s in steps if (s["rungStep"]["table"], s["rungStep"]["column"], s["rungStep"]["to"])
+                 == (t, c, rung)]
+        if len(match) != 1:
+            errs.append(f"{_fmt(['fieldJustifications'])}: {t}.{c}: rung-sacrifice-missing")
+    for i, s in steps:
+        st = s["rungStep"]
+        at = st["atFrom"]
+        if released.get((st["table"], st["column"])) != st["to"] or st["from"] == st["to"]:
+            errs.append(f"{_fmt(['sacrifices', i, 'rungStep'])}: field-mismatch")
+        if not at["share"] > at["maxShare"] or at["unitsSuppressed"] > at["unitsBefore"]:
+            errs.append(f"{_fmt(['sacrifices', i, 'rungStep', 'atFrom'])}: budget-not-exceeded")
+        if not isinstance(s["after"], (int, float)) or isinstance(s["after"], bool) or not s["after"] >= THRESHOLD:
+            errs.append(f"{_fmt(['sacrifices', i, 'after'])}: rung-sacrifice-check-not-strict")
+    return errs
+
+
 def _cross_field_errors(m: dict) -> list[str]:
     errs: list[str] = []
     gate = {c["check"]: c for c in m["gate"]["checks"]}
@@ -130,6 +159,7 @@ def _cross_field_errors(m: dict) -> list[str]:
             errs.append(f"{_fmt(['contract', 'files', f, 'required'])}: not-in-columns")
     _order(errs, "$.gate.checks", m["gate"]["checks"], tk("check"))
     _order(errs, "$.sacrifices", m["sacrifices"], tk("check"))
+    errs += _rung_step_errors(m)
     _order(errs, "$.residualRisks", m["residualRisks"], tk("risk"))
     _order(errs, "$.fitFor", m["fitFor"], tk("scenario"))
     _order(errs, "$.notFitFor", m["notFitFor"], tk("scenario"))

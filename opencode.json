@@ -5,5 +5,36 @@
     { "action": "external_directory", "resource": "*", "effect": "allow" },
     { "action": "read", "resource": "*.env", "effect": "allow" },
     { "action": "read", "resource": "*.env.*", "effect": "allow" }
+  ],
+  "policies": [
+    { "action": "tool.use", "resource": "read:*TRUSTED_PETS_PROVING_GROUND_2026/data/*", "effect": "deny" },
+    { "action": "tool.use", "resource": "read:*TRUSTED_PETS_PROVING_GROUND_2026/truth/*", "effect": "deny" },
+    { "action": "tool.use", "resource": "read:*TRUSTED_PETS_PROVING_GROUND_2026/adversary/*", "effect": "deny" },
+    { "action": "tool.use", "resource": "read:*TRUSTED_PETS_PROVING_GROUND_2026/holdout/*", "effect": "deny" },
+    { "action": "tool.use", "resource": "read:*TRUSTED_PETS_PROVING_GROUND_2026/metadata/*", "effect": "deny" },
+    { "action": "tool.use", "resource": "read:*TRUSTED_PETS_PROVING_GROUND_2026/data/*.md", "effect": "allow" },
+    { "action": "tool.use", "resource": "read:*TRUSTED_PETS_PROVING_GROUND_2026/metadata/*.md", "effect": "allow" },
+
+    { "action": "tool.use", "resource": "shell:Get-Content *TRUSTED_PETS_PROVING_GROUND_2026*", "effect": "deny" },
+    { "action": "tool.use", "resource": "shell:gc *TRUSTED_PETS_PROVING_GROUND_2026*", "effect": "deny" },
+    { "action": "tool.use", "resource": "shell:cat *TRUSTED_PETS_PROVING_GROUND_2026*", "effect": "deny" },
+    { "action": "tool.use", "resource": "shell:type *TRUSTED_PETS_PROVING_GROUND_2026*", "effect": "deny" },
+    { "action": "tool.use", "resource": "shell:more *TRUSTED_PETS_PROVING_GROUND_2026*", "effect": "deny" },
+    { "action": "tool.use", "resource": "shell:less *TRUSTED_PETS_PROVING_GROUND_2026*", "effect": "deny" },
+    { "action": "tool.use", "resource": "shell:head *TRUSTED_PETS_PROVING_GROUND_2026*", "effect": "deny" },
+    { "action": "tool.use", "resource": "shell:tail *TRUSTED_PETS_PROVING_GROUND_2026*", "effect": "deny" },
+    { "action": "tool.use", "resource": "shell:Import-Csv *TRUSTED_PETS_PROVING_GROUND_2026*", "effect": "deny" },
+    { "action": "tool.use", "resource": "shell:ipcsv *TRUSTED_PETS_PROVING_GROUND_2026*", "effect": "deny" },
+    { "action": "tool.use", "resource": "shell:Select-String *TRUSTED_PETS_PROVING_GROUND_2026*", "effect": "deny" },
+    { "action": "tool.use", "resource": "shell:sls *TRUSTED_PETS_PROVING_GROUND_2026*", "effect": "deny" },
+    { "action": "tool.use", "resource": "shell:findstr *TRUSTED_PETS_PROVING_GROUND_2026*", "effect": "deny" },
+    { "action": "tool.use", "resource": "shell:rg *TRUSTED_PETS_PROVING_GROUND_2026*", "effect": "deny" },
+    { "action": "tool.use", "resource": "shell:grep *TRUSTED_PETS_PROVING_GROUND_2026*", "effect": "deny" },
+    { "action": "tool.use", "resource": "shell:sed *TRUSTED_PETS_PROVING_GROUND_2026*", "effect": "deny" },
+    { "action": "tool.use", "resource": "shell:awk *TRUSTED_PETS_PROVING_GROUND_2026*", "effect": "deny" },
+    { "action": "tool.use", "resource": "shell:Format-Hex *TRUSTED_PETS_PROVING_GROUND_2026*", "effect": "deny" },
+    { "action": "tool.use", "resource": "shell:*ReadAll*TRUSTED_PETS_PROVING_GROUND_2026*", "effect": "deny" },
+    { "action": "tool.use", "resource": "shell:py* -c *TRUSTED_PETS_PROVING_GROUND_2026*", "effect": "deny" },
+    { "action": "tool.use", "resource": "shell:uv run py* -c *TRUSTED_PETS_PROVING_GROUND_2026*", "effect": "deny" }
   ]
 }
