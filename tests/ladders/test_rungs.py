@@ -88,7 +88,7 @@ def test_month_hour_keeps_hour_of_day_distribution():
 
 
 def test_month_hour_parses_in_pets_eval_with_same_hours():
-    pe = pytest.importorskip("pets_eval.parse")
+    import pets_eval.parse as pe  # required (kit toolkit on the venv path): missing must fail, not skip
     vals = ["2025-03-14 14:37:05", "2025-07-02 03:01:00", "2025-07-30 23:59:59"]
     out = _one("ts.month_hour", vals)["x"]
     assert list(pe.to_hour(out)) == [14, 3, 23]
@@ -216,7 +216,7 @@ def test_numeric_bin_matches_form_and_parses_in_pets_eval():
     out = _one("num.bin", ["12", "19.9", "-3", "20", "x"], {"width": 10})["x"]
     assert list(out) == ["[10,20)", "[10,20)", "[-10,0)", "[20,30)", ""]
     assert all(_matches("num.bin", v) for v in out if v)
-    pe = pytest.importorskip("pets_eval.parse")
+    import pets_eval.parse as pe  # required (kit toolkit on the venv path): missing must fail, not skip
     parsed = pe.parse_numeric(out.iloc[:4])
     assert parsed.notna().all() and abs(parsed.iloc[0] - 15) < 1e-6
 
@@ -315,7 +315,7 @@ def test_hour_of_day_drops_the_date_entirely():
 
 
 def test_hour_of_day_distribution_identical_via_pets_eval():
-    pe = pytest.importorskip("pets_eval.parse")
+    import pets_eval.parse as pe  # required (kit toolkit on the venv path): missing must fail, not skip
     vals = [f"2025-{m:02d}-{d:02d} {h:02d}:{(m * d) % 60:02d}:11" for m in (1, 5, 9) for d in (3, 17) for h in range(24)]
     out = _one("ts.hour_of_day", vals + ["", "junk"])["x"]
     got = pe.to_hour(out).dropna().astype(int).value_counts().sort_index()

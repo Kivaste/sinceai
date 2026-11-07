@@ -116,9 +116,9 @@ def test_no_cell_equals_original_where_generalised():
 
 
 def test_real_pseudonymiser_via_adapter_is_hex64_deterministic_and_keyed():
-    ps = pytest.importorskip("pets_release.pseudonym")
-    master = ps.MasterKey.from_env({"PETS_HMAC_KEY": "k" * 40}) if hasattr(ps.MasterKey, "from_env") else None
-    assert master is not None
+    import pets_release.pseudonym as ps  # first-party and required: an import error must fail, not skip
+
+    master = ps.MasterKey.from_env({"PETS_HMAC_KEY": "k" * 40})
     scope = ps.Scope.release("0123456789abcdef")
 
     def run(recipient):
