@@ -105,11 +105,11 @@ def _as_cs(m):
     m["release"]["releaseScopeId"] = _scope_id(m)
     # a CS-S1 contract: its provenance must resolve in the CS-S1 policy's source schema (#62 round 3), so the
     # HEALTH-S1 tables are replaced by one synthetic conversations column justified from its CS-S1 source.
-    m["contract"] = {"files": {"conversations.csv": {"columns": {"intent": {"form": "^[a-z_]{1,32}$", "params": {}}},
+    m["contract"] = {"files": {"conversations.csv": {"columns": {"intent": {"form": "^[a-z_]{1,32}$", "params": {"rung": "keep"}}},
                                                       "required": ["intent"]}},
                      "qi": [], "tokens": []}
     m["fieldJustifications"] = [{"table": "conversations", "column": "intent", "outputColumn": "intent",
-                                 "decision": "released", "rung": "exact", "floor": "exact", "reason": "CS-U1",
+                                 "decision": "released", "rung": "keep", "floor": "keep", "reason": "CS-U1",
                                  "source": "hand"}]
     m["bindings"]["files"] = {"conversations.csv": "a" * 64}
     _rebind_contract(m)
