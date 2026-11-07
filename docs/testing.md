@@ -80,6 +80,110 @@ than absolute timings on a loaded machine. Review and commit the generated list;
 never commit raw logs or kit data. New unprofiled synthetic tests remain fast
 until the next refresh; real-kit tests are slow immediately.
 
+## Release smoke (D34, issue #116)
+
+The real-kit smoke is an **explicit script tier**, not a pytest test/marker. Neither
+the default pytest invocation, `-m "not slow"`, nor `-m slow` executes it. Only its
+small synthetic regression tests live under `tests/smoke/` and belong to the fast
+tier. This uses D34's script alternative, keeping the product smoke out of both
+existing tiers without changing the shared collection hooks or pytest config.
+
+After the slow tier is green, the merger runs this from the exact, clean merged
+checkout (docs-only batches remain exempt). Use the same UTF-8, UTC and external
+bytecode-cache environment described above:
+
+```powershell
+$sha = git rev-parse HEAD
+python scripts/release_smoke.py --sha $sha
+```
+
+`--kit` overrides `PETS_KIT`, otherwise the pinned kit path is used. A selected kit
+without `results/benchmark.json` fails, with no fallback to another kit. The script
+executes the production CLI, with a fresh in-memory HMAC key passed only through
+`PETS_HMAC_KEY`. It never prints or saves child stdout/stderr. Protected tables and
+private scoring artefacts stay outside the checkout, in a new attempt directory.
+
+- HEALTH-S1 must release; both verify tiers and the dashboard then run.
+- HEALTH-S1's **measured delivery is opt-in**, requested only with
+  `--measured-delivery`. It runs `python -m pets_release.measure.wire`, then both
+  verify tiers and the dashboard on that measured release. This adds actual
+  scoring, baseline assembly, final manifest scan and publication coverage
+  (#120), beyond D34's default lanes. When requested, its verdict under
+  `delivery.HEALTH-S1` is additionally mandatory for overall success. Otherwise
+  that entry is exactly `{"status":"not-requested","pass":null}`: no measured
+  CLI executes, no gate pass is claimed, and it does not affect the default-lane
+  verdict. Neither boolean `true` nor `false` is a valid unrequested verdict.
+- CS-S1 follows `tests/smoke/expectations.json` **read from Git at that SHA**, not
+  from the working file or the presence of a release. **D46 drops CS-S1 from this
+  submission permanently**: its committed expectation is `refused` (including
+  the explicitly recognised unsupported outcome), with no later flip to
+  `released`. It must still execute the real `run --scenario CS-S1` CLI.
+  Unsupported passes only on completed exit 2, empty stdout, no release or
+  scoring path, and stderr exactly equal to this real CLI diagnostic, including
+  its final newline:
+
+  ```text
+  pets-release run: run supports only HEALTH-S1 in this build; the CS-S1 release needs ticket 23 and its search is follow-up #96
+  ```
+
+  This message is pinned at the real CLI seam. The historic ticket references
+  above are part of the current CLI diagnostic, not a promise of CS-S1 support.
+  Missing handlers, bare exit 2, extra output, process errors and planted paths
+  fail; no gate pass is invented for unsupported. Generic expected refusals
+  still require actual gate failure counts. Requested measured HEALTH-S1 delivery
+  always requires `released` (#120 is a defect, not an expected refusal).
+- A release needs all expected CLI exits, explicit limited/full verify messages,
+  passing applicable gate checks, person-k at the policy target (where applicable),
+  every policy/catalogue purpose check at its threshold or enumerated sacrifice
+  floor, and a nonempty dashboard. Registry `not_applicable` is recorded separately;
+  error/not-run/missing checks never pass.
+- An expected refusal needs exit 1, no published release, and actual gate failure
+  names and positive hit counts. Exit 2 is unknown, **not** a valid refusal,
+  except for the exact CS-S1 unsupported contract above.
+- Dirty checkouts, SHA mismatch, unavailable inputs, identity drift, missing steps,
+  errors and timeouts fail. In particular, a missing or errored **requested**
+  measured CLI fails even when the plain release passes; there is no fallback
+  to the plain verdict. `--timeout` sets the shared CLI budget (default **900
+  seconds**). With `--measured-delivery`, the plain and measured lanes run
+  concurrently, each with fresh output paths and the same in-memory key.
+  Expectations, tool revision and input digests never come from a planted pass file.
+
+### Runtime measurements and budget
+
+At `0d1b51f99c7042135b054670b2d95b8ab2da4146`, real-kit HEALTH-S1's plain run
+took 568.641 seconds; limited verify 15.848, full verify 58.269, dashboard 1.842,
+and CS-S1 1.689: **646.289 seconds** across the default D34 steps. The slower
+attempt at the same revision totalled **712.593 seconds** (604.094 + 23.959 +
+79.005 + 3.228 + 2.307). These timings included competing measured delivery.
+The default budget is derived from the slower observation with 25% margin,
+rounded up to a whole minute: `ceil(712.593 * 1.25 / 60) * 60 = 900` seconds.
+It is a fail-closed ceiling, **not a replacement for the approximately six-minute
+runtime target**. Fresh default-only wall time is reported against the exact
+tested SHA; any target overrun remains an explicit unknown for the human.
+
+Measured delivery's run alone took **1128.120 seconds**, plus limited verify
+9.978, full verify 41.648, and dashboard 1.378. It timed out at the former
+720-second budget and passed only with an explicit 1800-second budget. It is
+therefore outside the default per-merge tier. For optional delivery coverage:
+
+```powershell
+python scripts/release_smoke.py --sha $sha --measured-delivery --timeout 1800
+```
+
+Each invocation atomically replaces
+`C:\Users\kivas\AI\sinceai-out\smoke\<full SHA>\smoke.json`, initially with a failed
+record and then with the observed result. It includes the revision, scenario-catalogue
+digest, input-table digests, each step's exit/status/seconds, gate counts, failure
+counts, k and purpose aggregates, dashboard presence and scenario/overall verdicts.
+The writer validates exact record keys at every level and canonical JSON (sorted
+keys, fixed separators). Dynamic maps contain only schema/check names and aggregates.
+`--validate-record <path>` checks this format only; it **never** supplies fresh
+merge evidence or replaces executing the smoke. `--out-root` is available for isolated
+rehearsals/tests but must be outside the checkout.
+
+A nonzero smoke is a red merge gate, even if earlier tiers passed. The planning
+session owns adding this command to the merger template after this ticket lands.
+
 ## Checkout-write guard
 
 `tests/conftest.py` identifies the running tests' checkout with Git, not the

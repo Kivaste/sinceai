@@ -1,4 +1,4 @@
-﻿"""Follow-up #89 through the real CLI (seam: `pets-release run` / `pets-release verify`). Synthetic rows only.
+"""Follow-up #89 through the real CLI (seam: `pets-release run` / `pets-release verify`). Synthetic rows only.
 
 Rule: the HEALTH-S1 hand plan releases arrival_ts at ts.month_hour. It moves to ts.hour_of_day (coarser than
 month, sacrifice-only) only as the policy-enumerated rung sacrifice, only when per-person k measured at
@@ -27,6 +27,18 @@ verify tiers fail.
      -> verify passes                               -> test_verify_refuses_contract_column_no_justification_backs
   C7 arrival_ts relabelled keep (justification + contract) with an hour-only regex and cells -> verify passes
                                                     -> test_verify_refuses_rung_off_the_policy_ladder
+
+Follow-up #132. Rule: a validator-ID rung (id.pseudonym: hex64, num.round: decimal) may declare an anchored regex
+instead of its validator only if that regex provably narrows the validator; any other form refuses with
+rung-form-mismatch, so a widened form can never let a non-matching cell through.
+  C8 re-signed release whose id.pseudonym column declares ^.*$ and holds a cell the validator rejects
+     -> limited and full verify exit 0              -> test_verify_refuses_widened_validator_form
+
+Follow-up #132 round 2. Rule: a text-backed rung (validator form ``text``: keep, geo.*, text.redacted) must declare
+exactly ``text``; the text checks scan only ``text``-form columns, so a regex substitute hides the column from them.
+  C9 re-signed release with two text columns, one re-declared ^.*$ and holding a planted health-lexicon term (a
+     text.health hit while it is declared text) -> verify exit 0
+                                                    -> test_verify_refuses_text_column_hidden_from_text_checks
 """
 from __future__ import annotations
 
@@ -275,3 +287,75 @@ def test_verify_refuses_rung_off_the_policy_ladder(released, tmp_path):
     res = cli("verify", str(dst))
     assert res.returncode == 1, res.stdout + res.stderr
     assert "ed_visits.arrival_ts: rung-not-on-ladder" in res.stdout
+
+
+def test_verify_refuses_widened_validator_form(released, tmp_path):
+    """C8 (#132): an id.pseudonym column's form widened to ^.*$ and one cell hex64 rejects (HEALTH-S1 releases no
+    num.round column); bindings and the signature are recomputed, so only the rung-form rule can tell."""
+    rung = "id.pseudonym"
+    import hashlib
+
+    from pets_release.manifest import canonical_bytes
+
+    kit, out, proc = released
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    dst = tmp_path / "rel"
+    shutil.copytree(out, dst)
+    m = _manifest(dst)
+    fj = next(f for f in m["fieldJustifications"] if f["decision"] == "released" and f["rung"] == rung)
+    file, col = f"{fj['table']}.csv", fj["outputColumn"]
+    p = dst / file
+    df = pd.read_csv(p, dtype=str, keep_default_na=False, na_filter=False)
+    df.loc[0, col] = "x"  # synthetic; not hex64
+    df.to_csv(p, index=False, encoding="utf-8", lineterminator="\n")
+    m["bindings"]["files"][file] = hashlib.sha256(p.read_bytes()).hexdigest()
+    m["contract"]["files"][file]["columns"][col]["form"] = "^.*$"
+    _resign(m)
+    (dst / "privacy_manifest.json").write_bytes(canonical_bytes(m))
+    want = f"{fj['table']}.{fj['column']}: rung-form-mismatch"
+    lim = cli("verify", str(dst))
+    assert lim.returncode == 1, lim.stdout + lim.stderr
+    assert want in lim.stdout
+    full = cli("verify", "--full", "--kit", str(kit), str(dst))
+    assert full.returncode == 1, full.stdout + full.stderr
+    assert want in full.stdout
+
+
+def test_verify_refuses_text_column_hidden_from_text_checks(released, tmp_path):
+    """C9 (#132 r2): one of the release's text-form columns gets a cell holding a bundled health-lexicon term.
+    Declared ``text``, verify fails on the re-run text.health count (control). Re-declared ``^.*$`` with bindings
+    and signature recomputed, the column leaves the text checks' scope while another text column keeps them
+    applicable, so only the rung-form rule can tell."""
+    import hashlib
+
+    from pets_release.manifest import canonical_bytes
+
+    _, out, proc = released
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    m0 = _manifest(out)
+    texts = [f for f in m0["fieldJustifications"] if f["decision"] == "released" and m0["contract"]["files"][
+        f"{f['table']}.csv"]["columns"][f["outputColumn"]]["form"] == "text"]
+    assert len(texts) >= 2
+    fj = texts[0]
+    file, col = f"{fj['table']}.csv", fj["outputColumn"]
+
+    def plant(name, form):
+        dst = tmp_path / name
+        shutil.copytree(out, dst)
+        m = _manifest(dst)
+        p = dst / file
+        df = pd.read_csv(p, dtype=str, keep_default_na=False, na_filter=False)
+        df.loc[0, col] = "asthma"  # a bundled health-lexicon term
+        df.to_csv(p, index=False, encoding="utf-8", lineterminator="\n")
+        m["bindings"]["files"][file] = hashlib.sha256(p.read_bytes()).hexdigest()
+        m["contract"]["files"][file]["columns"][col]["form"] = form
+        _resign(m)
+        (dst / "privacy_manifest.json").write_bytes(canonical_bytes(m))
+        return dst
+
+    control = cli("verify", str(plant("control", "text")))
+    assert control.returncode == 1, control.stdout + control.stderr
+    assert "gate:text.health:HEALTH" in control.stdout  # the re-run counts the planted term
+    res = cli("verify", str(plant("hidden", "^.*$")))
+    assert res.returncode == 1, res.stdout + res.stderr
+    assert f"{fj['table']}.{fj['column']}: rung-form-mismatch" in res.stdout
