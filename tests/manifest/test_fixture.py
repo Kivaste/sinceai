@@ -18,6 +18,16 @@ from pets_release.manifest import (
     validate_manifest_file,
 )
 
+def test_fixture_claims_only_registered_checks():
+    """A recipient verify on the fixture re-runs every claimed check, so an unregistered claim fails it."""
+    from pets_release.checks.registry import all_checks
+
+    registered = {c.name for c in all_checks()}
+    m = json.loads((Path(__file__).resolve().parents[1] / "fixtures" / "manifest" / "release" / MANIFEST_FILENAME).read_text("utf-8"))
+    claimed = {c["check"] for c in m["gate"]["checks"]} | {e["check"] for e in m["assertionEvidence"].values()}
+    assert claimed - registered == set()
+
+
 RELEASE_DIR = Path(__file__).resolve().parents[1] / "fixtures" / "manifest" / "release"
 
 
