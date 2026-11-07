@@ -1,4 +1,4 @@
-﻿"""Personas on a tiny synthetic world (8 visits, 6 people). Seam: pure functions on DataFrames."""
+"""Personas on a tiny synthetic world (8 visits, 6 people). Seam: pure functions on DataFrames."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from pets_attacker import personas
 from pets_attacker.linkage import QI, RungError
 from pets_attacker.personas import AGGREGATE_KEYS, MappingError
 
-RUNGS = {"arrival_ts": "ts.exact", "municipality": "keep"}
+RUNGS = {"arrival_ts": "ts.exact", "municipality": "keep", "patient_name": "keep"}
 
 
 def insider_attack(*a, **k):
@@ -127,7 +127,7 @@ def test_single_target_ladder_release_is_certain():
     adv = pd.DataFrame({"adv_row_id": ["a0"], "t": ["2025-03-20T10:10:00"], "p": ["Kaarina"]})
     atruth = pd.DataFrame({"adv_row_id": ["a0"], "person_id": ["p0"]})
     qis = [QI("time", ("t",), ("arrival_ts",), window=(1, 1)), QI("exact", ("p",), ("municipality",))]
-    out = broker_attack(adv, atruth, prot, rm, ident, qis, rungs={"arrival_ts": "ts.month_hour", "municipality": "geo.topn"}, original=orig, record_key="visit_id", sensitive="icd10_primary")
+    out = broker_attack(adv, atruth, prot, rm, ident, qis, rungs={"arrival_ts": "ts.month_hour", "municipality": "geo.topn", "patient_name": "keep"}, original=orig, record_key="visit_id", sensitive="icd10_primary")
     assert out["reidentification_rate"] == 1.0 and out["attribute_inference_rate"] == 1.0  # truncated ICD is a prefix
 
 
