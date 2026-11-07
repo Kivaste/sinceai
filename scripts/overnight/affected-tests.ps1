@@ -71,7 +71,13 @@ if ($Run) {
   $env:PYTHONUTF8 = '1'; $env:TZ = 'UTC'; $env:PYTHONPATH = 'src'
   Remove-Item Env:PYTHONDONTWRITEBYTECODE -ErrorAction SilentlyContinue
   $env:PYTHONPYCACHEPREFIX = Join-Path $env:LOCALAPPDATA 'sinceai-pycache'
-  $py = Join-Path (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path '.venv\Scripts\python.exe'
+  $repo = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
+  # Git identity selects the same shared interpreter for every linked worktree.
+  # Never prefer a worktree-local executable merely because a file exists there.
+  $common = git -C $repo rev-parse --path-format=absolute --git-common-dir
+  if ($LASTEXITCODE -ne 0) { throw 'Cannot resolve the shared checkout for Python.' }
+  $py = Join-Path (Split-Path -Parent $common) '.venv\Scripts\python.exe'
+  "interpreter: $py"
   Push-Location $Worktree
   try { & $py -m pytest -n $Workers -q -p no:cacheprovider -m 'not slow' @paths; exit $LASTEXITCODE } finally { Pop-Location }
 }

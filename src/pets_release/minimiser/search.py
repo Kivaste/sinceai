@@ -33,7 +33,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from pets_release.ladders import LADDERS, WITHHELD, apply, output_column
+from pets_release.ladders import LADDERS, SACRIFICE_ONLY_RUNGS, WITHHELD, apply, output_column
 from pets_release.policy.model import validate_plan
 
 from . import risk as R
@@ -118,6 +118,10 @@ def _call(fn, task, original, protected) -> dict:
         return {"score": None, "status": "error"}
 
 
+def _num(x) -> bool:
+    return isinstance(x, (int, float)) and not isinstance(x, bool) and math.isfinite(x)
+
+
 def _strict(r) -> bool:
     return r["status"] == "ok" and r["score"] is not None and r["score"] >= PASS
 
@@ -146,6 +150,8 @@ class _Search:
         self.sacr = {s["check"]: s for s in policy.sacrifices}
         self.via_all = {(v["table"], v["column"]) for s in policy.sacrifices for v in s["via"]}
         self.floor_rung = {key: f.rung for key, f in policy.floors.items()}
+        self.rung_sacr = {(rs["table"], rs["column"]): rs for rs in policy.rung_sacrifices}
+        self.rung_steps: dict = {}  # key -> measured record of an adopted enumerated rung sacrifice (#89)
         self.start_ev = self.base_ev = None  # set by run() once the start and the strict phases are adopted
         self._units()
         self._check_inputs()
@@ -191,7 +197,8 @@ class _Search:
         lad = LADDERS[self.family(key)]
         if floor not in lad:  # alternative floor: that rung or withheld only
             return (floor, WITHHELD)
-        return lad[lad.index(floor):]
+        # sacrifice-only rungs (#89) are never an ordinary step; only an enumerated rung sacrifice adopts one
+        return tuple(r for r in lad[lad.index(floor):] if r == floor or r not in SACRIFICE_ONLY_RUNGS)
 
     def rung_params(self, key, rung):
         """Params for ``rung`` on ``key``, or None if the rung cannot be parameterised (skipped)."""
@@ -229,7 +236,8 @@ class _Search:
     def coarseness(self, cand) -> float:
         tot = 0.0
         for key, (rung, _, floor) in cand.items():
-            lad = self.ladder(key, floor)
+            full = LADDERS[self.family(key)]  # privacy order incl. sacrifice-only rungs
+            lad = full[full.index(floor):] if floor in full else self.ladder(key, floor)
             tot += lad.index(rung) / max(1, len(lad) - 1)
         return tot
 
@@ -353,7 +361,7 @@ class _Search:
         above its floor, and either waived for the adopted candidate in the search (the move rule) or caused by
         suppression: it passed strictly on the unsuppressed candidate and one of its via columns is coarser than
         its floor (the sacrifice is in effect). Errors and unknowns are never waived."""
-        diff = {k for k in cand if cand[k][:2] != base[k][:2]}
+        diff = {k for k in cand if cand[k][:2] != base[k][:2]} - set(self.rung_steps)
         if diff and not diff <= self.via_all:
             return False
         for c in self.failing(results):
@@ -503,7 +511,36 @@ class _Search:
         base = cur
         self.base_ev = cur_ev
         # sacrifice phase
-        if self.p.sacrifices and self._needs_more(cur_ev):
+        if (self.p.sacrifices or self.rung_sacr) and self._needs_more(cur_ev):
+            # enumerated rung sacrifices first (#89): only from `from`, only while k measurably fails
+            for key in sorted(self.rung_sacr):
+                if not self._needs_more(cur_ev) or self.out_of_budget():
+                    break
+                rs = self.rung_sacr[key]
+                if cur[key][0] != rs["from"]:
+                    continue
+                pr = self.rung_params(key, rs["to"])
+                if pr is None:
+                    continue
+                at_from = self._shortfall_of(cur_ev)
+                cand = dict(cur)
+                for k2 in self.unit_of[key]:
+                    cand[k2] = (rs["to"], canonical(pr), cur[k2][2])
+                ev = self.evaluate(cand)
+                fails = self.failing(ev["results"])
+                ok = not fails and self.objective(ev, cand) < self.objective(cur_ev, cur)
+                why = "adopted" if ok else ("rejected (" + ",".join(fails) + " below 0.9 or not ok)" if fails
+                                            else "rejected (objective not improved)")
+                step = self.record(cand, cur, ev, ok, f"sacrifice: rung step {self._name(self.unit_of[key])} "
+                                   f"{rs['from']} -> {rs['to']} (k shortfall {at_from:.6f} above budget): {why}")
+                if ok:
+                    cur, cur_ev = cand, ev
+                    self.rung_steps[key] = {
+                        "check": rs["check"], "table": key[0], "column": key[1], "from": rs["from"],
+                        "to": rs["to"], "k_shortfall_at_from": at_from,
+                        "max_share": (self.p.suppression or {}).get("max_share", 0.0),
+                        "check_score_at_to": ev["results"][rs["check"]]["score"]}
+                    step_reason(key, f"{rs['to']}: enumerated rung sacrifice, k fails at {rs['from']}", step)
             for u in self.units:
                 if not set(u) <= self.via_all:
                     continue
@@ -544,13 +581,17 @@ class _Search:
         return (ev if ok else None), step
 
     def _needs_more(self, ev):
+        sh = self._shortfall_of(ev)
+        budget = (self.p.suppression or {}).get("max_share", 0.0)
+        return sh is not None and sh > budget
+
+    def _shortfall_of(self, ev):
         sh = ev["risk"].get("qi_k_shortfall")
         if sh is None:
             if self.k is None:
-                return False
+                return None
             sh = self._shortfall(ev)
-        budget = (self.p.suppression or {}).get("max_share", 0.0)
-        return sh > budget
+        return sh
 
     def _shortfall(self, ev):
         pk = ev["pk"]
@@ -566,6 +607,8 @@ class _Search:
         key = u[0]
         rung, _, floor = cur[key]
         lad = self.ladder(key, floor)
+        if rung not in lad:  # a sacrifice-only rung: nothing ordinary lies beyond it but withheld
+            return None
         i = lad.index(rung) + 1
         while i < len(lad) and lad[i] != WITHHELD:
             pr = self.rung_params(key, lad[i])
@@ -623,6 +666,7 @@ class _Search:
             problems.append("re-check fails: " + ",".join(sorted(fails)))
         problems += [f"re-check privacy target {t['id']} ({t['kind']}): {t['status']}" for t in targets
                      if t["status"] != "pass"]
+        problems += self._rung_step_problems(cur, results)
         ok = not problems
         ev = {"results": {c: results.get(c, {"score": None, "status": "missing"}) for c in self.checks},
               "risk": {c: (0.0 if v is None else v) for c, v in rv.items()}, "cached": False}
@@ -643,6 +687,15 @@ class _Search:
                                "via": [dict(v) for v in s["via"]],
                                "score_before": before,
                                "score_after": results[c]["score"]})
+        for key in sorted(self.rung_steps):  # every adopted rung sacrifice, with its measured scores
+            st = self.rung_steps[key]
+            s = self.sacr.get(st["check"])
+            sacrifices.append({"check": st["check"], "floor_score": s["floor_score"] if s else None,
+                               "reason": self.rung_sacr[key]["reason"],
+                               "via": [{"table": key[0], "column": key[1]}],
+                               "score_before": self.base_ev["results"][st["check"]]["score"],
+                               "score_after": results[st["check"]]["score"], "rung_step": dict(st)})
+        sacrifices.sort(key=lambda s: (s["check"], "rung_step" in s))
         final = {
             "purpose": [{"id": c, **results[c]} for c in sorted(results)],
             "privacy": priv,
@@ -657,6 +710,22 @@ class _Search:
                    "start_risk": dict(self.start_ev["risk"]), "final_risk": rv}
         return SearchResult(plan=plan, log=self.log, suppressed=suppressed, final=final, sacrifices=sacrifices,
                             stats=dict(self.stats), summary=summary)
+
+    def _rung_step_problems(self, cur, results) -> list:
+        """Fail closed (#89): a sacrifice-only rung in the final plan needs an adopted, enumerated rung step with
+        measured scores, and the step's check must still pass strictly on the final re-check."""
+        out = []
+        for key in sorted(cur):
+            rung, _, floor = cur[key]
+            if rung not in SACRIFICE_ONLY_RUNGS or rung == floor:
+                continue
+            st = self.rung_steps.get(key)
+            if st is None or st["to"] != rung or not _num(st["k_shortfall_at_from"]) or not \
+                    _num(st["check_score_at_to"]) or not st["k_shortfall_at_from"] > st["max_share"]:
+                out.append(f"{key[0]}.{key[1]} at {rung} without a measured enumerated rung sacrifice")
+            elif not _strict(results.get(st["check"], {"status": "missing", "score": None})):
+                out.append(f"re-check: rung sacrifice check {st['check']} not passing at {rung}")
+        return out
 
     def _final_privacy(self, kprot, plan):
         """Re-check every privacy target the policy declares, failing closed.

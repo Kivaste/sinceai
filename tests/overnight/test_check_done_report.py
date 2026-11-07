@@ -79,18 +79,19 @@ def done_report_cli(tmp_path):
     runner = tmp_path / "run.ps1"
     # Reproduce the non-UTF-8 console code page even on UTF-8 developer machines.
     runner.write_text(
-        "param([string]$Script, [string]$BodyFile, [string]$GhExe)\n"
+        "param([string]$Script, [string]$BodyFile, [string]$GhExe, [switch]$TestMode)\n"
         "$ErrorActionPreference = 'Stop'\n"
         "[Console]::OutputEncoding = [Text.Encoding]::GetEncoding(1252)\n"
-        "if ($BodyFile) { & $Script -Issue 102 -BodyFile $BodyFile }\n"
-        "else { & $Script -Issue 102 -GhExe $GhExe }\n"
+        "$mode = @{}; if ($TestMode) { $mode.TestMode = $true }\n"
+        "if ($BodyFile) { & $Script -Issue 102 -BodyFile $BodyFile @mode }\n"
+        "else { & $Script -Issue 102 -GhExe $GhExe @mode }\n"
         "$result = $LASTEXITCODE\n"
         "if ([Console]::OutputEncoding.CodePage -ne 1252) { throw 'Console encoding leaked' }\n"
         "exit $result\n",
         encoding="ascii",
     )
 
-    def run(report, *, via_gh, unreadable=False, location="linked", merged=False):
+    def run(report, *, via_gh, unreadable=False, location="linked", merged=False, test_mode=True):
         if location == "main":
             git("-C", str(linked), "checkout", "-q", "--detach")
             git("checkout", "-q", "ticket/synthetic")
@@ -120,6 +121,7 @@ def done_report_cli(tmp_path):
             [
                 POWERSHELL, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(runner),
                 str(script), *(["-GhExe", str(gh)] if via_gh else ["-BodyFile", str(body_file)]),
+                *(["-TestMode"] if test_mode else []),
             ],
             check=False, capture_output=True, text=True, encoding="utf-8", errors="replace",
             env=env, timeout=60,
@@ -128,14 +130,33 @@ def done_report_cli(tmp_path):
     return body, run
 
 
+def test_gh_substitute_requires_explicit_test_mode_despite_planted_file(done_report_cli, tmp_path):
+    body, run = done_report_cli
+    (tmp_path / "repo" / ".test-mode").write_text("enabled", encoding="ascii")
+    result = run(body.replace("ARROW", "->"), via_gh=True, test_mode=False)
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert "UNKNOWN: -GhExe requires -TestMode" in result.stdout
+    assert "PASS #102" not in result.stdout
+
+
+def test_body_substitute_requires_explicit_test_mode_despite_planted_file(done_report_cli, tmp_path):
+    body, run = done_report_cli
+    (tmp_path / "repo" / ".test-mode").write_text("enabled", encoding="ascii")
+    result = run(body.replace("ARROW", "->"), via_gh=False, test_mode=False)
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert "UNKNOWN: -BodyFile requires -TestMode" in result.stdout
+    assert "PASS #102" not in result.stdout
+
+
 @pytest.mark.parametrize("arrow", ["\u2192", "->"], ids=["unicode", "ascii"])
-def test_valid_report_passes_body_file_and_gh(done_report_cli, arrow):
+@pytest.mark.parametrize("via_gh", [False, True], ids=["body-file", "gh"])
+def test_complete_substitute_report_is_not_a_close_pass(done_report_cli, arrow, via_gh):
     body, run = done_report_cli
     report = body.replace("ARROW", arrow)
-    for via_gh in (False, True):
-        result = run(report, via_gh=via_gh)
-        assert result.returncode == 0, result.stdout + result.stderr
-        assert "PASS #102" in result.stdout
+    result = run(report, via_gh=via_gh)
+    assert result.returncode == 3, result.stdout + result.stderr
+    assert "SUBSTITUTE-ONLY: evidence complete, not a close pass" in result.stdout
+    assert "PASS #" not in result.stdout
 
 
 @pytest.mark.parametrize("arrow", ["\u2192", "->"], ids=["unicode", "ascii"])
@@ -181,8 +202,9 @@ def test_active_ticket_requires_a_linked_worktree(done_report_cli, tmp_path, loc
     assert "Branch: ticket/synthetic must be checked out in a linked worktree" in result.stdout
 
 
-def test_merged_ticket_passes_after_its_worktree_is_removed(done_report_cli):
+def test_merged_ticket_removed_worktree_still_cannot_close_from_substitute(done_report_cli):
     body, run = done_report_cli
     result = run(body.replace("ARROW", "->"), via_gh=False, location="absent", merged=True)
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert "PASS #102" in result.stdout
+    assert result.returncode == 3, result.stdout + result.stderr
+    assert "SUBSTITUTE-ONLY: evidence complete, not a close pass" in result.stdout
+    assert "PASS #" not in result.stdout

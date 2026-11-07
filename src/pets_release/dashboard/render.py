@@ -70,6 +70,9 @@ def _rate(r: Any) -> str:
     if r.get("status") == "measured":
         d = r.get("denominator") or {}
         return f"{fmt_num(r.get('value'))} (n={d.get('n')} {d.get('unit', '')})".strip()
+    if r.get("status") == "counted":
+        d = r.get("denominator") or {}
+        return f"{r.get('count')} low-severity hit(s) (n={d.get('n')} {d.get('unit', '')})".strip()
     return f"{str(r.get('status', '')).replace('_', ' ')}: {r.get('reason', '')}"
 
 

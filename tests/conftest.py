@@ -105,6 +105,33 @@ def run_cli(*args: str, env: dict | None = None, module: str = "pets_release") -
     )
 
 
+PINNED_KIT = Path(r"C:\Users\kivas\AI\sinceai-hackaton\Briefs\TRUSTED_PETS_PROVING_GROUND_2026 (1)"
+                  r"\TRUSTED_PETS_PROVING_GROUND_2026")
+
+
+def find_kit() -> Path | None:
+    """The kit root: PETS_KIT if set, else the pinned path. None when it is not a kit (no results/benchmark.json)."""
+    kit = Path(os.environ.get("PETS_KIT") or PINNED_KIT)
+    return kit if (kit / "results" / "benchmark.json").is_file() else None
+
+
+@pytest.fixture
+def kit_root(request) -> Path:
+    """The kit root for tests marked ``kit``. A missing kit FAILS (never skips: skipped = not run = unknown = fail).
+    Kit-less runs deselect them explicitly with ``-m "not kit"``."""
+    kit = find_kit()
+    if kit is None:
+        pytest.fail("kit required but not found: set PETS_KIT or place the kit at the pinned path "
+                    '(run with -m "not kit" to exclude kit tests explicitly)', pytrace=False)
+    return kit
+
+
+@pytest.fixture(autouse=True)
+def _kit_marked_tests_need_the_kit(request):
+    if request.node.get_closest_marker("kit") is not None:
+        request.getfixturevalue("kit_root")
+
+
 @pytest.fixture
 def make_kit(tmp_path: Path):
     def _make(**kwargs) -> Path:
@@ -116,3 +143,55 @@ def make_kit(tmp_path: Path):
 @pytest.fixture
 def cli():
     return run_cli
+
+
+# Test tiers: collection only, never skip or change the default full-suite run.
+SLOW_TESTS_PATH = Path(__file__).resolve().with_name("slow_tests.txt")
+FAST_CLI_SMOKE = frozenset({
+    "tests/run/test_run.py::test_planted_card_number_refuses_via_cli",
+    "tests/run/test_run.py::test_release_passes_gate_and_both_verify_tiers",
+    "tests/run/test_run.py::test_two_runs_byte_identical",
+})
+# These modules exercise the release/gate/verification boundary on hand-made
+# synthetic fixtures. Keep the whole module fast, including shared fixture setup,
+# rather than letting noisy timings remove individual fail-closed cases.
+FAST_SYNTHETIC_CLI_MODULES = frozenset({
+    "tests/checks/test_runner.py",
+    "tests/checks/test_review_r3.py",
+    "tests/manifest/test_cli.py",
+})
+
+
+def keep_synthetic_cli_fast(item) -> bool:
+    module = item.nodeid.split("::", 1)[0]
+    return not requires_real_kit(item) and (
+        module.startswith(("tests/run/", "tests/verify/"))
+        or module in FAST_SYNTHETIC_CLI_MODULES
+        or item.nodeid in FAST_CLI_SMOKE
+    )
+
+
+def requires_real_kit(item) -> bool:
+    """Fixture names include the transitive closure; synthetic `kit` is not real.
+
+    `kit` is the repo's real-kit marker, including inherited module/class marks.
+    New real-kit fixtures must depend on kit_root (or tests must carry that mark).
+    """
+    return item.get_closest_marker("kit") is not None or "kit_root" in item.fixturenames
+
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_collection_modifyitems(items):
+    """Add marks before pytest's own -m deselection, using the canonical list."""
+    try:
+        measured = {
+            line.strip() for line in SLOW_TESTS_PATH.read_text(encoding="utf-8").splitlines()
+            if line.strip() and not line.lstrip().startswith("#")
+        }
+    except OSError as exc:
+        raise pytest.UsageError("cannot read canonical tests/slow_tests.txt") from exc
+    for item in items:
+        if requires_real_kit(item):
+            item.add_marker(pytest.mark.slow(reason="real-kit"))
+        elif item.nodeid in measured and not keep_synthetic_cli_fast(item):
+            item.add_marker(pytest.mark.slow(reason="profile"))

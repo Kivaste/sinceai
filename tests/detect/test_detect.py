@@ -138,11 +138,10 @@ def test_unseen_serialiser_header_and_rows():
     assert [r[0] for r in rows[1:]] == [f"c{i:02d}" for i in range(1, 13)]
 
 
-def test_headers_match_the_kit_scorer_source():
+@pytest.mark.kit
+def test_headers_match_the_kit_scorer_source(kit_root):
     """Copied-from-kit check: the scorer's docstring names the prediction columns."""
-    kit = os.environ.get("PETS_KIT")
-    if not kit:
-        pytest.skip("PETS_KIT not set (kit test not run)")
+    kit = kit_root
     src = (Path(kit) / "toolkit" / "pets_eval" / "detect.py").read_text(encoding="utf-8")
     assert "dataset, table, column, privacy_role [, subtype]" in src
     assert ",".join(KIT_HEADER) == serialise.KIT_HEADER_LINE
@@ -333,3 +332,75 @@ def test_unknown_role_raises_instead_of_asserting(monkeypatch):
     monkeypatch.setattr(inventory, "_classify", lambda profile, link: ("bogus", "", ""))
     with pytest.raises(ValueError, match="unknown role"):
         inventory.detect_table(_frame(n=5), "csv", "t")
+
+
+# --- follow-up #79: error paths and headers are content-free ------------------------------------------
+# Rule: a foreign exception (pandas parse/decode/value error) prints its class name only; a CSV header
+# cell that is not a schema identifier refuses the run (exit 2, nothing written). Rows: headerless CSV ->
+# first row read as header -> header refused -> no value on console or in --out.
+PLANTED = "ZZPLANTED_SECRET_4711"
+
+
+def test_cli_headerless_csv_never_emits_first_row_values(tmp_path, cli):
+    src = tmp_path / "export.csv"
+    src.write_text(f"{PLANTED},Maija Planted,x@example.fi\nEMP1,Other Name,y@example.fi\n", encoding="utf-8")
+    out = tmp_path / "labels.csv"
+    p = cli("detect", str(src), "--out", str(out))
+    assert p.returncode == 2
+    assert not out.exists()
+    for text in (p.stdout, p.stderr):
+        assert PLANTED not in text and "Maija" not in text and "example.fi" not in text
+    assert "header" in p.stderr
+
+
+def test_cli_headerless_csv_to_stdout_never_emits_values(tmp_path, cli):
+    src = tmp_path / "export.csv"
+    src.write_text(f"{PLANTED},Maija Planted\nEMP1,Other Name\n", encoding="utf-8")
+    p = cli("detect", str(src))
+    assert p.returncode == 2
+    assert PLANTED not in p.stdout + p.stderr and "Maija" not in p.stdout + p.stderr
+
+
+def test_cli_malformed_csv_prints_class_name_only(tmp_path, cli):
+    src = tmp_path / "export.csv"
+    src.write_bytes(f"a,b\n{PLANTED},x\n{PLANTED},y,z\n".encode("utf-8"))
+    p = cli("detect", str(src), "--out", str(tmp_path / "o.csv"))
+    assert p.returncode == 2
+    assert PLANTED not in p.stdout + p.stderr
+    assert "ParserError" in p.stderr
+
+
+@pytest.mark.parametrize("exc", [
+    pd.errors.ParserError(f"Error tokenizing data near '{PLANTED}'"),
+    UnicodeDecodeError("utf-8", PLANTED.encode(), 0, 1, f"bad byte in {PLANTED}"),
+    ValueError(f"could not convert {PLANTED}"),
+    OSError(f"cannot read {PLANTED}"),
+])
+def test_foreign_exception_text_is_never_printed(tmp_path, monkeypatch, capsys, exc):
+    from pets_release.detect import cli as detect_cli
+
+    src = tmp_path / "export.csv"
+    src.write_text("a,b\n1,2\n", encoding="utf-8")
+
+    def boom(*a, **k):
+        raise exc
+
+    monkeypatch.setattr(detect_cli.pd, "read_csv", boom)
+    assert detect_cli.main([str(src)]) == 2
+    err = capsys.readouterr()
+    assert PLANTED not in err.out + err.err
+    assert type(exc).__name__ in err.err
+
+
+@pytest.mark.parametrize("header", ["Maija Planted", "x@example.fi", "010190-123A", "+358401234567",
+                                    "EMP100123", "", "a.1", "1abc"])
+def test_header_cell_validator_rejects_value_shapes(header):
+    from pets_release.detect.cli import bad_header_cells
+
+    assert bad_header_cells(["ok_col", header]) == 1
+
+
+def test_header_cell_validator_accepts_schema_identifiers():
+    from pets_release.detect.cli import bad_header_cells
+
+    assert bad_header_cells(["visit_id", "icd10_primary", "floor_area_m2", "c01", "Region", "_x"]) == 0

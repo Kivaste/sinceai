@@ -108,7 +108,7 @@ def test_full_registry_refuses_when_a_registered_check_cannot_run(tmp_path):
 
 OWN_NAMES = sorted([
     "contract.columns", "contract.files", "contract.forms", "release.empty-tables", "release.file-digests",
-    "release.row-maps", "release.token-hex64", "rescan.account-numbers", "rescan.device-ids", "rescan.emails",
+    "release.manifest-values", "release.row-maps", "release.token-hex64", "rescan.account-numbers", "rescan.device-ids", "rescan.emails",
     "rescan.ibans", "rescan.ip-addresses", "rescan.national-ids", "rescan.payment-cards", "rescan.phones",
     "rescan.plates", "rescan.property-ids", "rescan.raw-timestamps", "rescan.secrets", "rescan.urls-with-tokens",
     "rescan.usernames"])

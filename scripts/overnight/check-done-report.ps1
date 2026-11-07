@@ -2,14 +2,22 @@
 .SYNOPSIS
   Deterministic close gate (D31): a ticket may be closed only if its newest "## Done-report" comment carries the
   required evidence for the CURRENT head. Exit 0 = may close; exit 1 = missing evidence (listed); exit 2 = couldn't check.
+  Exit 3 = substitute-only evidence complete, never permission to close.
   Missing, skipped or errored required checks are failures, never passes. Evidence for an older sha doesn't count.
 .EXAMPLE
   powershell -NoProfile -File scripts/overnight/check-done-report.ps1 -Issue 61
 #>
 param([Parameter(Mandatory = $true)][int]$Issue, [string]$Repo = 'Kivaste/sinceai', [switch]$Quiet,
       [string]$BodyFile,   # test hook: check a local done-report file instead of the issue's comments
-      [string]$GhExe = 'gh')   # test hook: a process emitting the same UTF-8 JSON as gh
+      [string]$GhExe = 'gh',   # test hook: a process emitting the same UTF-8 JSON as gh
+      [switch]$TestMode)       # explicit opt-in; never inferred from files on disk
 $ErrorActionPreference = 'Stop'
+if ($PSBoundParameters.ContainsKey('GhExe') -and -not $TestMode) {
+  'UNKNOWN: -GhExe requires -TestMode'; exit 2
+}
+if ($PSBoundParameters.ContainsKey('BodyFile') -and -not $TestMode) {
+  'UNKNOWN: -BodyFile requires -TestMode'; exit 2
+}
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $problems = New-Object System.Collections.Generic.List[string]
 function Need([bool]$ok, [string]$what) { if (-not $ok) { $problems.Add($what) } }
@@ -116,7 +124,12 @@ foreach ($axis in 'Standards', 'Spec') {
 $unk = $null; if ($b -match '(?ms)^###\s*Unknowns\s*\r?\n(.*?)(\r?\n###|\z)') { $unk = $matches[1] }
 Need ($unk -and $unk -match '(?mi)^\s*-\s*none\b') 'Unknowns: section missing or not "- none" (skipped/errored/not-run required checks block the close)'
 
-if ($problems.Count -eq 0) { if (-not $Quiet) { "PASS #${Issue} ($($iss.title)): done-report evidence complete for head $head" }; exit 0 }
+if ($problems.Count -eq 0) {
+  if ($PSBoundParameters.ContainsKey('BodyFile') -or $PSBoundParameters.ContainsKey('GhExe')) {
+    'SUBSTITUTE-ONLY: evidence complete, not a close pass'; exit 3
+  }
+  if (-not $Quiet) { "PASS #${Issue} ($($iss.title)): done-report evidence complete for head $head" }; exit 0
+}
 "FAIL #${Issue} ($($iss.title)): $($problems.Count) evidence gap(s)"
 $problems | ForEach-Object { "  - $_" }
 exit 1

@@ -28,7 +28,7 @@ _ROWS = [
     _r(E, "municipality", "geo", "exact", False, "QI; H-U4 needs the eight largest municipalities",
        "top_n", {"n": 8}, "H-U4 needs the top 8; rest grouped as other to help k"),
     _r(E, "arrival_ts", "timestamp", "exact", False, "QI; H-U8 hour-of-day vs k on arrival week",
-       "hour_of_day", {}, "hour of day only: H-U8 needs the hour-of-day curve; no date raises per-person k"),
+       "month_hour", {}, "month and hour: H-U8 needs the hour-of-day curve; the date is dropped to raise per-person k"),
     _r(E, "arrival_mode", "categorical", "exact", False, "QI (kit dictionary role); no required check", "withheld", {}, "no check needs it; withheld to raise per-person k"),
     _r(E, "ambulance_unit", "identifier", "pseudonym", False, "technical identifier", "withheld", {}, "no check needs it"),
     _r(E, "triage", "categorical", "exact", False, "H-U2", "exact"),
@@ -45,7 +45,8 @@ _ROWS = [
     _r(E, "attending_physician_id", "identifier", "pseudonym", False, "technical identifier", "withheld", {}, "no check needs it"),
     _r(E, "discharge_ts", "timestamp", "exact", False, "no required check", "withheld", {}, "no check needs it; los_minutes carries H-U2"),
     _r(E, "los_minutes", "numeric", "exact", False, "H-U2", "exact"),
-    _r(E, "disposition", "categorical", "exact", False, "no required check", "exact"),
+    _r(E, "disposition", "categorical", "exact", False,
+       "sensitive attribute; all HEALTH-S1 purpose checks exclude cancelled duplicates via kit derive()", "exact"),
     _r(E, "readmit_30d", "categorical", "exact", False, "H-U6", "exact"),
     _r(L, "visit_id", "identifier", "pseudonym", False, "same pseudonym as ed_visits (H-U7 join)", "pseudonym", REL),
     _r(L, "lab_id", "identifier", "pseudonym", False, "record key", "pseudonym", REL),
@@ -117,6 +118,12 @@ POLICY = ScenarioPolicy(
         {"check": "H-U4", "floor_score": 0.6, "reason": "municipality grouping to top-N to reach k", "via": [{"table": "ed_visits", "column": "municipality"}]},
         {"check": "H-U6", "floor_score": 0.6, "reason": "coarser age band to reach k", "via": [{"table": "ed_visits", "column": "date_of_birth"}]},
         {"check": "H-U8", "floor_score": 0.6, "reason": "coarser arrival time to reach k", "via": [{"table": "ed_visits", "column": "arrival_ts"}]},
+    ),
+    rung_sacrifices=(
+        {"check": "H-U8", "table": "ed_visits", "column": "arrival_ts", "from": "ts.month_hour",
+         "to": "ts.hour_of_day",
+         "reason": "hour of day only (drops all date meaning): taken only if per-person k at month+hour needs more "
+                   "suppression than the budget and H-U8 still passes at hour of day"},
     ),
     joint_qi_moves=(
         ({"table": "ed_visits", "column": "date_of_birth", "rung": "age.band10"},
