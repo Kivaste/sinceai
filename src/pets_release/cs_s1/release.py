@@ -95,6 +95,10 @@ def run_cs_s1(*, kit, scenario: dict, created: str, key_text: str, out, tool_rev
                        TURN_ID_REPORT: canonical_bytes(prep.turn_id.assessment)},
     )
     res = write_release(cand, out, master, kit, context=gate_ctx)
+    if res.status != "released" and res.scoring.is_dir():  # aggregates stay available for diagnosis
+        for name, body in cand.scoring_files.items():
+            if not (res.scoring / name).exists():
+                (res.scoring / name).write_bytes(body)
     if red["frame"] is not None and res.scoring.is_dir():
         from pets_release.redaction_eval import export_spot_check
 

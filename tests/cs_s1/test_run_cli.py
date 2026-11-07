@@ -51,6 +51,17 @@ def test_only_known_blocker_refuses(cs_run):
     assert recs["producer.person-k"]["status"] == "not_applicable"
 
 
+def test_measurement_reports_in_scoring_folder(cs_run):
+    _, out, _ = cs_run
+    sc = out.parent / f"{out.name}.scoring"
+    util = json.loads((sc / "utility_report.json").read_text(encoding="utf-8"))
+    assert {"CS-U1", "CS-U3", "CS-U4", "CS-U5", "CS-U5.lineage-adapted"} <= set(util)
+    red = json.loads((sc / "redaction_report.json").read_text(encoding="utf-8"))
+    assert red["status"] == "measured" and red["split"]["held_out_turns"] > 0
+    tid = json.loads((sc / "turn_id_assessment.json").read_text(encoding="utf-8"))
+    assert tid["status"] == "fail" and "conversationOrder" in tid["hits"]
+
+
 def test_spot_check_sheet_written_outside_repo(cs_run):
     _, out, _ = cs_run
     sheet = out.parent / f"{out.name}.scoring" / "spot_check.csv"
