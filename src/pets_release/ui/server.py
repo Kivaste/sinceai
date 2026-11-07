@@ -155,7 +155,7 @@ def serve(argv=None):
     parser.add_argument("--kit", required=True)
     parser.add_argument("--out", required=True)
     parser.add_argument("--created", required=True)
-    parser.add_argument("--plan", default="hand", choices=("hand", "measured"))
+    parser.add_argument("--plan", choices=("hand",), help="Explicit hand plan; omitted uses the CLI search default")
     parser.add_argument("--preview-rows", type=int, default=10, choices=range(1, 26))
     parser.add_argument("--demo-banner", default=os.environ.get("PETS_UI_DEMO_BANNER", ""))
     try:

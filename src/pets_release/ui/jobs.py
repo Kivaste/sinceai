@@ -85,8 +85,11 @@ class Jobs:
             if detector.returncode == 0:
                 inventory = pd.read_csv(io.BytesIO(detector.stdout), dtype=str, keep_default_na=False).to_dict("records")
             self.update(detectedInventory=inventory, detectorExit=detector.returncode)
-            rc = self.command("run", ["run", "--scenario", scenario, "--kit", args.kit,
-                                     "--out", release, "--created", args.created, "--plan", args.plan])
+            run_args = ["run", "--scenario", scenario, "--kit", args.kit,
+                        "--out", release, "--created", args.created]
+            if args.plan is not None:
+                run_args.extend(["--plan", args.plan])
+            rc = self.command("run", run_args)
             if rc != 0:
                 self.update(status="REFUSED" if rc == 1 else "FAILED", **self.refusal(release))
                 return

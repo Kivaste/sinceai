@@ -35,11 +35,11 @@ def server_env():
 
 @contextmanager
 def running(tmp_path, *, extra_env=None, edit=coarse_qis, probe=False, verifier_unavailable=False,
-            remove_refusal_report=False):
+            remove_refusal_report=False, record_commands=False, launch_extra=()):
     kit = build_kit(tmp_path / "kit", edit)
     env = server_env()
     env.update(extra_env or {})
-    command = launch_args(kit, tmp_path / "out")
+    command = launch_args(kit, tmp_path / "out", *launch_extra)
     if probe:
         trigger, output = tmp_path / "probe-start", tmp_path / "probe-result.json"
         code = f'''
@@ -63,13 +63,16 @@ sys.argv = {command[2:]!r}
 runpy.run_module("pets_release.ui", run_name="__main__")
 '''
         command = [sys.executable, "-c", code]
-    if verifier_unavailable or remove_refusal_report:
+    if verifier_unavailable or remove_refusal_report or record_commands:
         # Fault only at the external-process boundary, after a real successful run.
         # Never replace a production check with a passing stub.
         code = f'''
-import pathlib, runpy, subprocess, sys
+import json, pathlib, runpy, subprocess, sys
 original = subprocess.run
 def external_process(command, *args, **kwargs):
+    if {record_commands!r}:
+        with pathlib.Path({str(tmp_path / 'commands.jsonl')!r}).open("a") as handle:
+            handle.write(json.dumps(command) + "\\n")
     if {verifier_unavailable!r} and len(command) > 3 and command[3] == "verify" and pathlib.Path({str(tmp_path / 'verifier-unavailable')!r}).exists():
         raise FileNotFoundError("synthetic unavailable executable")
     result = original(command, *args, **kwargs)
@@ -154,8 +157,8 @@ def result(url):
 
 
 def test_health_release_matches_cli_bytes_and_rechecks_both_tiers(tmp_path):
-    """Rule: HTTP run -> real run/gate/verify/verify-full; same release bytes as CLI."""
-    with running(tmp_path) as (_, url, kit, out):
+    """Rule: default HTTP run omits --plan and matches the CLI's default search bytes."""
+    with running(tmp_path, record_commands=True) as (_, url, kit, out):
         status, body = request(url, "/api/scenarios")
         assert status == 200
         scenarios = json.loads(body)
@@ -176,10 +179,49 @@ def test_health_release_matches_cli_bytes_and_rechecks_both_tiers(tmp_path):
         release = out / "run-1"
         assert (release / "privacy_manifest.json").is_file()
         other = tmp_path / "cli-release"
-        proc = cli(*run_args(kit, other))
+        proc = cli("run", "--scenario", "HEALTH-S1", "--kit", str(kit), "--out", str(other),
+                   "--created", CREATED)
         assert proc.returncode == 0, "reference CLI failed"
+        commands = [json.loads(line) for line in (tmp_path / "commands.jsonl").read_text().splitlines()]
+        run = next(command for command in commands if command[3] == "run")
+        assert "--plan" not in run, "default UI must preserve the CLI search default"
         assert {p.name: p.read_bytes() for p in release.iterdir()} == {
             p.name: p.read_bytes() for p in other.iterdir()}
+
+
+def test_explicit_hand_plan_matches_cli_bytes(tmp_path):
+    """HTTP/CLI seam: the optional server hand plan is forwarded explicitly and remains usable."""
+    with running(tmp_path, record_commands=True, launch_extra=("--plan", "hand")) as (_, url, kit, out):
+        assert request(url, "/api/run", data={"scenario": "HEALTH-S1"})[0] == 202
+        assert result(url)["status"] == "RELEASED"
+        commands = [json.loads(line) for line in (tmp_path / "commands.jsonl").read_text().splitlines()]
+        run = next(command for command in commands if command[3] == "run")
+        assert run[-2:] == ["--plan", "hand"]
+        reference = tmp_path / "reference"
+        assert cli(*run_args(kit, reference)).returncode == 0
+        assert {p.name: p.read_bytes() for p in (out / "run-1").iterdir()} == {
+            p.name: p.read_bytes() for p in reference.iterdir()}
+
+
+def test_client_plan_overrides_are_refused_without_starting_a_job(tmp_path):
+    """HTTP/CLI seam: untrusted plan values never reach the production CLI."""
+    with running(tmp_path, record_commands=True) as (_, url, _, out):
+        for value in ("measured", "unknown", "hand", None, {"plan": "hand"}):
+            assert request(url, "/api/run", data={"scenario": "HEALTH-S1", "plan": value})[0] == 400
+        assert json.loads(request(url, "/api/result")[1])["status"] == "IDLE"
+        assert not (tmp_path / "commands.jsonl").exists()
+        assert not list(out.iterdir())
+
+
+def test_unsupported_server_plan_is_refused_at_startup(tmp_path):
+    """CLI seam: no advertised server plan can forward the unsupported measured value."""
+    kit = build_kit(tmp_path / "kit", coarse_qis)
+    for plan in ("measured", "unknown"):
+        proc = subprocess.run(launch_args(kit, tmp_path / "out", "--plan", plan), env=server_env(),
+                              cwd=ROOT, capture_output=True, text=True, timeout=20, check=False)
+        assert proc.returncode == 2
+        assert "invalid choice" in proc.stderr
+        assert not (tmp_path / "out").exists()
 
 
 def test_server_and_children_are_offline_while_loopback_http_works(tmp_path):
