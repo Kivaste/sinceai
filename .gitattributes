@@ -1,0 +1,2 @@
+# Human-run Git Bash wizards must not acquire CRLF on Windows checkout.
+scripts/wizard/*.sh text eol=lf

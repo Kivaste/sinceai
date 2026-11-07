@@ -124,6 +124,8 @@ Row maps (`rowmap_<table>.csv`) are scoring aids, not part of a release. They ar
 
 They must never enter the public repo (decision D15, [ADR 0003](docs/adr/)). The organisers receive them only through the private repo `Suhtetark-Kool/trusted-since-ai`. `pets_submission/` is built outside this repo for that purpose. `.gitignore` already excludes `Briefs/`, `rowmap_*.csv`, `truth/`, `pets_submission/` and `.env`; do not force-add them.
 
+Human-run submission wizards (Git Bash on Windows): [Saturday private handoff](scripts/wizard/saturday-submission.sh) and [Sunday public submission](scripts/wizard/sunday-submission.sh). From the repo root in PowerShell, run `& 'C:\Program Files\Git\bin\bash.exe' scripts/wizard/saturday-submission.sh` (or `sunday-submission.sh`). They prompt before consequential actions and save public setup values in the ignored root `.env`; the tool itself does not read that file.
+
 ## Reproducibility
 
 - Same input, key, `--created` (or `SOURCE_DATE_EPOCH`) and tool versions give a byte-identical release. Rows and lists are sorted; the only time value is the creation time.
