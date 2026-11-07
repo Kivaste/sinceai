@@ -1,7 +1,8 @@
 """Deterministic release-scope ID.
 
 first 16 hex of SHA-256(canonical JSON of
-{"inputs": {table: sha256}, "recipient": str|null, "scenario": str, "toolRevision": str})
+{"inputs": {table: sha256}, "recipient": str|null, "scenario": str,
+ "toolRevision": str})
 Canonical JSON: sorted keys, separators (",", ":"), UTF-8, no ASCII escaping.
 """
 
@@ -12,9 +13,11 @@ import json
 import re
 from collections.abc import Mapping
 
-_SHA256_HEX = re.compile(r"^[0-9a-f]{64}$")
+_SHA256_HEX = re.compile(r"[0-9a-f]{64}")
 
 
+# TODO(merge): switch to ticket 02's canonical JSON in pets_release.manifest
+# once it lands; tests/pseudonym/test_keys.py pins these exact bytes.
 def _canonical(obj: object) -> bytes:
     return json.dumps(
         obj, sort_keys=True, separators=(",", ":"), ensure_ascii=False
@@ -40,7 +43,7 @@ def release_scope_id(
     for table, digest in input_digests.items():
         if not isinstance(table, str) or not table:
             raise ValueError("input table names must be non-empty strings")
-        if not isinstance(digest, str) or not _SHA256_HEX.match(digest):
+        if not isinstance(digest, str) or not _SHA256_HEX.fullmatch(digest):
             raise ValueError("input digests must be lowercase 64-hex SHA-256")
         inputs[table] = digest
     payload = {
