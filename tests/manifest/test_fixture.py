@@ -70,9 +70,10 @@ def test_manifest_binds_ticket_04_assertion_checks():
     assert {a: e["check"] for a, e in ASSERTION_EVIDENCE.items()} == ASSERTION_CHECKS
 
 
-# Assertion checks pinned in ASSERTION_CHECKS but registered by sibling tickets not yet merged (11: producer.*,
-# 05: text.health). When one lands, this set must shrink, and its scope/unit is then compared below.
-NOT_YET_REGISTERED = {"producer.key-material", "producer.person-k", "producer.unkeyed-hashes", "text.health"}
+# Assertion checks pinned in ASSERTION_CHECKS but registered by sibling tickets that may not be merged yet
+# (11: producer.*, 05: text.health). Unregistered checks must be a subset, so this passes as they land; once
+# registered, a check's scope/unit is compared strictly below. A NEW unregistered check fails.
+KNOWN_PENDING = {"producer.key-material", "producer.person-k", "producer.unkeyed-hashes", "text.health"}
 
 
 def test_assertion_scope_and_unit_equal_the_registry():
@@ -81,7 +82,7 @@ def test_assertion_scope_and_unit_equal_the_registry():
 
     registered = {c.name: c for c in all_checks()}
     missing = {e["check"] for e in ASSERTION_EVIDENCE.values()} - set(registered)
-    assert missing == NOT_YET_REGISTERED
+    assert missing <= KNOWN_PENDING, sorted(missing - KNOWN_PENDING)
     for name, e in ASSERTION_EVIDENCE.items():
         assert ASSERTION_SCOPES[name] == e["scope"]
         if e["check"] in registered:
