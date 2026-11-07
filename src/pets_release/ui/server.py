@@ -12,6 +12,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from socketserver import TCPServer
 from urllib.parse import parse_qs, urlsplit
 
+from pets_release.manifest.canonical import loads_strict
 from pets_release.manifest.value_scan import identifier_shape_counts
 from pets_release.offline import install
 from pets_release.ui.jobs import SCENARIOS, Jobs, scenarios
@@ -126,7 +127,7 @@ class Handler(BaseHTTPRequestHandler):
                 length = int(self.headers.get("Content-Length", "0"))
                 if not 0 < length <= 1024:
                     raise ValueError
-                node = json.loads(self.rfile.read(length))
+                node = loads_strict(self.rfile.read(length))  # #131: duplicate keys / NaN refuse (400)
                 if set(node) != {"scenario"} or node["scenario"] not in SCENARIOS:
                     raise ValueError
             except (ValueError, TypeError):

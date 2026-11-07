@@ -46,7 +46,8 @@ def make_candidate(**over) -> Candidate:
     full = fx.manifest(files)
     kw = {"scenario": fx.SCENARIO, "recipient": fx.RECIPIENT, "tables": tuple(tables), "contract": fx.contract(),
           "tool_revision": fx.TOOL_REVISION, "created": fx.CREATED,
-          "narrative": {k: full[k] for k in NARRATIVE_KEYS}, "lexicon_digests": {}}
+          "narrative": {k: full[k] for k in NARRATIVE_KEYS},
+          "lexicon_digests": dict(full["bindings"]["lexiconDigests"])}  # #132: text columns need the lexicon
     kw.update(over)
     return Candidate(**kw)
 
