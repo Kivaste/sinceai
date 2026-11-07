@@ -21,7 +21,7 @@ from pathlib import Path
 import pandas as pd
 
 from pets_release.ladders import PseudonymKeys
-from pets_release.pseudonym import MasterKey, Scope, manifest_signing_key, pseudonymiser_for
+from pets_release.pseudonym import MasterKey, Scope, manifest_signing_key, pseudonymiser_for, recipient_key
 
 DEFAULT_RECIPIENT = "default"  # manifest recipient when no --recipient is given (pseudonyms keyed by the master)
 
@@ -85,6 +85,8 @@ def producer_context(*, scenario_id: str, policy, source: Mapping[str, pd.DataFr
         # master and manifest-signing key material (bytes; scanned in every encoding by producer.key-material)
         "keys": [master._k, manifest_signing_key(master)._k],
     }
+    if recipient != DEFAULT_RECIPIENT:  # the recipient-derived token key is key material too
+        ctx["keys"].append(recipient_key(master, recipient)._k)
     if "k" in contract:
         ctx["k"] = contract["k"]
     if released is not None:

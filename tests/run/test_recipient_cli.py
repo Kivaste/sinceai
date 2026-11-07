@@ -1,4 +1,4 @@
-"""`pets-release run --recipient` through the real CLI on the synthetic minikit.
+﻿"""`pets-release run --recipient` through the real CLI on the synthetic minikit.
 
 Rows (trigger -> result):
   recipient A and B, same kit and key         -> both exit 0; zero shared visit tokens
@@ -34,9 +34,17 @@ def releases(tmp_path_factory):
 
 
 def _tokens(out):
+    """Every token column of the released tables, from the manifest contract: (visit tokens of ed, of lab, all)."""
+    contract = json.loads((out / "privacy_manifest.json").read_text(encoding="utf-8"))["contract"]
+    cols = {(t["table"], t["column"]) for t in contract["tokens"]}
+    assert ("ed_visits", "visit_id") in cols and len(cols) >= 3
+    allt = set()
+    for table, col in sorted(cols):
+        df = pd.read_csv(out / f"{table}.csv", dtype=str, keep_default_na=False)
+        allt |= set(df[col])
     ed = pd.read_csv(out / "ed_visits.csv", dtype=str, keep_default_na=False)
     lab = pd.read_csv(out / "lab_results.csv", dtype=str, keep_default_na=False)
-    return set(ed["visit_id"]), set(lab["visit_id"])
+    return set(ed["visit_id"]), set(lab["visit_id"]), allt
 
 
 def _tree(folder):
@@ -51,12 +59,12 @@ def test_both_recipient_releases_succeed(releases):
 
 def test_recipients_share_zero_tokens_and_joins_survive(releases):
     _, outs, _ = releases
-    ed_a, lab_a = _tokens(outs["a"])
-    ed_b, lab_b = _tokens(outs["b"])
-    ed_n, lab_n = _tokens(outs["none"])
+    ed_a, lab_a, all_a = _tokens(outs["a"])
+    ed_b, lab_b, all_b = _tokens(outs["b"])
+    _, _, all_n = _tokens(outs["none"])
     assert ed_a and ed_b and lab_a and lab_b
-    assert (ed_a | lab_a).isdisjoint(ed_b | lab_b)
-    assert (ed_a | lab_a).isdisjoint(ed_n | lab_n)
+    assert all_a.isdisjoint(all_b)
+    assert all_a.isdisjoint(all_n)
     assert lab_a <= ed_a and lab_b <= ed_b
 
 
@@ -90,4 +98,8 @@ def test_invalid_recipient_exits_2_without_output(tmp_path, bad):
     proc = cli(*run_args(kit, out), "--recipient", bad)
     assert proc.returncode == 2
     assert not out.exists()
-    assert bad not in proc.stderr + proc.stdout or bad in ("default", "manifest-signature", "-x")
+    text = proc.stderr + proc.stdout
+    if bad == "bad id":
+        assert bad not in text
+    else:  # the reserved / flag-like IDs may appear in generic usage text, but never echoed as a quoted value
+        assert f"'{bad}'" not in text and f'"{bad}"' not in text and f"recipient {bad}" not in text
