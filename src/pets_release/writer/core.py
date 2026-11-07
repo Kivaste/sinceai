@@ -160,10 +160,12 @@ def _gate_reasons(result, prefix: str) -> list[str]:
 
 
 def _strings(obj, acc: list) -> list:
+    """Every string under ``obj``: values and map KEYS at any depth (#149: a value copied into a key is text too)."""
     if isinstance(obj, str):
         acc.append(obj)
     elif isinstance(obj, dict):
-        for v in obj.values():
+        for k, v in obj.items():
+            acc.append(str(k))
             _strings(v, acc)
     elif isinstance(obj, (list, tuple)):
         for v in obj:
