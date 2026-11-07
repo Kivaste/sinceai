@@ -152,6 +152,57 @@ def bed(tmp_path: Path, kit: Path) -> Path:
     return rel
 
 
+@pytest.fixture(scope="session")
+def _real_release(tmp_path_factory):
+    """One release built by the real ``pets-release run`` CLI on the synthetic run minikit (k reachable)."""
+    import sys
+
+    sys.path.insert(0, str(ROOT / "tests" / "run"))
+    from run_helpers import build_kit, cli, coarse_qis, run_args
+
+    base = tmp_path_factory.mktemp("real-bed")
+    kit = build_kit(base / "kit", coarse_qis)
+    out = base / "out" / "rel"
+    proc = cli(*run_args(kit, out))
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    return kit, out
+
+
+class RealBed:
+    """A per-test copy of a real run release (``release``) and its kit (``kit``), signed with ``KEY``."""
+
+    def __init__(self, kit: Path, release: Path):
+        import sys
+
+        sys.path.insert(0, str(ROOT / "tests" / "run"))
+        from run_helpers import TEST_KEY
+
+        self.kit, self.release, self.KEY = kit, release, TEST_KEY
+
+    def resign(self, m: dict) -> dict:
+        """Write ``m`` with its contract digest and file digests re-bound and the signature recomputed."""
+        from pets_release.manifest import canonical_digest
+
+        m["bindings"]["contractDigest"] = canonical_digest(m["contract"])
+        rebind_files(self.release, m)
+        sign(m, self.KEY)
+        save(self.release, m)
+        return m
+
+    def env(self) -> dict:
+        return {"PETS_HMAC_KEY": self.KEY, "PETS_KIT": str(self.kit)}
+
+
+@pytest.fixture
+def real_bed(_real_release, tmp_path: Path) -> RealBed:
+    kit, out = _real_release
+    k2 = tmp_path / "kit"
+    r2 = tmp_path / "release"
+    shutil.copytree(kit, k2)
+    shutil.copytree(out, r2)
+    return RealBed(k2, r2)
+
+
 @pytest.fixture
 def verify_cli(cli):
     """The real CLI as a subprocess: ``pets-release verify ...`` (env does not inherit key or kit)."""
