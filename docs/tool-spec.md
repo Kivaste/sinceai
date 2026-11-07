@@ -82,7 +82,7 @@ Initial rule table (_open_, to be refined against the scenarios):
 
 | Field type | Ladder |
 |---|---|
-| Timestamp | exact → hour → month+hour → day → week → month → withheld. Branch rung `ts.hour_of_day` (date-free `HH:00`): coarser than month+hour and everything finer, but **not comparable** with day/week/month (it drops the date, they drop the hour). A plan or floor pairing it with a date rung is refused; the search walks it after month+hour and every step is still measured. |
+| Timestamp | exact → hour → month+hour → day → week → month → withheld. Branch rung `ts.hour_of_day` (date-free `HH:00`): coarser than month+hour and everything finer, but **not comparable** with day/week/month (it drops the date, they drop the hour). A plan or floor pairing it with a date rung is refused. From month+hour the search walks the date branch (day → week → month) and the hour-of-day branch independently, every step measured; it adopts the better branch end (lower risk, else the date branch on a tie) and never moves between the two. |
 | Birth date / age | date → year → 5y band → 10y band (top-coded) → withheld |
 | Location | coordinates → 3 decimals → 2 decimals → postcode 3-digit → municipality → withheld |
 | Postcode | 5-digit → 3-digit (`201**`) → withheld |
