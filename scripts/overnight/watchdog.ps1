@@ -136,11 +136,19 @@ try {
   if (-not $Fixture -and -not $DryRun) {
     $gapMin = 0; $lastLine = Get-Content $LogPath -Tail 1 -ErrorAction SilentlyContinue   # read BEFORE we log anything
     if ($lastLine -match '^(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d)') { $gapMin = ((Get-Date) - [datetime]::ParseExact($matches[1], 'yyyy-MM-dd HH:mm:ss', $null)).TotalMinutes }
-    $kaPid = $null; $kaFile = Join-Path $StateDir 'keep-awake.pid'
-    if (Test-Path $kaFile) { $kaPid = [int](Get-Content $kaFile -ErrorAction SilentlyContinue) }
-    if (-not $kaPid -or -not (Get-Process -Id $kaPid -ErrorAction SilentlyContinue)) {
-      Start-Process -WindowStyle Hidden -FilePath 'powershell.exe' -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $PSScriptRoot 'keep-awake.ps1'))
-      Write-Log 'keep-awake was not running; started it'
+    # Helpers are started via WMI (Win32_Process.Create) so they are NOT children of this task or of the OpenCode
+    # server: a server restart or task-scheduler job cleanup must not kill them.
+    $helpers = @(@{ pid = 'keep-awake.pid'; script = 'keep-awake.ps1'; skipIf = $null },
+                 @{ pid = 'gpt-probe.pid'; script = 'gpt-quota-probe.ps1'; skipIf = (Join-Path $StateDir 'gpt-available.json') })
+    foreach ($h in $helpers) {
+      if ($h.skipIf -and (Test-Path $h.skipIf)) { continue }
+      $hp = $null; $hf = Join-Path $StateDir $h.pid
+      if (Test-Path $hf) { $hp = [int](Get-Content $hf -ErrorAction SilentlyContinue) }
+      if (-not $hp -or -not (Get-Process -Id $hp -ErrorAction SilentlyContinue)) {
+        $cmd = 'powershell.exe -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "{0}"' -f (Join-Path $PSScriptRoot $h.script)
+        $r = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = $cmd; CurrentDirectory = $RepoRoot }
+        Write-Log ('{0} was not running; started it via WMI (pid {1}, rc {2})' -f $h.script, $r.ProcessId, $r.ReturnValue)
+      }
     }
     # If our own previous run is far older than the 3-min cadence, the machine was suspended: every age below is
     # inflated by the suspend, and the network may still be reconnecting. Log it and do not act this cycle.

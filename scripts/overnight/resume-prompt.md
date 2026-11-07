@@ -39,7 +39,7 @@ A ticket is **ready** when both reviews pass on its current head and its tests a
 | Work | Model |
 |---|---|
 | Ticket labelled `model:opus` | `claude-agent/opus` |
-| Ticket labelled `model:grok` | `claude-agent/sonnet`. If Anthropic rate-limits or errors, use `openai/gpt-6.1-sol-fast`, then `xai/grok-4.7#medium` |
+| Ticket labelled `model:grok` | `claude-agent/sonnet`. If Anthropic rate-limits or errors, use `openai/gpt-6.1-sol` (regular Sol, never `-fast`), then `xai/grok-4.7#medium` |
 | Grunt subtasks (bulk edits, fixture typing, log digging) | `claude-agent/sonnet` |
 | Ticket reviewers (since Sat 05:35, D13b) | core tickets (`model:opus`): `xai/grok-4.7#medium` + `opencode-go/gpt-6-luna#medium`; routine tickets: `xai/grok-4.7#medium` only. DeepSeek is out of ticket reviews (25+ min each, throttled at high concurrency). Fallbacks: `opencode-go/gemini-4-argon#medium`, then `opencode-go/grok-4.7#medium` |
 
