@@ -354,8 +354,12 @@ _CUE_TABLE = [
      r"tekstiviestikoodi\w*|engångs(?:kod|lösenord)\w*|verifieringskod\w*|bekräftelsekod\w*")),
     ("secret", 4, 128,
      (r"password|passwd|pwd|passcode|passphrase|salasana\w*|tunnussana\w*|lösenord\w*|"
-     r"api[ _-]?(?:key|avain\w*|nyckel\w*)|token|secret\s+key")),
+     r"api[ _-]?(?:key|avain\w*|nyckel\w*)|token|secret\s+key|"
+     # network keys, as in the cell rescan (Grok r1: the two walkers agree)
+     r"wi-?fi(?:-?avain\w*|-?salasana\w*|\s?key|\s?password)?|wlan(?:-?avain\w*)?|wpa\d?")),
 ]
+# a bare network cue (no key/password suffix): a plain word mid-clause after it is prose (cell rescan rule)
+_BARE_NETWORK_CUE = re.compile(r"(?i)wi-?fi|wlan")
 _CUES = [(kind, lo, hi, re.compile(r"(?i)\b(?<!-)(?:" + rx + r")(?![\w])")) for kind, lo, hi, rx in _CUE_TABLE]
 _FILLERS = {
     "is", "was", "on", "oli", "är", "var", "it's", "its", "my", "minun", "min", "mitt", "the",
@@ -411,7 +415,7 @@ def _collapse(text, m):
 _CTOK = re.compile(r"\s*(" + _MASKED + r"|[,;]|[^\s" + _MASKED + r",;]+)")
 
 
-def _cue_end(kind, lo, hi, text, pos):
+def _cue_end(kind, lo, hi, text, pos, network=False):
     """End offset of the value after a cue ending at ``pos``, or None. Same rule as the cell rescans
     (``cells._validators._cued_value_counts``), over up to ``_cues.WINDOW`` tokens, never past a
     sentence end: a value-shaped token counts anywhere; a copula (also a trailing ":") arms, and while
@@ -471,7 +475,9 @@ def _cue_end(kind, lo, hi, text, pos):
         nxt = nxt.group(1) if nxt else ""
         # a plain word directly before a placeholder is not the value: the placeholder is
         before_ph = nxt == _MASKED or _cues.is_placeholder(nxt.rstrip(_TRAIL))
-        plain = (armed or (kind == "username" and first_word)) and not before_ph
+        # after a bare wifi/wlan cue a plain word counts only at the clause end ("wifi: x")
+        mid_clause = network and not ends and bool(nxt) and not _cues.is_punct(nxt)
+        plain = (armed or (kind == "username" and first_word)) and not before_ph and not mid_clause
         if _value_ok(kind, lo, hi, value, single, armed, plain):
             return end
         pos = max(pos, end)  # a rejected collapsed value ("4321 0000 0000 99") is not re-read in parts
@@ -524,7 +530,8 @@ def secrets(text):
         for m in cue.finditer(text):
             if _overlaps_any(m.span(), urls):
                 continue
-            end = _cue_end(kind, lo, hi, text, m.end())
+            end = _cue_end(kind, lo, hi, text, m.end(),
+                           network=bool(_BARE_NETWORK_CUE.fullmatch(m.group(0))))
             if end is not None:
                 hits.append((m.start(), end))  # cue + value: a next-turn value touches the cue turn
     return hits

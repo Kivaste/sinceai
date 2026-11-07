@@ -63,6 +63,24 @@ def test_bare_wifi_plain_word_mid_clause_stays_prose(tmp_path, text):
     assert _hits(tmp_path, text, "rescan.secrets") == 0
 
 
+# Grok r1: the text walker agrees with the cell walker on bare network cues (same rule, both checks)
+WIFI_VALUES = WIFI_DATES + ["wifi is 12:30", "wifi is 12:30.", "wlan on kissakala.", "wifi: kissakala",
+                            "wifi is Talvi2031 here", "wifi-avain on kissakala nyt"]
+
+
+@pytest.mark.parametrize("check", SECRETS)
+@pytest.mark.parametrize("text", WIFI_VALUES)
+def test_bare_network_cue_values_refuse_in_cells_and_text(tmp_path, check, text):
+    assert _hits(tmp_path, text, check) >= 1
+
+
+@pytest.mark.parametrize("check", SECRETS)
+@pytest.mark.parametrize("text", ["wifi is terrible again today", "wifi on kehno tänään", "wlan is unusable for now",
+                                  "wifi is terrible [SECRET_1]"])
+def test_bare_network_cue_prose_passes_in_cells_and_text(tmp_path, check, text):
+    assert _hits(tmp_path, text, check) == 0
+
+
 # (b) hedge glued to its value
 GLUED_SECRETS = [f"{pre}{d}kissakala" for pre in ("password probably", "salasana nyt",
                                                   "password for the router still")
