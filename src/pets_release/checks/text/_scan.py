@@ -208,29 +208,47 @@ def _add(found, parts):
     found.append(parts)
 
 
-def detect(field: TextField, detector, view: str):
-    """Run one detector over single turns, then over 2- and 3-turn windows.
+def conversation(texts):
+    """A Conversation of the given source turns, in order (rows = turn positions)."""
+    c = Conversation()
+    for r_i, text in enumerate(texts):
+        c.rows.append(r_i)
+        c.src.append(text)
+        c.views["digit"].append(normalise.view(text, "digit"))
+        c.views["email"].append(normalise.view(text, "email"))
+    return c
 
-    Windows are normalised from the joined source turns. Returns a list of hits, each a
-    sorted tuple of row indices the hit touches. A window hit counts only if it spans the
-    first and last turn of the window; overlapping hits are merged (see ``_add``).
+
+def conversation_hits(conv: Conversation, detector, view: str):
+    """One detector over single turns, then over 2- and 3-turn windows, of one conversation.
+
+    Windows are normalised from the joined source turns. Returns the hits, each a list of
+    (turn position, start, end) source parts. A window hit counts only if it spans the first and
+    last turn of the window; overlapping hits are merged (see ``_add``). The redactor's cross-turn
+    step (``pets_release.redactor.cross_turn``) calls this same function.
     """
+    found: list = []
+    for t, text in enumerate(conv.views[view]):
+        src = conv.src[t]
+        for s, e in detector(text):
+            parts = _source_parts(src, view, s, e, [(0, len(src), t)])
+            if parts:
+                _add(found, parts)
+    if len(conv.src) > 1:
+        for idx, joined_src, joined_view, bounds in conv.windows(view):
+            for s, e in detector(joined_view):
+                parts = _source_parts(joined_src, view, s, e, bounds)
+                touched = {p[0] for p in parts}
+                if idx[0] in touched and idx[-1] in touched:
+                    _add(found, parts)
+    return found
+
+
+def detect(field: TextField, detector, view: str):
+    """Hits of one detector over every conversation of the field (see ``conversation_hits``),
+    each a sorted tuple of the row indices the hit touches."""
     hits = []
     for conv in field.conversations:
-        found: list = []
-        for t, text in enumerate(conv.views[view]):
-            src = conv.src[t]
-            for s, e in detector(text):
-                parts = _source_parts(src, view, s, e, [(0, len(src), t)])
-                if parts:
-                    _add(found, parts)
-        if len(conv.src) > 1:
-            for idx, joined_src, joined_view, bounds in conv.windows(view):
-                for s, e in detector(joined_view):
-                    parts = _source_parts(joined_src, view, s, e, bounds)
-                    touched = {p[0] for p in parts}
-                    if idx[0] in touched and idx[-1] in touched:
-                        _add(found, parts)
-        for parts in found:
+        for parts in conversation_hits(conv, detector, view):
             hits.append(tuple(sorted({conv.rows[t] for t, _s, _e in parts})))
     return hits

@@ -7,6 +7,7 @@ import importlib
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
+from . import cross_turn
 from .labels import LABELS
 from .normalise import value_key
 from .passes import Candidate, ConversationView, Pass, Turn
@@ -91,6 +92,12 @@ def redact_conversation(
     turns = tuple(turns)
     if passes is None:
         passes = default_passes()
+    # then gate-consistent across turns: forced candidates for the gate text checks' hits (#92)
+    return cross_turn.redact_until_clean(_redact_once, conversation_id, turns, tuple(passes), normalise)
+
+
+def _redact_once(conversation_id: str, turns: tuple[Turn, ...], passes: Sequence[Pass],
+                 normalise: Callable[[str, str], str]) -> Redaction:
     view = ConversationView(conversation_id, turns)
     texts = [t.text for t in turns]
     cands: list[Candidate] = []
