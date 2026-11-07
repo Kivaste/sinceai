@@ -62,13 +62,13 @@ Risk, before and after. Mind the denominators: they differ.
 - Kit scorecard, share of ROWS in `ed_visits` with k below 5: `{{measured.privacy.before.k_below_5_share}}` before, `{{measured.privacy.after.k_below_5_share}}` after. Rows, not persons, and see the disclosure below.
 - Kit scorecard, linkage re-identification in `ed_visits`: `{{measured.privacy.before.linkage_reid}}` before, `{{measured.privacy.after.linkage_reid}}` after.
 
-Against the published baselines (same scenario; scenario utility, privacy summary, worst-case re-identification):
+Against the published baselines (same scenario; scenario utility and worst-case re-identification):
 
-| Baseline | Scenario utility | Privacy | worst_reid |
-|---|---|---|---|
-| B0 | `{{measured.baselines.B0.utility_mean}}` | `{{measured.baselines.B0.privacy}}` | `{{measured.baselines.B0.worst_reid}}` |
-| B2 | `{{measured.baselines.B2.utility_mean}}` | `{{measured.baselines.B2.privacy}}` | `{{measured.baselines.B2.worst_reid}}` |
-| B2-k | `{{measured.baselines.B2-k.utility_mean}}` | `{{measured.baselines.B2-k.privacy}}` | `{{measured.baselines.B2-k.worst_reid}}` |
+| Baseline | Scenario utility | worst_reid |
+|---|---|---|
+| B0 | `{{measured.baselines.B0.utility_mean}}` | `{{measured.baselines.B0.worst_reid}}` |
+| B2 | `{{measured.baselines.B2.utility_mean}}` | `{{measured.baselines.B2.worst_reid}}` |
+| B2-k | `{{measured.baselines.B2-k.utility_mean}}` | `{{measured.baselines.B2-k.worst_reid}}` |
 
 - Disclosure (D22, residual risk `scorecard-renamed-qi`): we release age as `age_band`. The kit scorecard does not count a renamed column as a quasi-identifier, so its "rows with k below 5" figure is blind to `age_band`. Our per-person k over every released quasi-identifier is the authoritative figure; the scorecard figure is shown only for completeness. Do not present the scorecard figure as proof of k-anonymity.
 - "After" is the score of the release the recipient actually gets, after local suppression of below-k persons, not the pre-suppression plan.

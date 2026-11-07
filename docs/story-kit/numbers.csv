@@ -1,5 +1,5 @@
 beat,label,manifest_key_path,unit,value
-1,Baseline B2-k - scenario utility,measured.baselines.B2-k.utility.HEALTH-S1,score_0_1,0.3990
+1,Baseline B2-k - scenario utility,measured.baselines.B2-k.utility_mean,score_0_1,0.3990
 1,Baseline B2-k - H-U6 (published null = cannot answer),measured.baselines.B2-k.task.H-U6,score_0_1,—
 1,Baseline B2-k - H-U7 (published null = cannot answer),measured.baselines.B2-k.task.H-U7,score_0_1,—
 1,Baseline B2-k - H-U8 (published null = cannot answer),measured.baselines.B2-k.task.H-U8,score_0_1,—
@@ -29,18 +29,15 @@ beat,label,manifest_key_path,unit,value
 6,Our per-person k - persons counted,measured.privacy.after.person_k.persons,count,24204
 6,Our per-person k - minimum k,measured.privacy.after.person_k.min,count,5
 6,Our per-person k - share of PERSONS with k below 5,measured.privacy.after.person_k.below_k_share,share_of_persons,0.0000
-6,Scorecard - share of ROWS in ed_visits with k below 5 (before),measured.privacy.before.risk.ed_visits:_records_with_k_5,share_of_rows,1.0000
-6,Scorecard - share of ROWS in ed_visits with k below 5 (after; blind to age_band),measured.privacy.after.risk.ed_visits:_records_with_k_5,share_of_rows,0.0000
-6,Scorecard - linkage re-identification ed_visits (before),measured.privacy.before.risk.ed_visits:_linkage_re-identification,score_0_1,0.5697
-6,Scorecard - linkage re-identification ed_visits (after),measured.privacy.after.risk.ed_visits:_linkage_re-identification,score_0_1,0.0000
-6,Scorecard privacy summary (before),measured.privacy.before.summary.privacy,score_0_1,0.2026
-6,Scorecard privacy summary (after),measured.privacy.after.summary.privacy,score_0_1,1.0000
-6,Baseline B0 - scenario utility,measured.baselines.B0.utility.HEALTH-S1,score_0_1,1.0000
-6,Baseline B0 - privacy,measured.baselines.B0.privacy,score_0_1,0.2840
-6,Baseline B2 - scenario utility,measured.baselines.B2.utility.HEALTH-S1,score_0_1,0.7930
-6,Baseline B2 - privacy,measured.baselines.B2.privacy,score_0_1,0.3554
+6,Scorecard - share of ROWS in ed_visits with k below 5 (before),measured.privacy.before.k_below_5_share,share_of_rows,1.0000
+6,Scorecard - share of ROWS in ed_visits with k below 5 (after; blind to age_band),measured.privacy.after.k_below_5_share,share_of_rows,0.0000
+6,Scorecard - linkage re-identification ed_visits (before),measured.privacy.before.linkage_reid,score_0_1,0.5697
+6,Scorecard - linkage re-identification ed_visits (after),measured.privacy.after.linkage_reid,score_0_1,0.0000
+6,Baseline B0 - scenario utility,measured.baselines.B0.utility_mean,score_0_1,1.0000
+6,Baseline B2 - scenario utility,measured.baselines.B2.utility_mean,score_0_1,0.7930
 6,Baseline B2 - worst_reid,measured.baselines.B2.worst_reid,score_0_1,0.0950
-6,Baseline B2-k - privacy,measured.baselines.B2-k.privacy,score_0_1,0.5188
 6,Baseline B2-k - worst_reid,measured.baselines.B2-k.worst_reid,score_0_1,0.0000
-6,Our release - scenario utility (scorecard summary.utility),measured.privacy.after.summary.utility,score_0_1,0.9352
 6,sacrifices.count,sacrifices.count,count,3
+6,Sacrifice floor H-U4,sacrifices.H-U4.floor,score_0_1,0.6000
+6,Sacrifice floor H-U6,sacrifices.H-U6.floor,score_0_1,0.6000
+6,Sacrifice floor H-U8,sacrifices.H-U8.floor,score_0_1,0.6000
