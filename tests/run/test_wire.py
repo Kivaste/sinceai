@@ -96,3 +96,22 @@ def test_cli_exit_2_on_mismatch(setup, monkeypatch, capsys):
     assert wire.main(run_args(kit, out)[1:]) == 2
     assert not out.exists()
     assert "differ" in capsys.readouterr().err
+
+
+def test_recipient_reaches_the_release_through_the_cli(setup, monkeypatch):
+    """follow-up #94: --recipient must reach run_release (both passes) and the signed manifest."""
+    from pets_release.manifest import MANIFEST_FILENAME, loads_strict
+
+    kit, out = setup
+    seen = []
+    real = pipeline.run_release
+    monkeypatch.setattr(pipeline, "run_release", lambda **kw: (seen.append(kw.get("recipient")), real(**kw))[1])
+    assert wire.main(run_args(kit, out)[1:] + ["--recipient", "acme"]) == 0
+    assert seen == ["acme", "acme"]
+    assert loads_strict((out / MANIFEST_FILENAME).read_bytes())["release"]["recipient"] == "acme"
+
+
+def test_invalid_recipient_is_refused_by_the_measure_cli(setup, capsys):
+    kit, out = setup
+    assert wire.main(run_args(kit, out)[1:] + ["--recipient", "bad id!"]) == 2
+    assert not out.exists()
