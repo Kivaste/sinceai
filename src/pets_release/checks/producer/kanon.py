@@ -125,6 +125,31 @@ def _anchor_ids(table, release_n, context):
     return out
 
 
+def _person_linked(contract, context, person_t, person_c) -> bool:
+    """True if a released token lets a recipient link all records of one person.
+
+    A contract token links the person when ANY of: it has the source person column's
+    name (legacy), it carries ``derived_from`` naming the person column (``col`` or
+    ``table.col``), or it is listed in ``context["person"]["released_as"]`` (the
+    released output columns of the person column, from the plan's outputColumn).
+    The token's released name need not match the source name.
+    """
+    tokens = (contract or {}).get("tokens", []) or []
+    released_as = {
+        (x["table"], x["column"]) for x in (context["person"].get("released_as") or [])
+    }
+    for x in tokens:
+        key = (x["table"], x["column"])
+        src = x.get("derived_from")
+        if (
+            key == (person_t, person_c)
+            or key in released_as
+            or (isinstance(src, str) and src in (person_c, f"{person_t}.{person_c}") and x["table"] == person_t)
+        ):
+            return True
+    return False
+
+
 class PersonK(NamedTuple):
     per_person: dict  # identified person -> k (in memory only; never exported)
     below_rows: list  # person-table release rows of identified persons below k
@@ -182,8 +207,7 @@ def person_k_values(release, contract, context) -> PersonK:
                 sig.append(tuple(sorted(rows)) if rows else ())
         return tuple(sig)
 
-    tokens = {(x["table"], x["column"]) for x in (contract or {}).get("tokens", []) or []}
-    person_linked = (person_t, person_c) in tokens
+    person_linked = _person_linked(contract, context, person_t, person_c)
 
     identified = [a for a in parts if anchor_person[a] is not None]
     unidentified = sorted(a for a in parts if anchor_person[a] is None)

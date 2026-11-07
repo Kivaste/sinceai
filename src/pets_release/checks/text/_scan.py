@@ -18,6 +18,8 @@ TEXT_FORM = "text"
 # error) if at least this share of its non-empty values has at least this many tokens.
 UNDECLARED_TEXT_TOKENS = 6
 UNDECLARED_TEXT_SHARE = 0.2
+# ... or if at least this many of its values are that long (a sparse free-text column).
+UNDECLARED_TEXT_CELLS = 3
 
 
 class TextCheckError(Exception):
@@ -116,7 +118,7 @@ def load(release, contract):
             vals = [v for v in _column(table, col) if v.strip()]
             if vals:
                 wordy = sum(1 for v in vals if len(v.split()) >= UNDECLARED_TEXT_TOKENS)
-                if wordy / len(vals) >= UNDECLARED_TEXT_SHARE:
+                if wordy / len(vals) >= UNDECLARED_TEXT_SHARE or wordy >= UNDECLARED_TEXT_CELLS:
                     raise TextCheckError("undeclared free-text column in release")
         for f, col, conv, order in fields:
             if f != fname:
@@ -128,9 +130,11 @@ def load(release, contract):
             else:
                 convs_col, orders = _column(table, conv), _column(table, order)
 
+            if not all(o.isascii() and o.isdigit() for o in orders):
+                raise TextCheckError("turn order value is not a non-negative integer")
+
             def order_key(r_i, orders=orders):
-                v = orders[r_i]
-                return (0, int(v), "", r_i) if v.isdigit() else (1, 0, v, r_i)
+                return (int(orders[r_i]), r_i)
 
             groups = {}
             for r_i, cid in enumerate(convs_col):

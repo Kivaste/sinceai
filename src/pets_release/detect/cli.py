@@ -15,7 +15,7 @@ from pathlib import Path
 import pandas as pd
 
 from pets_release.detect import inventory, serialise
-from pets_release.kit import Kit, KitError
+from pets_release.kit import Kit, KitError, refuse_forbidden_path
 
 
 class _Parser(argparse.ArgumentParser):
@@ -35,6 +35,7 @@ def main(argv: list[str]) -> int:
     path = Path(a.target)
     try:
         if path.suffix.lower() == ".csv" and path.is_file():
+            path = refuse_forbidden_path(path)
             tables = {path.stem: pd.read_csv(path, dtype=str, keep_default_na=False, na_filter=False,
                                              encoding="utf-8")}
             dataset = "csv"
