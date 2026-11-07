@@ -1,4 +1,4 @@
-﻿"""Truth-boundary and import-graph guards. Both fail closed.
+"""Truth-boundary and import-graph guards. Both fail closed.
 
 (a) Static: no Python file under src/ outside pets_attacker/ may contain the substring
     ``pets_attacker`` or a ``truth`` path-segment literal (raw-text regex; an unreadable
@@ -34,14 +34,55 @@ _TRUTH_RE = re.compile(r"""(^|[\\/'"])truth([\\/'"]|$)""", re.MULTILINE)
 TRUTH_SCAN_EXEMPT = frozenset({"pets_release/kit.py"})
 
 
-# #138: the measured run starts the attacker as a separate child process from this one file, so the file may
-# name the attacker only as these exact module-name string constants. Every other mention, any dynamic-import
-# or exec route, and an unparseable or unreadable file are still violations. The truth scan and the runtime
-# guard are unchanged for it.
+# #138: the measured run starts the attacker as a separate child process from this one file. Structural allowlist
+# (round 2): the file names the attacker only in exactly two top-level assignments (LAUNCHER_ASSIGNMENTS), and uses
+# those two names only as the third element of ``[sys.executable, "-m", <NAME>, ...]`` passed as the only
+# positional argument of ``subprocess.run`` (no executable=, shell= or **kwargs). ``subprocess``, ``sys`` and the
+# two names are never rebound or shadowed. Every other mention or use, any dynamic-import or exec route, and an
+# unparseable or unreadable file are violations. The truth scan and the runtime guard are unchanged for it.
 ATTACKER_LAUNCHER = "pets_release/measure/attackers.py"
-LAUNCHER_CONSTANTS = frozenset({ATTACKER, ATTACKER + ".bridge"})
+LAUNCHER_ASSIGNMENTS = {"ATTACKER_MODULE": ATTACKER, "BRIDGE_MODULE": ATTACKER + ".bridge"}
+_LAUNCH_MODULES = ("subprocess", "sys")
+_PINNED = frozenset({*_LAUNCH_MODULES, *LAUNCHER_ASSIGNMENTS})
 _DYNAMIC = frozenset({"importlib", "__import__", "import_module", "runpy", "run_module", "run_path", "pkgutil",
-                      "exec", "eval", "compile"})
+                      "exec", "eval", "compile", "builtins", "__builtins__"})
+
+
+def _is_name(node, name: str | None = None) -> bool:
+    import ast
+
+    return isinstance(node, ast.Name) and (name is None or node.id == name)
+
+
+def _launch_use(node):
+    """The ``<NAME>`` node of an approved ``subprocess.run([sys.executable, "-m", <NAME>, ...])`` call, else None."""
+    import ast
+
+    if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "run"
+            and _is_name(node.func.value, "subprocess") and len(node.args) == 1 and isinstance(node.args[0], ast.List)):
+        return None
+    if any(k.arg in (None, "executable", "shell") for k in node.keywords):
+        return None
+    elts = node.args[0].elts
+    if len(elts) < 3 or not (isinstance(elts[0], ast.Attribute) and elts[0].attr == "executable"
+                             and _is_name(elts[0].value, "sys")):
+        return None
+    if not (isinstance(elts[1], ast.Constant) and elts[1].value == "-m"):
+        return None
+    name = elts[2]
+    return name if _is_name(name) and name.id in LAUNCHER_ASSIGNMENTS and isinstance(name.ctx, ast.Load) else None
+
+
+def _binds_pinned(node) -> bool:
+    """global/nonlocal, a parameter, a def/class, an ``except ... as`` or a match capture naming a pinned name.
+    Import aliases are checked separately (``ast.alias.name`` is the imported module, not a binding)."""
+    import ast
+
+    if isinstance(node, (ast.Global, ast.Nonlocal)):
+        return bool(set(node.names) & _PINNED)
+    if isinstance(node, ast.arg):
+        return node.arg in _PINNED
+    return not isinstance(node, ast.alias) and getattr(node, "name", None) in _PINNED
 
 
 def _launcher_violates(text: str) -> bool:
@@ -51,17 +92,46 @@ def _launcher_violates(text: str) -> bool:
         tree = ast.parse(text)
     except (SyntaxError, ValueError):
         return True
-    allowed = 0
+    if text.count(ATTACKER) != len(LAUNCHER_ASSIGNMENTS):  # comments, docstrings and other strings included
+        return True
+    defined = {}
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and any(_is_name(t) and t.id in LAUNCHER_ASSIGNMENTS for t in node.targets):
+            t = node.targets[0]
+            if (len(node.targets) != 1 or not _is_name(t) or t.id in defined or not isinstance(node.value, ast.Constant)
+                    or node.value.value != LAUNCHER_ASSIGNMENTS[t.id]):
+                return True
+            defined[t.id] = t
+    if set(defined) != set(LAUNCHER_ASSIGNMENTS):
+        return True
+    allowed_stores = {id(t) for t in defined.values()}
+    allowed_loads = {id(u) for u in map(_launch_use, ast.walk(tree)) if u is not None}
     for node in ast.walk(tree):
-        if isinstance(node, ast.Constant) and node.value in LAUNCHER_CONSTANTS:
-            allowed += 1
+        if isinstance(node, ast.Name) and node.id in _PINNED:
+            if not isinstance(node.ctx, ast.Load):
+                if id(node) not in allowed_stores:
+                    return True  # rebinding, deleting or shadowing a pinned name
+            elif node.id in LAUNCHER_ASSIGNMENTS and id(node) not in allowed_loads:
+                return True  # a module-name constant used anywhere but the approved launch position
+        elif isinstance(node, ast.Attribute) and not isinstance(node.ctx, ast.Load) and _is_name(node.value) \
+                and node.value.id in _LAUNCH_MODULES:
+            return True  # e.g. ``subprocess.run = ...`` or ``sys.executable = ...``
+        elif _binds_pinned(node):
+            return True
+        elif isinstance(node, (ast.Import, ast.ImportFrom)):
+            mods = [a.name for a in node.names] + ([node.module or ""] if isinstance(node, ast.ImportFrom) else [])
+            if any(m.split(".")[0] in _DYNAMIC for m in mods):
+                return True
+            for a in node.names:
+                bound = a.asname or a.name.split(".")[0]
+                plain = isinstance(node, ast.Import) and a.asname is None and a.name in _LAUNCH_MODULES
+                if bound in _PINNED and not plain:
+                    return True
         elif getattr(node, "id", None) in _DYNAMIC or getattr(node, "attr", None) in _DYNAMIC:
             return True  # a Name or Attribute naming a dynamic-import or exec route
-        elif isinstance(node, (ast.Import, ast.ImportFrom)):
-            names = [a.name for a in node.names] + ([node.module or ""] if isinstance(node, ast.ImportFrom) else [])
-            if any(n.split(".")[0] in _DYNAMIC or n in _DYNAMIC for n in names):
-                return True
-    return text.count(ATTACKER) != allowed  # any mention outside the exact constants (import, comment, string)
+        elif isinstance(node, ast.Constant) and isinstance(node.value, str) and node.value in _DYNAMIC:
+            return True  # e.g. getattr(builtins, "__import__")
+    return False
 
 
 class BoundaryError(ValueError):

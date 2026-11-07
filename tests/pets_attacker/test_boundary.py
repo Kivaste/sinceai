@@ -1,4 +1,4 @@
-﻿"""Truth-boundary and import-graph guards.
+"""Truth-boundary and import-graph guards.
 
 Seams: (a) static raw-text scan of every file under src/ outside pets_attacker/;
 (b) runtime import of every pets_release module in a subprocess.
@@ -214,18 +214,25 @@ def test_runtime_unknown_open_target_type_is_a_hook_error(tmp_path: Path):
 
 
 # --- #138: the measured run's attacker launcher ----------------------------------------------------------
-# Rule: pets_release/measure/attackers.py starts the attacker as a separate child process, so it may name the
-# attacker only as the two exact module-name string constants. Any other mention (import, from-import, comment,
-# other string), any dynamic-import or exec route (importlib, __import__, runpy, pkgutil, exec, eval, compile),
-# or an unparseable/unreadable file is still a violation. Every other file keeps the any-mention rule.
-# Rows: launcher with the constants only -> clean; each planted route -> flagged; constants elsewhere -> flagged.
+# Rule (structural allowlist, round 2): pets_release/measure/attackers.py starts the attacker as a separate child
+# process. It may name the attacker only in exactly two top-level assignments, ATTACKER_MODULE = "pets_attacker"
+# and BRIDGE_MODULE = "pets_attacker.bridge", and may use those two names only as the third element of a list
+# literal [sys.executable, "-m", <NAME>, ...] passed as the only positional argument of subprocess.run (no
+# executable= or shell=). The names subprocess, sys, ATTACKER_MODULE and BRIDGE_MODULE are never rebound.
+# Any other mention or use (import, comment, other string, alias, concatenation, formatting, getattr/builtins,
+# importlib, exec), an unparseable or unreadable file, or the same content in any other file is a violation.
+# Rows: the approved launch form -> clean; each planted route -> flagged; the clean form elsewhere -> flagged.
 LAUNCHER = "pets_release/measure/attackers.py"
 CONSTANTS = 'ATTACKER_MODULE = "pets_attacker"\nBRIDGE_MODULE = "pets_attacker.bridge"\n'
+CLEAN = ("import subprocess\nimport sys\n\n" + CONSTANTS + "\n\n"
+         "def attack(argv):\n"
+         "    return subprocess.run([sys.executable, \"-m\", ATTACKER_MODULE, *argv], check=False, timeout=5)\n\n\n"
+         "def bridge(argv):\n"
+         "    return subprocess.run([sys.executable, \"-m\", BRIDGE_MODULE, *argv], check=False)\n")
 
 
-def test_launcher_naming_the_attacker_only_in_its_module_constants_is_clean(tmp_path: Path):
-    _plant(tmp_path, LAUNCHER, CONSTANTS + "import subprocess, sys\n"
-                                           "subprocess.run([sys.executable, '-m', ATTACKER_MODULE])\n")
+def test_launcher_in_the_approved_child_launch_form_is_clean(tmp_path: Path):
+    _plant(tmp_path, LAUNCHER, CLEAN)
     assert attacker_importers(tmp_path / "src") == []
 
 
@@ -243,18 +250,54 @@ def test_launcher_naming_the_attacker_only_in_its_module_constants_is_clean(tmp_
     "eval(compile('1', 'x', 'eval'))\n",
     "from importlib import import_module\n",
     "def (:\n",
+    # round 2 (Sol Standards, high): routes the denylist alone missed or might miss
+    'import builtins\ndef load():\n    return getattr(builtins, "__import__")(ATTACKER_MODULE)\n',
+    'def load():\n    m = ATTACKER_MODULE\n    return getattr(__builtins__, "__imp" + "ort__")(m)\n',
+    "def load():\n    m = ATTACKER_MODULE\n    import importlib as il\n    return il.import_module(m)\n",
+    'X = ATTACKER_MODULE + ".cli"\n',
+    'X = f"{ATTACKER_MODULE}.cli"\n',
+    'X = "{}.cli".format(BRIDGE_MODULE)\n',
+    'X = "%s.cli" % BRIDGE_MODULE\n',
+    "X = [ATTACKER_MODULE]\n",
+    'subprocess.run([sys.executable, "-c", ATTACKER_MODULE])\n',
+    'subprocess.run(["python", "-m", ATTACKER_MODULE])\n',
+    'subprocess.run([sys.executable, "-m", ATTACKER_MODULE], executable="sh")\n',
+    'subprocess.run([sys.executable, "-m", ATTACKER_MODULE], shell=True)\n',
+    'subprocess.Popen([sys.executable, "-m", ATTACKER_MODULE])\n',
+    'ATTACKER_MODULE = "os"\n',
+    "import builtins as subprocess\n",
+    "def f():\n    global sys\n    sys = None\n",
+    'sys.executable = "x"\n',
+    "subprocess.run = print\n",
+    "def f(sys):\n    return sys\n",
+    "def subprocess():\n    return None\n",
+    "try:\n    pass\nexcept Exception as ATTACKER_MODULE:\n    pass\n",
 ], ids=["import", "from", "from_sub", "comment", "other_string", "importlib", "dunder_import", "runpy", "pkgutil",
-        "exec", "eval_compile", "from_importlib", "unparseable"])
+        "exec", "eval_compile", "from_importlib", "unparseable", "getattr_builtins", "alias_getattr_computed",
+        "alias_importlib", "concat", "fstring", "format", "percent", "other_list", "dash_c", "other_executable",
+        "executable_kw", "shell_kw", "popen", "rebind_constant", "rebind_subprocess", "rebind_sys",
+        "store_sys_attr", "store_subprocess_attr", "shadow_param", "shadow_def", "shadow_except"])
 def test_launcher_with_any_other_route_to_the_attacker_is_a_violation(tmp_path: Path, extra):
-    _plant(tmp_path, LAUNCHER, CONSTANTS + extra)
+    _plant(tmp_path, LAUNCHER, CLEAN + extra)
     assert any(h.endswith("attackers.py") for h in attacker_importers(tmp_path / "src"))
 
 
-def test_launcher_constants_in_any_other_file_are_a_violation(tmp_path: Path):
-    _plant(tmp_path, "pets_release/measure/other.py", CONSTANTS)
-    _plant(tmp_path, "pets_release/attackers.py", CONSTANTS)
-    hits = attacker_importers(tmp_path / "src")
-    assert any(h.endswith("other.py") for h in hits) and any(h.endswith("attackers.py") for h in hits)
+@pytest.mark.parametrize("text", [
+    CLEAN.replace('"pets_attacker"', '"pets_attacker.cli"'),
+    CLEAN.replace("ATTACKER_MODULE = ", "ATTACKER_MODULE: str = "),
+    "if True:\n    " + CLEAN.replace("\n", "\n    "),
+], ids=["other_constant_value", "annotated_assignment", "nested_assignment"])
+def test_launcher_constants_outside_the_two_exact_top_level_assignments_are_a_violation(tmp_path: Path, text):
+    _plant(tmp_path, LAUNCHER, text)
+    assert any(h.endswith("attackers.py") for h in attacker_importers(tmp_path / "src"))
+
+
+@pytest.mark.parametrize("rel", ["pets_release/attackers.py", "pets_release/ui/attackers.py",
+                                 "pets_release/measure/sub/attackers.py", "pets_release/measure/other.py"])
+def test_the_approved_launcher_form_in_any_other_file_is_a_violation(tmp_path: Path, rel):
+    _plant(tmp_path, LAUNCHER, CLEAN)
+    _plant(tmp_path, rel, CLEAN)
+    assert [Path(h).relative_to(tmp_path / "src").as_posix() for h in attacker_importers(tmp_path / "src")] == [rel]
 
 
 def test_launcher_unreadable_is_a_violation(tmp_path: Path):

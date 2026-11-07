@@ -4,7 +4,8 @@ This package never imports the attacker package and never reads the kit's identi
 the attacker and its manifest bridge as offline children of this same source tree (``python -m`` with the
 module names below), on the scratch release and its row map chosen by identity, and reads back the bridge's
 aggregate ``residualRisks`` entries (names, rates, denominators). Static boundary scan: this file may name the
-attacker only in the two module-name constants below (see the attacker package's boundary guard).
+attacker only in the two module-name constants below, used only in the approved child-launch form (see the
+attacker package's boundary guard).
 
 Fail closed: a child that fails, times out or writes a malformed result gives no rates; the caller keeps the
 generic linkage and attribute-inference entries as ``not_measured`` with a current, content-free reason.
@@ -33,21 +34,35 @@ class AttackUnavailable(Exception):
     """No attacker rates for this release; the message is our own short, content-free reason."""
 
 
-def _child(args: list, work: Path, log: Path) -> None:
+def _env() -> dict:
     parts = [p for p in os.environ.get("PYTHONPATH", "").split(os.pathsep) if p]
-    env = child_env({**os.environ, "PYTHONPATH": os.pathsep.join([str(_SRC), *parts]), "PYTHONUTF8": "1",
-                     "PYTHONDONTWRITEBYTECODE": "1", "TZ": "UTC"})
+    return child_env({**os.environ, "PYTHONPATH": os.pathsep.join([str(_SRC), *parts]), "PYTHONUTF8": "1",
+                      "PYTHONDONTWRITEBYTECODE": "1", "TZ": "UTC"})
+
+
+# The two launches below are the only uses of the module-name constants the boundary guard allows
+# (``subprocess.run([sys.executable, "-m", <NAME>, ...])``); keep that exact form.
+def _attacker(argv: list, work: Path):
+    return subprocess.run([sys.executable, "-m", ATTACKER_MODULE, *map(str, argv)], env=_env(), cwd=str(work),
+                          capture_output=True, check=False, timeout=TIMEOUT_S)
+
+
+def _bridge(argv: list, work: Path):
+    return subprocess.run([sys.executable, "-m", BRIDGE_MODULE, *map(str, argv)], env=_env(), cwd=str(work),
+                          capture_output=True, check=False, timeout=TIMEOUT_S)
+
+
+def _child(what: str, launch, argv: list, work: Path, log: Path) -> None:
     try:
-        proc = subprocess.run([sys.executable, "-m", *map(str, args)], env=env, cwd=str(work), capture_output=True,
-                              check=False, timeout=TIMEOUT_S)
+        proc = launch(argv, work)
     except subprocess.TimeoutExpired:
-        raise AttackUnavailable(f"attacker run failed: {args[0]} timed out") from None
+        raise AttackUnavailable(f"attacker run failed: {what} timed out") from None
     except OSError:
-        raise AttackUnavailable(f"attacker run failed: {args[0]} could not start") from None
+        raise AttackUnavailable(f"attacker run failed: {what} could not start") from None
     with log.open("ab") as f:  # the children print class names and our own short messages only
         f.write(proc.stdout + b"\n--- stderr ---\n" + proc.stderr + b"\n")
     if proc.returncode != 0:
-        raise AttackUnavailable(f"attacker run failed: {args[0]} exit {proc.returncode}")
+        raise AttackUnavailable(f"attacker run failed: {what} exit {proc.returncode}")
 
 
 def _rungs(manifest: dict) -> dict:
@@ -81,10 +96,10 @@ def attacker_risks(*, kit_root, release: Path, rowmaps: dict, work: Path) -> lis
     rungs.write_text(json.dumps(_rungs(loads_strict((release / MANIFEST_FILENAME).read_bytes())), sort_keys=True),
                      encoding="utf-8")
     attack, residual = work / "attack.json", work / "residual.json"
-    _child([ATTACKER_MODULE, "--kit", Path(kit_root).absolute(), "--release", release.absolute(), "--label",
-            "measured", "--out", attack, "--rungs", rungs, "--rowmap", f"{TABLE}={Path(rowmaps[TABLE]).absolute()}"],
-           work, log)
-    _child([BRIDGE_MODULE, "--attack", attack, "--out", residual], work, log)
+    _child("attacker", _attacker, ["--kit", Path(kit_root).absolute(), "--release", release.absolute(), "--label",
+                                   "measured", "--out", attack, "--rungs", rungs,
+                                   "--rowmap", f"{TABLE}={Path(rowmaps[TABLE]).absolute()}"], work, log)
+    _child("bridge", _bridge, ["--attack", attack, "--out", residual], work, log)
     try:
         doc = loads_strict(residual.read_bytes())
     except (OSError, ValueError):
