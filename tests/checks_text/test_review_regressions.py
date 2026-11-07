@@ -9,8 +9,8 @@ import pytest
 C = "customer"
 A = "agent"
 CARD = ["four"] + ["one"] * 15
-HETU = "yksi kolme yksi nolla viisi kaksi viiva kolme nolla kahdeksan T".split()
-PHONE = "nolla neljä nolla yksi kaksi kolme neljä viisi kuusi seitsemän".split()
+HETU = ["yksi", "kolme", "yksi", "nolla", "viisi", "kaksi", "viiva", "kolme", "nolla", "kahdeksan", "T"]
+PHONE = ["nolla", "neljä", "nolla", "yksi", "kaksi", "kolme", "neljä", "viisi", "kuusi", "seitsemän"]
 
 
 def _splits(words, name):

@@ -55,7 +55,7 @@ class Conversation:
     for every N-turn window, computed from the joined *source* turns.
     """
 
-    __slots__ = ("rows", "src", "views", "_windows")
+    __slots__ = ("_windows", "rows", "src", "views")
 
     def __init__(self):
         self.rows, self.src = [], []
