@@ -76,6 +76,7 @@ def _week(y: int, mo: int, d: int, *_: int) -> str:
 ts_exact = _ts_fmt(lambda y, mo, d, h, mi, sec: f"{y:04d}-{mo:02d}-{d:02d} {h:02d}:{mi:02d}:{sec:02d}")
 ts_hour = _ts_fmt(lambda y, mo, d, h, *_: f"{y:04d}-{mo:02d}-{d:02d}T{h:02d}:00")
 ts_month_hour = _ts_fmt(lambda y, mo, d, h, *_: f"{y:04d}-{mo:02d}-01T{h:02d}:00")
+ts_hour_of_day = _ts_fmt(lambda y, mo, d, h, *_: f"{h:02d}:00")
 ts_day = _ts_fmt(lambda y, mo, d, h, *_: f"{y:04d}-{mo:02d}-{d:02d}")
 ts_week = _ts_fmt(_week)
 ts_month = _ts_fmt(lambda y, mo, d, h, *_: f"{y:04d}-{mo:02d}")
