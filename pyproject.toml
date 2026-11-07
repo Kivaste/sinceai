@@ -26,7 +26,10 @@ where = ["src"]
 pythonpath = ["src"]
 testpaths = ["tests"]
 addopts = "--import-mode=importlib"
-markers = ["kit: needs the challenge kit (PETS_KIT or the pinned path); FAILS if absent. Run kit-less with -m 'not kit'"]
+markers = [
+    "kit: needs the challenge kit (PETS_KIT or the pinned path); FAILS if absent. Run kit-less with -m 'not kit'",
+    "slow: heavy real-kit/e2e tests; implementers skip, merger runs",
+]
 
 [tool.ruff]
 line-length = 110
