@@ -50,12 +50,26 @@ def _params(p: Any) -> str:
     return ", ".join(f"{k}={p[k]}" for k in sorted(p)) if isinstance(p, dict) else ""
 
 
+NULL_TEXT = "—"
+
+
+def fmt_num(v: Any) -> str:
+    """The one number formatter (HTML and CSV): null -> em dash; numbers -> 4 fixed decimals, never scientific."""
+    if v is None:
+        return NULL_TEXT
+    if isinstance(v, bool) or not isinstance(v, (int, float)):
+        return str(v)
+    if v != 0 and abs(v) < 0.00005:
+        return "<0.0001" if v > 0 else ">-0.0001"
+    return f"{v:.4f}"
+
+
 def _rate(r: Any) -> str:
     if not isinstance(r, dict):
         return ""
     if r.get("status") == "measured":
         d = r.get("denominator") or {}
-        return f"{r.get('value')} (n={d.get('n')} {d.get('unit', '')})".strip()
+        return f"{fmt_num(r.get('value'))} (n={d.get('n')} {d.get('unit', '')})".strip()
     return f"{str(r.get('status', '')).replace('_', ' ')}: {r.get('reason', '')}"
 
 
@@ -81,7 +95,8 @@ def _s2(m: dict) -> dict:
     rows = []
     if bf.ok:
         for f in bf.value:
-            p = pets.get((f["table"], f["column"]))
+            # derived columns are recorded under their output name (e.g. date_of_birth -> age_band)
+            p = pets.get((f["table"], f.get("outputColumn"))) or pets.get((f["table"], f["column"]))
             form, cparams = "", ""
             if bc.ok and f.get("outputColumn"):
                 col = bc.value.get("files", {}).get(f["table"] + ".csv", {}).get("columns", {}).get(f["outputColumn"])
@@ -97,8 +112,10 @@ def _s3(m: dict, files_base: str) -> dict:
     bc, bfiles = Block("contract", _get(m, "contract")), Block("bindings.files", _get(m, "bindings", "files"))
     bg, ba, be = Block("gate", _get(m, "gate")), Block("exportAssertions", _get(m, "exportAssertions")), \
         Block("assertionEvidence", _get(m, "assertionEvidence"))
-    forms, files, checks, asserts = [], [], [], []
+    forms, files, checks, asserts, qi, tokens = [], [], [], [], [], []
     if bc.ok:
+        qi = sorted(bc.value.get("qi", []), key=lambda q: (q["table"], q["column"]))
+        tokens = sorted(bc.value.get("tokens", []), key=lambda t: (t["table"], t["column"]))
         for fname in sorted(bc.value.get("files", {})):
             spec = bc.value["files"][fname]
             for col in sorted(spec["columns"]):
@@ -119,7 +136,7 @@ def _s3(m: dict, files_base: str) -> dict:
                             "version": e["version"] if e else "", "hits": e["hits"] if e else "",
                             "n": e["denominator"]["n"] if e else "", "unit": e["denominator"]["unit"] if e else "",
                             "status": e["status"] if e else ""})
-    return {"blocks": [bc, bfiles, bg, ba, be], "forms": forms, "files": files, "checks": checks,
+    return {"blocks": [bc, bfiles, bg, ba, be], "forms": forms, "qi": qi, "tokens": tokens, "files": files, "checks": checks,
             "gate_status": bg.value.get("status") if bg.ok else "", "asserts": asserts}
 
 
@@ -168,14 +185,15 @@ def _chart(m: dict) -> dict:
 
     out["svg"] = {"w": w, "h": h, "pad": pad, "xmax": xmax, "ymax": ymax,
                   "line": " ".join(f"{sx(p['risk'])},{sy(p['utility'])}" for p in pts),
+                  # accepted points are drawn last so a rejected candidate never hides an accepted one
                   "points": [{"x": sx(p["risk"]), "y": sy(p["utility"]), "accepted": p["accepted"],
-                              "step": p["step"]} for p in pts]}
+                              "step": p["step"]} for p in sorted(pts, key=lambda p: (p["accepted"], p["step"]))]}
     out["summary"] = {k: b.value.get(k) for k in ("candidates", "accepted", "boundReached")}
     return out
 
 
 _ENV = Environment(autoescape=True, undefined=StrictUndefined, trim_blocks=True, lstrip_blocks=True)
-_ENV.filters["fmt"] = lambda v: f"{v:.3g}" if isinstance(v, float) else str(v)
+_ENV.filters["fmt"] = fmt_num
 _TEMPLATE = _ENV.from_string(PAGE)
 
 
@@ -186,8 +204,7 @@ def render_html(manifest: dict, files_base: str = ".") -> str:
     extra = {"baselines": _baselines(manifest), "chart": _chart(manifest)}
     for s in extra.values():
         s["status"] = _status(s["blocks"])
-    release = _get(manifest, "release")
-    return _TEMPLATE.render(secs=secs, extra=extra, release=release if release is not MISSING else {},
+    return _TEMPLATE.render(secs=secs, extra=extra, release=secs[5]["release"],
                             schema_version=_get(manifest, "schemaVersion") if _get(manifest, "schemaVersion")
                             is not MISSING else "")
 
@@ -197,19 +214,19 @@ def render_csv(manifest: dict) -> str:
     rows: list[list[str]] = []
     u = Block("u", _get(manifest, "measured", "utility"))
     if u.ok:
-        rows += [["utility", t["task"], str(t["before"]), str(t["after"])]
+        rows += [["utility", t["task"], fmt_num(t["before"]), fmt_num(t["after"])]
                  for t in sorted(u.value["tasks"], key=lambda t: t["task"])]
     p = Block("p", _get(manifest, "measured", "privacy"))
     if p.ok:
-        rows += [["privacy", c["component"], str(c["before"]), str(c["after"])]
+        rows += [["privacy", c["component"], fmt_num(c["before"]), fmt_num(c["after"])]
                  for c in sorted(p.value["components"], key=lambda c: c["component"])]
     b = Block("b", _get(manifest, "measured", "baselines"))
     if b.ok:
-        rows += [["baseline", f"{r['baseline']}/{r['metric']}", "", str(r["value"])]
+        rows += [["baseline", f"{r['baseline']}/{r['metric']}", "", fmt_num(r["value"])]
                  for r in sorted(b.value["rows"], key=lambda r: (r["baseline"], r["metric"]))]
     s = Block("s", _get(manifest, "sacrifices"))
     if s.ok:
-        rows += [["sacrifice", r["check"], str(r["before"]), str(r["after"])]
+        rows += [["sacrifice", r["check"], fmt_num(r["before"]), fmt_num(r["after"])]
                  for r in sorted(s.value, key=lambda r: r["check"])]
     buf = io.StringIO()
     w = csv.writer(buf, lineterminator="\n")
