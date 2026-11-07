@@ -10,7 +10,7 @@ from typing import Any, Protocol
 import pandas as pd
 
 from . import transforms as T
-from .rungs import CONTRACT_FORMS, KNOWN_RUNGS, WITHHELD, LadderError, coarseness
+from .rungs import CONTRACT_FORMS, KNOWN_RUNGS, WITHHELD, LadderError, at_least_as_coarse
 
 
 class KeyMaterial(Protocol):
@@ -81,8 +81,7 @@ def _validate(plan: list[Mapping[str, Any]], tables: Mapping[str, pd.DataFrame])
         elif rung == WITHHELD:
             ok = True
         else:
-            (rk, rp), (fk, fp) = coarseness(rung), coarseness(floor)
-            ok = rk == fk and rp >= fp
+            ok = at_least_as_coarse(rung, floor)
         if not ok:
             raise LadderError(f"rung {rung!r} is finer than its floor {floor!r} for {key[0]}.{key[1]}")
         by_key[key] = e

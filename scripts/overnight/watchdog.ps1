@@ -44,8 +44,15 @@ param(
   [int]$IdleMinutes = 10,
   [int]$HungMinutes = 90,
   [int]$CooldownMinutes = 20,
+  [int]$MaxContextTokens = 300000,   # hand over to a fresh orchestrator above this context size
+  [int]$HandoverCooldownMinutes = 30,
   [string]$Model = 'claude-agent/opus#high',
   [string]$FallbackModel = 'openai/gpt-6.1-sol',
+  # Hand-over overrides (test-handover.ps1). Empty = start-orchestrator.ps1 defaults (its -Model, resume-prompt.md).
+  [string]$HandoverModel,
+  [string]$HandoverPromptFile,
+  # Test-only: do not (re)start the keep-awake / gpt-probe helpers.
+  [switch]$SkipHelpers,
   [switch]$DryRun,
   [switch]$NoFetch,
   # Test hook: JSON file that replaces the gh / OpenCode / commit probes. See test-watchdog.ps1.
@@ -132,6 +139,56 @@ try { $owned = $mutex.WaitOne(0) } catch [System.Threading.AbandonedMutexExcepti
 if (-not $owned) { Write-Log 'action=skip reason="another watchdog run holds the mutex"'; exit 0 }
 
 try {
+  # ---------- (0) keep-awake + resume-from-suspend grace ----------
+  if (-not $Fixture -and -not $DryRun) {
+    $gapMin = 0; $lastLine = Get-Content $LogPath -Tail 1 -ErrorAction SilentlyContinue   # read BEFORE we log anything
+    if ($lastLine -match '^(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d)') { $gapMin = ((Get-Date) - [datetime]::ParseExact($matches[1], 'yyyy-MM-dd HH:mm:ss', $null)).TotalMinutes }
+    # Helpers are started via WMI (Win32_Process.Create) so they are NOT children of this task or of the OpenCode
+    # server: a server restart or task-scheduler job cleanup must not kill them.
+    $helpers = @(@{ pid = 'keep-awake.pid'; script = 'keep-awake.ps1'; skipIf = $null },
+                 @{ pid = 'gpt-probe.pid'; script = 'gpt-quota-probe.ps1'; skipIf = (Join-Path $StateDir 'gpt-available.json') },
+                 @{ pid = 'deprioritize.pid'; script = 'deprioritize-tests.ps1'; skipIf = $null })
+    if ($SkipHelpers) { $helpers = @() }
+    foreach ($h in $helpers) {
+      if ($h.skipIf -and (Test-Path $h.skipIf)) { continue }
+      $hp = $null; $hf = Join-Path $StateDir $h.pid
+      if (Test-Path $hf) { $hp = [int](Get-Content $hf -ErrorAction SilentlyContinue) }
+      if (-not $hp -or -not (Get-Process -Id $hp -ErrorAction SilentlyContinue)) {
+        $cmd = 'powershell.exe -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "{0}"' -f (Join-Path $PSScriptRoot $h.script)
+        $r = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = $cmd; CurrentDirectory = $RepoRoot }
+        Write-Log ('{0} was not running; started it via WMI (pid {1}, rc {2})' -f $h.script, $r.ProcessId, $r.ReturnValue)
+      }
+    }
+    # If our own previous run is far older than the 3-min cadence, the machine was suspended: every age below is
+    # inflated by the suspend, and the network may still be reconnecting. Log it and do not act this cycle.
+    if ($gapMin -gt 10) { Write-Log ('action=grace reason="resumed after suspend or missed runs (gap {0:N0} min); not acting this cycle"' -f $gapMin); exit 0 }
+
+    # Context hand-over: a long-running orchestrator degrades and slows far beyond ~150k tokens. Above the limit,
+    # start a fresh one (start-orchestrator.ps1 -Force interrupts and retires the old session).
+    $hbNow = Read-Json $HbPath
+    if ($hbNow -and $hbNow.session_id) {
+      $hoFile = Join-Path $StateDir 'last-handover.txt'
+      $hoAge = 1e9; if (Test-Path $hoFile) { $hoAge = ((Get-Date) - [datetime](Get-Content $hoFile)).TotalMinutes }
+      $msgs = OcApi @('get', "/api/session/$($hbNow.session_id)/message")
+      $last = @($msgs.data) | Where-Object { $_.type -eq 'assistant' -and $_.tokens -and $_.tokens.cache } | Select-Object -First 1
+      if ($last) {
+        $ctx = [int64]$last.tokens.input + [int64]$last.tokens.cache.read + [int64]$last.tokens.cache.write
+        if ($ctx -gt $MaxContextTokens -and $hoAge -gt $HandoverCooldownMinutes) {
+          Write-Log ('action=handover reason="orchestrator context {0:N0} > {1:N0} tokens" session={2}' -f $ctx, $MaxContextTokens, $hbNow.session_id)
+          Set-Content $hoFile (Get-Date).ToString('o')
+          $soArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $PSScriptRoot 'start-orchestrator.ps1'), '-Force', '-StateDir', $StateDir)
+          if ($HandoverModel) { $soArgs += @('-Model', $HandoverModel) }
+          if ($HandoverPromptFile) { $soArgs += @('-PromptFile', $HandoverPromptFile) }
+          # EAP Continue: under Stop, the child's first stderr line (e.g. a Write-Error) would crash this run and lose the result.
+          $ErrorActionPreference = 'Continue'
+          $out = & powershell.exe @soArgs 2>&1 | Out-String
+          $ErrorActionPreference = 'Stop'
+          Write-Log ('handover result: ' + (($out -split "`r?`n" | Where-Object { $_ -match 'created session|retirement|interrupting|error|WARN' }) -join ' | '))
+          exit 0
+        }
+      }
+    }
+  }
   # ---------- (a) heartbeat ----------
   $hb = Read-Json $HbPath
   $hbAge = $null
