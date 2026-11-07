@@ -4,8 +4,10 @@ The release tool never imports the attacker (#138: it runs only as a child via t
 producer-side implementation of #139's red-team attribute-inference estimator (the attacker package's
 ``redteam.attribute_inference``; named here without importing it):
 
-  targets     the released rows with a non-blank value of the attribute, a seeded sample (seed 0) of at most 3000,
-              as the red team's sampling frame;
+  targets     EVERY released row with a non-blank value of the attribute (the population, not the red team's
+              seeded sample of at most 3000: that sample is drawn over the released row order, which follows the
+              keyed tokens and so changes with the release key; the population measure is independent of row
+              order and key, so the bound check is deterministic and not a sampling draw);
   attacker    knows the target's QIs and predicts the most common released value (ties: the smallest string)
               among the rows that match them best;
   baseline    the release's most common value of the attribute, guessed for every target;
@@ -13,9 +15,10 @@ producer-side implementation of #139's red-team attribute-inference estimator (t
 
 The one difference: the red team scores rows with Fellegi-Sunter over interval overlaps (the age tolerance can
 merge neighbouring bands) and treats a blank QI cell as a wildcard; here the best rows are exactly the target's
-own equivalence class on every released QI of the policy (a superset of the red team's background QIs). On the
-same release this attacker is at least as sharp on small classes (tested against #139's numbers on a synthetic
-fixture, ``tests/minimiser/test_attr_lift.py``). Aggregates only: nothing here logs or returns a value.
+own equivalence class on every released QI of the policy (a superset of the red team's background QIs). Where the
+two coincide (every QI released, no blank cell, no band edge within the age tolerance, at most 3000 targets) they
+give the same targets, inference rate and base rate (``tests/minimiser/test_attr_lift.py``, against the red team
+itself). Aggregates only: nothing here logs or returns a value.
 """
 
 from __future__ import annotations
@@ -23,11 +26,8 @@ from __future__ import annotations
 import math
 import re
 
-import numpy as np
 import pandas as pd
 
-MAX_SAMPLE = 3000  # the red team's sampling frame (the attacker's personas.MAX_SAMPLE)
-SEED = 0
 _MASKED = re.compile(r"^[\*x#?\-_]*$", re.IGNORECASE)  # the red team's blank rule (masked cells are blank)
 
 
@@ -46,13 +46,6 @@ def _mode(values) -> str | None:
     return min(counts, key=lambda v: (-counts[v], v)) if counts else None
 
 
-def _sample(n: int) -> np.ndarray:
-    rows = np.arange(n)
-    if n > MAX_SAMPLE:
-        rows = np.sort(np.random.default_rng(SEED).choice(n, MAX_SAMPLE, replace=False))
-    return rows
-
-
 def measure(df: pd.DataFrame, qcols: list, column: str) -> dict:
     """``{n_targets, inference_rate, baseline_rate, lift}`` for ``column`` of the released table ``df`` against an
     attacker who knows ``qcols``. ``lift`` is None when it cannot be measured (no target, or a zero base rate with a
@@ -69,12 +62,11 @@ def measure(df: pd.DataFrame, qcols: list, column: str) -> dict:
     guess = {k: _mode(v) for k, v in groups.items()}
     base = _mode(cells)
     n = ok = b = 0
-    for r in _sample(len(df)):
-        actual = cells[r]
+    for key, actual in zip(keys, cells):  # every row: independent of row order and of the release key
         if not actual:
             continue
         n += 1
-        ok += guess[keys[r]] == actual
+        ok += guess[key] == actual
         b += base == actual
     if n == 0:
         return {"n_targets": 0, "inference_rate": None, "baseline_rate": None, "lift": None}

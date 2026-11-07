@@ -68,6 +68,16 @@ def test_producer_estimator_equals_the_red_team(tmp_path):
     assert AL.measure(prot, QCOLS, "icd10_primary")["lift"] > 1.0
 
 
+def test_population_measure_is_independent_of_row_order():
+    """More rows than the red team's 3000-target sample: the bound check reads every row, so the released row
+    order (it follows the keyed tokens, i.e. the release key) cannot move the measured lift."""
+    _, prot = _synthetic(3500)
+    shuffled = prot.sample(frac=1.0, random_state=3)
+    for c in SENS:
+        a, b = AL.measure(prot, QCOLS, c), AL.measure(shuffled, QCOLS, c)
+        assert a == b and a["n_targets"] == 3500
+
+
 def test_no_known_qi_is_the_base_rate():
     _, prot = _synthetic()
     m = AL.measure(prot, [], "icd10_primary")
