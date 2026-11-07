@@ -1,0 +1,21 @@
+{
+  "failing": {
+    "contract.columns": [
+      {
+        "column": "protected_row",
+        "count": 1,
+        "file": "visits.csv",
+        "locations": []
+      }
+    ],
+    "release.row-maps": [
+      {
+        "column": "protected_row",
+        "count": 1,
+        "file": "visits.csv",
+        "locations": []
+      }
+    ]
+  },
+  "refused": true
+}

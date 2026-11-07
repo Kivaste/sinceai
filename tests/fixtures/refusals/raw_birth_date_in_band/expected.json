@@ -1,0 +1,16 @@
+{
+  "failing": {
+    "contract.forms": [
+      {
+        "column": "age_band",
+        "count": 1,
+        "file": "visits.csv",
+        "locations": [
+          2
+        ]
+      }
+    ]
+  },
+  "planted": "1984-05-17",
+  "refused": true
+}
