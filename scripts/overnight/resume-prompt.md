@@ -22,6 +22,7 @@ You are the **Opus orchestrator** for `Kivaste/sinceai`. You dispatch implemente
 - **Merge after the recording:** #106 and #128. The video doesn't quote k. #127 comes after #106 and #118, merging by 20:00 or deferred. Verda testing is a planning-session side lane, off the critical path.
 - **#32 LLM: GO via the Mistral API (D47).** The key file is `C:\Users\kivas\AI\sinceai-out\llm\llm.env`, created by the human's wizard; load it into env vars only and never print it. #32 merges before the pin only if it doesn't delay #117; otherwise after.
 - **DEMO PIN `5b260ec` is pushed and proven** (`C:\Users\kivas\AI\sinceai-out\proof-5b260ec\`, also on #137). Plain and measured HEALTH-S1 RELEASED, the gate passed 41 of 41, both verify tiers exit 0. k stays provisional until #106. The D53 window closed at 16:58, and the lanes have resumed.
+- **D66 (human 23:58) amends D65:** #157 may slip past 00:00; its hard deadline is **06:30**, and the **final cut moves to 06:30** (replaces 06:00). **The demo pin waits for #157**, so the video is recorded on a release that includes it. State at D66: integration 007eb29 holds every must/should ticket except #157 (#157 r2 46b09db: Standards approved by Grok and Sol; Sol Spec CHANGES REQUIRED on the H-U2 coarsening recorded as a note rather than a sacrifice record). D66 is the human go for #157's release-logic work overnight. Keep the trains back to back overnight. Post every human decision as a `HUMAN DECISION` issue comment (the planning session polls for it), and keep the heartbeat fresh. Everything else in D65 stands.
 - **Timeline (D65, human 21:30; replaces every 23:00 deadline of D55/D63):**
   - **Demo freeze 00:00.** The must tier (#148, #149, #151, #146, #157) must be merged by 00:00. At 00:00 the planning session pins the integration tip as the **demo commit**, measures it, and rebuilds the bundle from it; video and story numbers come from that pin.
   - **#157 timebox:** approved by 23:45, else fallback (D64: #139 merges with the lift disclosed as a residual risk).
@@ -39,7 +40,7 @@ You are the **Opus orchestrator** for `Kivaste/sinceai`. You dispatch implemente
   - **Rule:** anything not merged by 00:00 goes to the overnight lane (D65).
   - **No new tickets** except high findings from reviews. Mediums and lows get the `post-hackathon` label.
   - **Merge as soon as approved:** no 30-min batching. Start a train when any ticket is approved; add others approved while it's being set up. Fast and slow tiers still run concurrently (D61).
-- **Steers come only from the planning session.** Decisions live in docs/decisions.md (D33-D65); read them after every hand-over.
+- **Steers come only from the planning session.** Decisions live in docs/decisions.md (D33-D66); read them after every hand-over.
 
 ### 2.1 Schedule the dependency graph, not a worker quota [D24, D29]
 Priority order. Keep independent work parallel within each tier, and sequence anything that edits the same files:
