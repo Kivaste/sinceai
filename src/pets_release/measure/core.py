@@ -19,7 +19,7 @@ from pets_release.kiteval import Lineage, run_scorecard
 from pets_release.manifest import MANIFEST_SCHEMA, not_measured
 from pets_release.measure.baselines import baseline_rows
 from pets_release.measure.errors import MeasureRejected
-from pets_release.measure.ids import RISK_AGGREGATES
+from pets_release.measure.ids import K_BELOW_5_SHARE, K_BELOW_5_SUFFIX, RISK_AGGREGATES
 
 _VALIDATOR = Draft202012Validator({"$defs": MANIFEST_SCHEMA["$defs"], **MANIFEST_SCHEMA["properties"]["measured"]})
 _BAD_ID_CHARS = re.compile(r"[^A-Za-z0-9._:+-]")
@@ -94,9 +94,44 @@ def _worst(risks: dict, suffix: str):
     return max(vals) if vals else None
 
 
+def _row_count(v) -> int:
+    if isinstance(v, bool) or not isinstance(v, int) or v <= 0:
+        raise MeasureRejected("risk_rows")
+    return v
+
+
+def _weighted_k_share(summary: dict):
+    """Row-weighted share of rows with k<5: sum(rate * rows) / sum(rows) over the released tables.
+
+    Fails closed (risk_rows) if a rate has no table entry, a table's row count is missing or not a positive
+    int, or a released table reports no rate while another does. None when no table reports the rate."""
+    rates = {k[: -len(K_BELOW_5_SUFFIX)]: _finite(v) for k, v in summary["risks"].items()
+             if k.endswith(K_BELOW_5_SUFFIX)}
+    tables = summary.get("tables")
+    if not isinstance(tables, list):
+        raise MeasureRejected("risk_rows")
+    if not rates:
+        return None  # the kit reports no k<5 rate for this scenario (e.g. no quasi-identifiers): not measured
+    rows = {}
+    for t in tables:
+        if not isinstance(t, dict) or not isinstance(t.get("table"), str):
+            raise MeasureRejected("risk_rows")
+        if t.get("status") == "released":
+            if t["table"] not in rates:
+                raise MeasureRejected("risk_rows")
+            rows[t["table"]] = _row_count(t.get("rows_protected"))
+    if set(rates) - set(rows):
+        raise MeasureRejected("risk_rows")
+    total = sum(rows.values())
+    return sum(rates[t] * n for t, n in rows.items()) / total
+
+
 def _privacy(before: dict, after: dict) -> list[dict]:
     """Privacy components only: utility and composite are not privacy (utility is in `utility.tasks`)."""
     comps = [{"component": "privacy", "before": _finite(before["privacy"]), "after": _finite(after["privacy"])}]
+    share_b, share_a = _weighted_k_share(before), _weighted_k_share(after)
+    if share_b is not None or share_a is not None:
+        comps.append({"component": K_BELOW_5_SHARE, "before": share_b, "after": share_a})
     for cid, suffix in RISK_AGGREGATES.items():
         b, a = _worst(before["risks"], suffix), _worst(after["risks"], suffix)
         if b is not None or a is not None:

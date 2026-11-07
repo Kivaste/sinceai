@@ -9,10 +9,13 @@ from __future__ import annotations
 
 # aggregate privacy component -> suffix of the kit's per-table risk key it is the worst (max) of
 RISK_AGGREGATES = {
-    "k_below_5_share": ": records with k<5",
+    "k_below_5_worst_table": ": records with k<5",
     "linkage_reid": ": linkage re-identification",
 }
-PRIVACY_IDS = ("privacy", *RISK_AGGREGATES)
+# k_below_5_share is the row-weighted share across tables (sum of rows with k<5 / sum of rows), not a max
+K_BELOW_5_SUFFIX = ": records with k<5"
+K_BELOW_5_SHARE = "k_below_5_share"
+PRIVACY_IDS = ("privacy", K_BELOW_5_SHARE, *RISK_AGGREGATES)
 PERSON_K_IDS = ("person_k.below_k_share", "person_k.min", "person_k.persons")
 RISK_PREFIX = "risk."
 BASELINE_METRICS = ("privacy", "utility_mean", "composite", "worst_reid", "residual_identifiers")
