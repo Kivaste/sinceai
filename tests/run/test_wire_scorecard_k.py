@@ -109,3 +109,30 @@ def test_skipped_or_contradicting_k_evaluation_fails_the_measure_cli(measured_ki
     assert wire.main(run_args(kit, out)[1:]) == 2
     assert "ScorecardRejected" in capsys.readouterr().err
     assert not out.exists()
+
+
+# ---- #113: row maps by identity, not presence ---------------------------------------------------------
+
+STUB_BLOCK = {k: {"status": "not_measured", "reason": "stub"} for k in ("utility", "privacy", "baselines", "search",
+                                                                       "redaction")}
+
+
+@pytest.mark.parametrize("planted", ["rowmap_ghost.csv", "rowmap_clinical_notes.csv", "ROWMAP_Ghost.csv"])
+def test_planted_row_map_in_the_scoring_folder_is_refused_by_the_measure_cli(tmp_path, monkeypatch, capsys, planted):
+    monkeypatch.setenv("PETS_HMAC_KEY", TEST_KEY)
+    kit, out = build_kit(tmp_path / "kit", edit=coarse_qis), tmp_path / "rel"
+    monkeypatch.setattr(wire, "measure", lambda *a, **k: dict(STUB_BLOCK))
+    monkeypatch.setattr(wire, "person_k_components", lambda *a, **k: [])
+    monkeypatch.setattr(wire, "_person_k_from_release", lambda **k: None)
+    real = pipeline.run_release
+
+    def run_release(**kw):
+        res = real(**kw)
+        if res.status == "released" and Path(kw["out"]).name == "pass1":  # plant next to the run's own maps
+            (res.scoring / planted).write_text("protected_row,original_record_id\n0,x\n", encoding="utf-8")
+        return res
+
+    monkeypatch.setattr(pipeline, "run_release", run_release)
+    assert wire.main(run_args(kit, out)[1:]) == 2
+    assert "row map" in capsys.readouterr().err
+    assert not out.exists()
