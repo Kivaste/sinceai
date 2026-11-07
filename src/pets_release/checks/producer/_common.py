@@ -15,7 +15,7 @@ from typing import Any
 
 import pandas as pd
 
-LOCATION_CAP = 1000
+LOCATION_CAP = 100  # same cap as ticket 04's records.MAX_LOCATIONS
 
 
 @dataclass(frozen=True)
@@ -60,13 +60,17 @@ def record(check: Check, status, unit, n, hits=0, violations=()):
 
 
 def guarded(check_ref: Callable[[], Check], unit: str):
-    """Wrap a run function so a CheckError becomes an ``error`` record (fail closed)."""
+    """Wrap a run function so any exception becomes an ``error`` record (fail closed).
+
+    Like ticket 04's runner, the record carries the status only: exception text
+    (which may quote a value, e.g. a parse error) is never copied anywhere.
+    """
 
     def deco(fn):
         def run(release, contract, context):
             try:
                 return fn(release, contract, context or {})
-            except CheckError:
+            except Exception:  # noqa: BLE001  (message may carry values; record the status only)
                 return record(check_ref(), "error", unit, 0)
 
         return run
@@ -79,7 +83,7 @@ def not_run(check: Check, unit: str):
 
 
 def release_dir(release) -> Path:
-    p = Path(release)
+    p = Path(getattr(release, "path", release))  # a folder path or ticket 04's Release
     if not p.is_dir():
         raise CheckError("release folder missing")
     return p

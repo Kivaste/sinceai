@@ -90,6 +90,64 @@ def test_original_identifier_in_a_cell_is_refused(h, ctx, value):
     assert value not in json.dumps(rec)
 
 
+@pytest.fixture
+def ctx_short(h, ctx):
+    src = ctx["source"]["ed_visits"].copy()
+    src["nick"] = ["Aki", "Ee", "Ola"]  # identifiers below the 4-char token threshold
+    src["phone"] = ["0401234567", "0459876543", "+358 50 111 2233"]
+    return dict(
+        ctx,
+        source={"ed_visits": src},
+        identifiers=ctx["identifiers"]
+        + [{"table": "ed_visits", "column": "nick"}, {"table": "ed_visits", "column": "phone"}],
+    )
+
+
+@pytest.mark.parametrize("value", ["Aki", "ee", " Ola "])
+def test_short_identifier_as_a_whole_cell_is_refused(h, ctx_short, value):
+    rec = ORIGINALS.run(_with_cell(h, "note", 1, value), {}, ctx_short)
+    assert rec["status"] == "fail"
+    assert rec["violations"][0]["locations"] == [1]
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        f"xx{HETUS[0]}yy",
+        "puh0401234567soita",
+        "tel:+3585011122334",
+        f"ref{NAMES[1].replace(' ', '')}end",
+    ],
+)
+def test_identifier_embedded_without_token_boundary_is_refused(h, ctx_short, value):
+    rec = ORIGINALS.run(_with_cell(h, "note", 2, value), {}, ctx_short)
+    assert rec["status"] == "fail", value
+    assert rec["violations"][0]["locations"] == [2]
+    assert value not in json.dumps(rec)
+
+
+def test_short_identifier_inside_longer_text_is_not_a_hit(h, ctx_short):
+    # below the substring minimum only whole-cell equality counts (documented)
+    rec = ORIGINALS.run(_with_cell(h, "note", 0, "Akira tuli"), {}, ctx_short)
+    assert rec["status"] == "pass"
+
+
+@pytest.mark.parametrize("key", ["short", "fifteen-chars!!", b"\x01" * 8])
+def test_key_too_short_to_scan_in_every_form_is_an_error(h, ctx, key):
+    rec = KEYS.run(_clean(h), {}, dict(ctx, keys=[KEY, key]))
+    assert rec["status"] == "error"
+
+
+@pytest.mark.parametrize("check", [ORIGINALS, HASHES, KEYS])
+def test_unexpected_exception_becomes_a_content_free_error(h, ctx, check):
+    rel = _clean(h)
+    secret = HETUS[0]
+    (rel / "privacy_manifest.json").write_text("{" + secret, encoding="utf-8")  # malformed JSON
+    rec = check.run(rel, {}, ctx)
+    assert rec["status"] == "error"
+    assert secret not in json.dumps(rec)
+
+
 @pytest.mark.parametrize(
     "digest",
     [

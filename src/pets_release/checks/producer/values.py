@@ -1,6 +1,18 @@
 """Producer-scope value checks: original identifier survival, unkeyed hashes, key material.
 
 Each scans every cell of every released CSV and every string in the manifest.
+
+Original-value survival is a hit when any of these holds for a cell:
+  - whole-cell equality (case-folded, whitespace collapsed) with an original value, any length;
+  - the original's alphanumeric-compact form (case-folded, separators removed) of at least
+    SUBSTRING_MIN (8) characters occurs anywhere in the cell's compact form, with no token
+    boundary required (cells that are a single 32+ hex digest are left to the hash check);
+  - a token n-gram equals an original of at least 4 normalised characters (or its compact form
+    of at least 6 characters).
+Shorter originals inside longer text are not hits; that floor is deliberate (false refusals).
+
+Key material: every supplied key must be at least MIN_KEY_FORM (16) characters/bytes, so every
+form (raw, hex, base64 std/url, padded or not) is scannable; a shorter key is an error.
 Originals and hash sets are built in memory from the source data and never
 leave this module; records carry only schema names, counts and row indices.
 
@@ -42,6 +54,10 @@ _EDGE = ".!?*"
 _NON_ALNUM = re.compile(r"[\W_]+", re.UNICODE)
 _HEX = re.compile(r"[0-9a-fA-F]{32,}")
 _HEX_LENS = (32, 40, 64)
+# A cell that is one hex digest/token is not substring-scanned for originals: the
+# reversible-hash check covers it, and a digit run inside a keyed digest is chance.
+_DIGEST = re.compile(r"[0-9a-fA-F]{32,}")
+SUBSTRING_MIN = 8
 
 
 def _tokens(s: str) -> list[str]:
@@ -54,6 +70,10 @@ def _norm(s: str) -> str:
 
 def _compact(s: str) -> str:
     return _NON_ALNUM.sub("", s.casefold())
+
+
+def _whole(s: str) -> str:
+    return " ".join(s.casefold().split())
 
 
 def _cells(release):
@@ -143,9 +163,15 @@ def _run_originals(release, contract, context):
         return not_run(ORIGINAL_VALUES, "cells")
     norm: dict[str, set] = defaultdict(set)
     compact: dict[str, set] = defaultdict(set)
+    whole_cell: dict[str, set] = defaultdict(set)
+    prefix: dict[str, list] = defaultdict(list)  # first SUBSTRING_MIN compact chars -> [(compact, label)]
     max_gram = 1
     for label, vals in _source_values(context):
         for v in vals:
+            whole_cell[_whole(v)].add(label)
+            cv = _compact(v)
+            if len(cv) >= SUBSTRING_MIN:
+                prefix[cv[:SUBSTRING_MIN]].append((cv, label))
             nv = _norm(v)
             if len(nv) >= MIN_NORM:
                 norm[nv].add(label)
@@ -155,7 +181,15 @@ def _run_originals(release, contract, context):
                 compact[cv].add(label)
 
     def match(text):
-        found = set()
+        found = set(whole_cell.get(_whole(text), ()))
+        c = _compact(text)
+        if not _DIGEST.fullmatch(text.strip()):
+            for i in range(len(c) - SUBSTRING_MIN + 1):
+                cands = prefix.get(c[i : i + SUBSTRING_MIN])
+                if cands:
+                    for cv, label in cands:
+                        if c.startswith(cv, i):
+                            found.add(label)
         toks = _tokens(text)
         ctoks = [_compact(t) for t in toks]
         whole = _compact(text)
@@ -260,8 +294,8 @@ def _run_keys(release, contract, context):
         return not_run(KEY_MATERIAL, "cells")
     exact, lower = set(), set()
     for k in keys:
-        if not k:
-            raise CheckError("empty key material")
+        if not k or len(k) < MIN_KEY_FORM:
+            raise CheckError("key material too short to scan in every form")
         e, lo = _key_forms(k)
         exact |= e
         lower |= lo

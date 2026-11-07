@@ -11,6 +11,13 @@ assumes a join is unavailable to the recipient.
 If the person column itself is released as a token, a recipient can link all
 of a person's records, so the unit becomes the person's full set of records.
 
+Unidentified records (person ID empty in source): such a record (with its joined
+rows) is one unidentified unit. It never adds to any class's person count, so it
+cannot inflate anyone's k, and it is itself counted as below k: it is a hit under
+the label ``unidentifiedPersonRecords`` (count = units, locations = person-table
+release rows) and is in the denominator. Local suppression of those records
+clears the hit, so the rule never makes a release impossible.
+
 Context (producer scope; any missing item → ``not_run``):
   k:            int, required k
   source:       {table: DataFrame (dtype=str)} original tables
@@ -23,6 +30,7 @@ Context (producer scope; any missing item → ``not_run``):
 from __future__ import annotations
 
 from collections import defaultdict
+from typing import NamedTuple
 
 from ._common import (
     Check,
@@ -38,6 +46,7 @@ from ._common import (
 
 ABSENT = "\x00absent"
 LABEL = "quasiIdentifiersBelowK"
+UNIDENTIFIED = "unidentifiedPersonRecords"
 
 
 def _k(context) -> int:
@@ -107,8 +116,15 @@ def _anchor_ids(table, release_n, context):
     return out
 
 
-def person_k_values(release, contract, context):
-    """Return ``(per_person_k: {person: k}, below_rows: [person-table release rows])``.
+class PersonK(NamedTuple):
+    per_person: dict  # identified person -> k (in memory only; never exported)
+    below_rows: list  # person-table release rows of identified persons below k
+    unidentified: int  # count of unidentified units (records with no person ID)
+    unidentified_rows: list  # person-table release rows of those units
+
+
+def person_k_values(release, contract, context) -> PersonK:
+    """Per-person k over every released QI. See the module docstring for the rules.
 
     Raises CheckError on any fail-closed condition. Values stay in memory only.
     """
@@ -120,10 +136,9 @@ def person_k_values(release, contract, context):
         raise CheckError("person table record key missing")
     psrc = _source_index(context["source"], person_t, person_c)
     _source_index(context["source"], person_t, pk)
-    # a record with no person ID is its own person (identity unknown, never merged)
+    # a record with no person ID maps to None: an unidentified unit (see module docstring)
     anchor_person = {
-        a: (p if isinstance(p, str) and p.strip() else f"{ABSENT}:{a}")
-        for a, p in zip(psrc[pk], psrc[person_c])
+        a: (p if isinstance(p, str) and p.strip() else None) for a, p in zip(psrc[pk], psrc[person_c])
     }
 
     qis = qi_by_table(contract)
@@ -161,15 +176,18 @@ def person_k_values(release, contract, context):
     tokens = {(x["table"], x["column"]) for x in (contract or {}).get("tokens", []) or []}
     person_linked = (person_t, person_c) in tokens
 
+    identified = [a for a in parts if anchor_person[a] is not None]
+    unidentified = sorted(a for a in parts if anchor_person[a] is None)
+
     units: dict[str, list[tuple]] = defaultdict(list)  # person -> unit signatures
     if person_linked:
         by_person = defaultdict(list)
-        for a in parts:
+        for a in identified:
             by_person[anchor_person[a]].append(anchor_sig(a))
         for p, sigs in by_person.items():
             units[p].append(tuple(sorted(sigs)))
     else:
-        for a in parts:
+        for a in identified:
             units[anchor_person[a]].append(anchor_sig(a))
 
     class_persons: dict[tuple, set] = defaultdict(set)
@@ -181,10 +199,11 @@ def person_k_values(release, contract, context):
     below_rows = []
     if k is not None:
         below = {p for p, v in per_person.items() if v < k}
-        for a, rows in person_rows.items():
+        for a in identified:
             if anchor_person[a] in below:
-                below_rows.extend(rows)
-    return per_person, sorted(below_rows)
+                below_rows.extend(person_rows.get(a, ()))
+    unid_rows = sorted(i for a in unidentified for i in person_rows.get(a, ()))
+    return PersonK(per_person, sorted(below_rows), len(unidentified), unid_rows)
 
 
 def _person_k_check():
@@ -197,17 +216,23 @@ def _run_person_k(release, contract, context):
     if any(context.get(n) is None for n in needed):
         return not_run(PERSON_K, "persons")
     k = _k(context)
-    per_person, below_rows = person_k_values(release, contract, context)
-    n = len(per_person)
+    res = person_k_values(release, contract, context)
+    n = len(res.per_person) + res.unidentified
     if n == 0:
         raise CheckError("no persons in release")
-    hits = sum(1 for v in per_person.values() if v < k)
+    below = sum(1 for v in res.per_person.values() if v < k)
+    pt = context["person"]["table"]
+    cols = "+".join(qi_by_table(contract).get(pt, [])) or "*"
     vs = []
-    if hits:
-        pt = context["person"]["table"]
-        cols = "+".join(qi_by_table(contract).get(pt, [])) or "*"
-        vs.append(violation(PERSON_K.name, LABEL, f"{pt}.csv", cols, below_rows))
-        vs[0]["count"] = hits
+    if below:
+        v = violation(PERSON_K.name, LABEL, f"{pt}.csv", cols, res.below_rows)
+        v["count"] = below  # persons
+        vs.append(v)
+    if res.unidentified:
+        v = violation(PERSON_K.name, UNIDENTIFIED, f"{pt}.csv", cols, res.unidentified_rows)
+        v["count"] = res.unidentified  # unidentified units
+        vs.append(v)
+    hits = below + res.unidentified
     return record(PERSON_K, "fail" if hits else "pass", "persons", n, hits, vs)
 
 

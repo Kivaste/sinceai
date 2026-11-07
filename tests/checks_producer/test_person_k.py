@@ -102,14 +102,37 @@ def test_released_person_token_links_visits_of_one_person(h):
     assert linked["violations"][0]["locations"] == [10, 11]
 
 
-def test_records_with_empty_person_id_count_as_separate_persons(h):
-    persons = [""] * 6 + ["P01", "P02", "P03", "P04"]
-    rel = h.release({"ed_visits": {"visit_tok": VISITS, "sex": ["F"] * 6 + ["M"] * 4}})
-    rec = PERSON_K.run(rel, h.contract([("ed_visits", "sex")]), _health_ctx(h, VISITS, persons))
-    # six unknown-person F visits are six persons (k=6, pass); the four M persons fail
-    assert rec["denominator"]["n"] == 10
-    assert rec["hits"] == 4
-    assert rec["violations"][0]["locations"] == [6, 7, 8, 9]
+def test_unidentified_records_never_inflate_k_and_count_as_below_k(h):
+    # 4 identified F persons + 3 F visits with no person ID (possibly one person).
+    # If the unidentified visits counted as persons, the F class would reach k=7.
+    visits = VISITS[:7]
+    persons = ["P01", "P02", "P03", "P04", "", "", ""]
+    rel = h.release({"ed_visits": {"visit_tok": visits, "sex": ["F"] * 7}})
+    rec = PERSON_K.run(rel, h.contract([("ed_visits", "sex")]), _health_ctx(h, visits, persons))
+    assert rec["status"] == "fail"
+    assert rec["denominator"] == {"unit": "persons", "n": 7}  # 4 persons + 3 unidentified units
+    assert rec["hits"] == 7
+    by_label = {v["label"]: v for v in rec["violations"]}
+    assert by_label["quasiIdentifiersBelowK"]["count"] == 4
+    assert by_label["quasiIdentifiersBelowK"]["locations"] == [0, 1, 2, 3]
+    assert by_label["unidentifiedPersonRecords"]["count"] == 3
+    assert by_label["unidentifiedPersonRecords"]["locations"] == [4, 5, 6]
+
+
+def test_unidentified_records_do_not_lower_others_and_suppressing_them_passes(h):
+    visits = VISITS[:8]
+    persons = ["P01", "P02", "P03", "P04", "P05", "", "", ""]
+    rel = h.release({"ed_visits": {"visit_tok": visits, "sex": ["F"] * 8}})
+    rec = PERSON_K.run(rel, h.contract([("ed_visits", "sex")]), _health_ctx(h, visits, persons))
+    by_label = {v["label"]: v for v in rec["violations"]}
+    assert set(by_label) == {"unidentifiedPersonRecords"}  # the 5 identified persons are k=5
+    assert rec["hits"] == 3
+    # local suppression of the unidentified visits makes the release pass
+    kept = visits[:5]
+    rel2 = h.release({"ed_visits": {"visit_tok": kept, "sex": ["F"] * 5}})
+    ctx = _health_ctx(h, visits, persons)
+    ctx["rowmaps"] = {"ed_visits": h.rowmap(kept)}
+    assert PERSON_K.run(rel2, h.contract([("ed_visits", "sex")]), ctx)["status"] == "pass"
 
 
 def test_not_run_without_source_or_k(h):
