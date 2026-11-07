@@ -56,7 +56,7 @@ FIRST_A = ["Ka", "Mi", "To", "Lu", "Ve", "Ni", "Sa", "Ra", "Ju", "Ha", "Pe", "Ol
 FIRST_B = ["rin", "lo", "mas", "vi", "ko", "ra", "ten", "mo", "ssa", "ni"]
 LAST_A = ["Kor", "Vael", "Mast", "Ruut", "Pello", "Hark", "Sund", "Tuur", "Lind", "Nyk", "Aal", "Vir"]
 LAST_B = ["ainen", "ola", "mäki", "berg", "nen", "koski", "lund", "ström"]
-STREET_STEM = ["Koivu", "Kuusi", "Pajan", "Meri", "Harju", "Lehto", "Niitty", "Rinne", "Kallio", "Aallon"]
+STREET_STEM = ["SynthKoivu", "SynthKuusi", "SynthPajan", "SynthMeri", "SynthHarju", "SynthLehto", "SynthNiitty", "SynthRinne", "SynthKallio", "SynthAallon"]
 STREET_END = ["katu", "tie", "kuja", "polku"]
 MUNICIPALITIES = [
     "Pellonmaa", "Harjuvalli", "Kivilahti", "Rantalinna", "Suvikoski", "Ylikorpi", "Alamäki",
@@ -67,8 +67,8 @@ POSTCODES = [
 ]
 MUNI_WEIGHTS = [20, 16, 13, 11, 9, 7, 6, 5, 4, 3]
 NON_RESIDENT = "non-resident"
-PHYSICIANS = [(f"PHY-{i:03d}", f"{LAST_A[i]}{LAST_B[i % len(LAST_B)]}") for i in range(12)]
-NURSES = [(f"NUR-{i:03d}", f"{LAST_A[(i + 3) % 12]}{LAST_B[(i + 2) % len(LAST_B)]}") for i in range(10)]
+PHYSICIANS = [(f"SYNP-{i:03d}", f"{LAST_A[i]}{LAST_B[i % len(LAST_B)]}") for i in range(12)]
+NURSES = [(f"SYNR-{i:03d}", f"{LAST_A[(i + 3) % 12]}{LAST_B[(i + 2) % len(LAST_B)]}") for i in range(10)]
 
 # code -> (group, complaint phrases). Codes are public ICD-10 identifiers.
 ICD_GROUPS = [
@@ -255,11 +255,11 @@ def _phone(rng: random.Random) -> str:
 
 
 def _hetu(rng: random.Random, dob: datetime, female: bool) -> str:
-    """Synthetic identity code: individual number 900-999 is the reserved test range."""
+    """Synthetic identity code: day 00 (never a valid date) and the reserved 900-999 individual range."""
     ind = rng.randint(900, 998)
     if (ind % 2 == 0) != female:  # even individual number = female
         ind += 1
-    base = f"{dob.day:02d}{dob.month:02d}{dob.year % 100:02d}"
+    base = f"00{dob.month:02d}{dob.year % 100:02d}"  # day 00 is impossible, so no real code collides
     check = "0123456789ABCDEFHJKLMNPRSTUVWXY"[int(base + f"{ind:03d}") % 31]
     sep = "A" if dob.year >= 2000 else "-"
     return f"{base}{sep}{ind:03d}{check}"
@@ -323,7 +323,7 @@ def _health(dest: Path, rng: random.Random) -> None:
     for n, (arrival, p, code_i) in enumerate(raw, start=1):
         pat = patients[p]
         code, group, phrases = ICD_GROUPS[code_i]
-        visit_id = f"ED25-{n:06d}"
+        visit_id = f"SYNV-{n:06d}"
         triage = rng.choices(TRIAGE, TRIAGE_WEIGHTS)[0]
         mode = rng.choices(ARRIVAL_MODES, ARRIVAL_WEIGHTS)[0]
         disposition = rng.choices(DISPOSITIONS, DISPOSITION_WEIGHTS)[0]
@@ -338,7 +338,7 @@ def _health(dest: Path, rng: random.Random) -> None:
         visits.append([
             visit_id, pat["hetu"], pat["name"], pat["dob"].strftime("%Y-%m-%d"), pat["sex"], pat["phone"],
             pat["address"], pat["postcode"], pat["municipality"], arrival.strftime(TS), mode,
-            f"AMB-{rng.randint(1, 9):02d}" if mode == "ambulance" else "", triage, rng.choice(phrases),
+            f"SYNU-{rng.randint(1, 9):02d}" if mode == "ambulance" else "", triage, rng.choice(phrases),
             code, secondary, str(rng.randint(95, 175)), str(rng.randint(55, 100)), str(rng.randint(52, 125)),
             str(rng.randint(11, 26)), f"{temp:.1f}", str(rng.randint(90, 100)), str(rng.randint(0, 9)),
             phys_id, phys_name, discharge.strftime(TS), str(los), disposition, "1" if later else "0",
@@ -353,12 +353,12 @@ def _health(dest: Path, rng: random.Random) -> None:
             lab_rows.append(("B-Hb", "Haemoglobin", str(hb), "g/L", "117-175", "L" if hb < 117 else ""))
         for test_code, test_name, value, unit, ref, flag in lab_rows:
             lab_n += 1
-            labs.append([f"LAB25-{lab_n:06d}", visit_id, test_code, test_name, value, unit, ref, flag, sampled])
+            labs.append([f"SYNL-{lab_n:06d}", visit_id, test_code, test_name, value, unit, ref, flag, sampled])
         lang = rng.choice(NOTE_LANGS)
         author_id, author_name = rng.choice(NURSES if n % 2 else PHYSICIANS)
         note_n += 1
         notes.append([
-            f"NOTE25-{note_n:06d}", visit_id, "nurse_triage" if n % 2 else "physician", author_id, author_name,
+            f"SYNN-{note_n:06d}", visit_id, "nurse_triage" if n % 2 else "physician", author_id, author_name,
             (arrival + timedelta(minutes=10)).strftime(TS), lang, NOTE_TEXT[lang].format(name=pat["name"]),
         ])
         if disposition != "cancelled_duplicate":
@@ -366,7 +366,7 @@ def _health(dest: Path, rng: random.Random) -> None:
             stats[(f"{iso[0]}-W{iso[1]:02d}", pat["municipality"], _age_band(age), pat["sex"], group)] += 1
 
     stat_rows = [
-        [f"WS25-{i:06d}", *key, str(count)] for i, (key, count) in enumerate(sorted(stats.items()), start=1)
+        [f"SYNS-{i:06d}", *key, str(count)] for i, (key, count) in enumerate(sorted(stats.items()), start=1)
     ]
     out = dest / "health"
     _write(out / "ed_visits.csv", ED_VISITS_COLUMNS, visits)
@@ -383,7 +383,7 @@ def _customer_service(dest: Path, rng: random.Random) -> None:
         dob = datetime(rng.randint(1945, 2005), rng.randint(1, 12), rng.randint(1, 28))
         first, last = _first(rng), _last(rng)
         customers.append({
-            "id": f"CUST-{i:05d}", "name": f"{first} {last}", "number": f"{rng.randint(1000000, 9999999)}",
+            "id": f"SYNC-{i:05d}", "name": f"{first} {last}", "number": f"SYN{rng.randint(1000000, 9999999)}",
             "hetu": _hetu(rng, dob, female), "street": _street(rng),
             "postcode": rng.choice(POSTCODES), "city": rng.choice(MUNICIPALITIES),
             "email": f"{first.lower()}.{last.lower()}@example.test", "phone": _phone(rng),
@@ -395,11 +395,11 @@ def _customer_service(dest: Path, rng: random.Random) -> None:
         cust_rows.append([
             c["id"], c["number"], c["name"], c["hetu"], c["street"], c["postcode"], c["city"], c["email"],
             c["phone"], c["lang"], since.strftime("%Y-%m-%d"), rng.choice(PRODUCTS),
-            f"CN-{rng.randint(100000, 999999)}", rng.choice(PAYMENT_METHODS), c["iban"],
+            f"SYN-CN-{rng.randint(100000, 999999)}", rng.choice(PAYMENT_METHODS), c["iban"],
             rng.choice(["true", "false"]), "1" if rng.random() < 0.06 else "0", rng.choice(ACCESSIBILITY),
         ])
 
-    agents = [(f"AGT-{i:03d}", f"{_first(rng)} {_last(rng)}") for i in range(1, 13)]
+    agents = [(f"SYNA-{i:03d}", f"{_first(rng)} {_last(rng)}") for i in range(1, 13)]
     splits = ["train"] * N_TRAIN + ["eval"] * N_EVAL
     # cycle intents so every class is present in both splits, then shuffle assignment order
     intents = [INTENT_CLASSES[i % len(INTENT_CLASSES)] for i in range(len(splits))]
@@ -436,13 +436,13 @@ def _customer_service(dest: Path, rng: random.Random) -> None:
         for seq, (speaker, text) in enumerate(script, start=1):
             turn_n += 1
             ts = ts + timedelta(seconds=rng.randint(15, 90))
-            turn_rows.append([f"T25-{turn_n:07d}", f"CONV-{k:05d}", str(seq), speaker, ts.strftime(TS), text])
+            turn_rows.append([f"SYNT-{turn_n:07d}", f"SYNQ-{k:05d}", str(seq), speaker, ts.strftime(TS), text])
         handle = int(abs(rng.gauss(240 + 25 * INTENT_CLASSES.index(intent), 70))) + 60
         sentiment = rng.choices(SENTIMENTS, [3, 5, 4])[0]
         csat = "" if rng.random() < 0.58 else str({"negative": rng.randint(1, 3), "neutral": rng.randint(2, 4), "positive": rng.randint(4, 5)}[sentiment])
         resolved = "true" if rng.random() < (0.55 + 0.02 * (INTENT_CLASSES.index(intent) % 10)) else "false"
         conv_rows.append([
-            f"CONV-{k:05d}", cust["id"], agent_id, agent_name, channel, language, started.strftime(TS), intent,
+            f"SYNQ-{k:05d}", cust["id"], agent_id, agent_name, channel, language, started.strftime(TS), intent,
             sentiment, csat, resolved, str(handle), str(len(script)), split,
             f"Customer {cust['name']} contacted us about {intent.replace('_', ' ')}.",
         ])

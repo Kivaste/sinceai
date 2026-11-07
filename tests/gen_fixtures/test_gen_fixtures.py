@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import importlib.util
 import subprocess
+import sys
 from pathlib import Path
 
 import pandas as pd
@@ -24,7 +25,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts" / "gen_fixtures.py"
 COMMITTED = ROOT / "tests" / "fixtures" / "minikit"
-PYTHON = Path(r"C:\Users\kivas\AI\sinceai-hackaton\.venv\Scripts\python.exe")
+PYTHON = Path(sys.executable)
 
 HEALTH_COLUMNS = {
     "ed_visits": [
@@ -220,7 +221,7 @@ def test_leading_zero_postcode_is_text(tmp_path, gen):
     assert zero_codes
     assert zero_codes[0] in raw
     visits = pd.read_csv(tmp_path / "kit" / "health" / "ed_visits.csv", dtype=str)
-    assert visits["visit_id"].str.match(r"ED25-\d{6}$").all()
+    assert visits["visit_id"].str.match(r"SYNV-\d{6}$").all()
 
 
 def test_committed_fixture_bytes_are_protected_from_line_ending_conversion():
@@ -234,3 +235,37 @@ def test_identity_codes_use_the_reserved_synthetic_range(tmp_path, gen):
     visits = pd.read_csv(tmp_path / "kit" / "health" / "ed_visits.csv", dtype=str)
     individual = visits["patient_hetu"].str[7:10]
     assert individual.str.match(r"9\d\d$").all()
+
+
+def test_identifiers_live_in_namespaces_the_kit_cannot_use(tmp_path, gen):
+    gen.generate(tmp_path / "kit")
+    kit = tmp_path / "kit"
+
+    def col(domain, table, column):
+        return pd.read_csv(kit / domain / f"{table}.csv", dtype=str, keep_default_na=False)[column]
+
+    checks = [
+        ("health", "ed_visits", "visit_id", r"SYNV-\d{6}$"),
+        ("health", "ed_visits", "patient_hetu", r"00\d{4}[-A]9\d\d[0-9A-Y]$"),
+        ("health", "ed_visits", "home_address", r"Synth[A-Za-z]+ \d+$"),
+        ("health", "ed_visits", "attending_physician_id", r"SYNP-\d{3}$"),
+        ("health", "lab_results", "lab_id", r"SYNL-\d{6}$"),
+        ("health", "lab_results", "visit_id", r"SYNV-\d{6}$"),
+        ("health", "clinical_notes", "note_id", r"SYNN-\d{6}$"),
+        ("health", "published_weekly_stats", "stat_id", r"SYNS-\d{6}$"),
+        ("customer_service", "customers", "customer_id", r"SYNC-\d{5}$"),
+        ("customer_service", "customers", "customer_number", r"SYN\d{7}$"),
+        ("customer_service", "customers", "hetu", r"00\d{4}[-A]9\d\d[0-9A-Y]$"),
+        ("customer_service", "customers", "street_address", r"Synth[A-Za-z]+ \d+$"),
+        ("customer_service", "customers", "contract_number", r"SYN-CN-\d{6}$"),
+        ("customer_service", "conversations", "conversation_id", r"SYNQ-\d{5}$"),
+        ("customer_service", "conversations", "customer_id", r"SYNC-\d{5}$"),
+        ("customer_service", "conversations", "agent_id", r"SYNA-\d{3}$"),
+        ("customer_service", "turns", "turn_id", r"SYNT-\d{7}$"),
+        ("customer_service", "turns", "conversation_id", r"SYNQ-\d{5}$"),
+    ]
+    for domain, table, column, pattern in checks:
+        values = col(domain, table, column)
+        values = values[values != ""]
+        bad = values[~values.str.match(pattern)]
+        assert bad.empty, (table, column, len(bad))
