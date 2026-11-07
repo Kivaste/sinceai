@@ -44,8 +44,8 @@ def test_unchanged_release_reruns_the_check(real_bed, verify_cli):
 
 
 def test_folded_withheld_value_in_manifest_text_fails_verify_full(real_bed, tb, verify_cli):
-    value = sorted((v for v in _source(real_bed, "ed_visits", "chief_complaint").unique() if len(v) >= 6),
-                   key=lambda v: (-len(v), v))[0]
+    value = min((v for v in _source(real_bed, "ed_visits", "chief_complaint").unique() if len(v) >= 6),
+                key=lambda v: (-len(v), v))
     planted = "  ".join(value.upper().split(" "))
     m = tb.load(real_bed.release)
     m["fitFor"][0]["reason"] = f"{m['fitFor'][0]['reason']} {planted}"
@@ -59,7 +59,7 @@ def test_folded_withheld_value_in_manifest_text_fails_verify_full(real_bed, tb, 
 def test_withheld_value_as_map_key_fails_verify_full(real_bed, tb, verify_cli):
     shaped = re.compile(r"[A-Za-z][A-Za-z0-9_]{5,63}")
     # clinical_notes is a withheld table in HEALTH-S1; note_type is a non-identifier category column
-    value = sorted(v for v in _source(real_bed, "clinical_notes", "note_type").unique() if shaped.fullmatch(v))[0]
+    value = min(v for v in _source(real_bed, "clinical_notes", "note_type").unique() if shaped.fullmatch(v))
     m = tb.load(real_bed.release)
     m["pets"][0]["params"][value] = 1
     real_bed.resign(m)

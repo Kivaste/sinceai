@@ -15,6 +15,8 @@ from pathlib import Path
 import pandas as pd
 
 from pets_release.checks import RegistryError, all_checks, run_checks
+from pets_release.checks.producer.manifest_values import CHECK as MANIFEST_VALUE_CHECK  # #149: one scan
+from pets_release.checks.producer.manifest_values import SCAN_MIN_LEN, usable_source  # noqa: F401  (re-export)
 from pets_release.kit import Kit, KitError
 from pets_release.kiteval import Lineage
 from pets_release.manifest import (
@@ -35,7 +37,6 @@ from pets_release.writer.assemble import (
 
 FILE_NAME = re.compile(r"^[A-Za-z0-9_]{1,64}\.csv$")
 SCORING_NAME = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.\-]{0,99}$")
-SCAN_MIN_LEN = 6  # released cell values at least this long must not appear in manifest text (outside `contract`)
 REFUSAL_REPORT = "refusal_report.json"
 GATE_REPORT = "gate_report.json"
 LINEAGE_FILE = "lineage.json"
@@ -159,30 +160,13 @@ def _gate_reasons(result, prefix: str) -> list[str]:
     return out
 
 
-def _strings(obj, acc: list) -> list:
-    """Every string under ``obj``: values and map KEYS at any depth (#149: a value copied into a key is text too)."""
-    if isinstance(obj, str):
-        acc.append(obj)
-    elif isinstance(obj, dict):
-        for k, v in obj.items():
-            acc.append(str(k))
-            _strings(v, acc)
-    elif isinstance(obj, (list, tuple)):
-        for v in obj:
-            _strings(v, acc)
-    return acc
-
-
 def _source_missing(context: Mapping) -> list[str]:
     """#149: the source-value scan needs the source tables. Absent, empty or malformed is unknown, and unknown
     refuses (fail closed) instead of scanning nothing."""
-    source = context.get("source")
-    if isinstance(source, Mapping) and source and all(isinstance(df, pd.DataFrame) for df in source.values()):
-        return []
-    return ["selfscan:source-missing"]
+    return [] if usable_source(context) else ["selfscan:source-missing"]
 
 
-def _self_scan(build: Path, c: Candidate, manifest: dict, context: dict) -> list[str]:
+def _self_scan(build: Path, c: Candidate, context: dict) -> list[str]:
     reasons = []
     expected = sorted([t.name for t in c.tables] + [MANIFEST_FILENAME])
     if sorted(p.name for p in build.iterdir()) != expected or not all(p.is_file() for p in build.iterdir()):
@@ -191,33 +175,13 @@ def _self_scan(build: Path, c: Candidate, manifest: dict, context: dict) -> list
     verify = run_checks(build, c.contract, {**context, "phase": "verify"})
     reasons += _gate_reasons(verify, "selfscan")
     reasons += [r.replace("gate:", "selfscan:") for r in _registry_reasons(verify.records)]
-    strings = _strings({k: v for k, v in manifest.items() if k != "contract"}, [])
-    released = set()
-    for t in c.tables:
-        released.update(v for v in pd.unique(t.frame.to_numpy(dtype=object).ravel()) if len(v) >= SCAN_MIN_LEN)
-    # #80: every source cell value (withheld tables and columns, suppressed rows, raw forms) is scanned too. The
-    # one exemption is by identity, not frequency: a manifest string that IS a table or column header name (the
-    # writer's structured table/column fields) may contain a source value, e.g. a category inside a column name.
-    missing = _source_missing(context)
-    reasons += missing
-    source = {} if missing else context["source"]
-    headers = {stem for stem in source} | {str(col) for df in source.values() for col in df.columns} \
-        | {t.name[:-4] for t in c.tables} | {col for t in c.tables for col in t.frame.columns}
-    from_source = set()
-    for df in source.values():
-        for col in df.columns:
-            from_source.update(v for v in pd.unique(df[col].to_numpy(dtype=object))
-                               if isinstance(v, str) and len(v) >= SCAN_MIN_LEN)
-    if _occurs(released, "\x00".join(strings)) or _occurs(from_source, "\x00".join(s for s in strings
-                                                                                     if s not in headers)):
+    reasons += _source_missing(context)
+    # #80/#149: the manifest source/released-value scan (every key and string, contract included, folded) is the
+    # registered check, run above in the verify phase over the written manifest; anything but a pass refuses.
+    rec = [r for r in verify.records if r.check == MANIFEST_VALUE_CHECK]
+    if len(rec) != 1 or rec[0].status != "pass":
         reasons.append("selfscan:manifest-value")
     return reasons
-
-
-def _occurs(values: set, text: str) -> bool:
-    """Any value (each >= SCAN_MIN_LEN long) a substring of ``text``. An n-gram prefilter keeps big kits fast."""
-    grams = {text[i:i + SCAN_MIN_LEN] for i in range(len(text) - SCAN_MIN_LEN + 1)}
-    return any(v[:SCAN_MIN_LEN] in grams and v in text for v in values)
 
 
 def _publish_scoring(staging: Path, scoring: Path) -> None:
@@ -270,7 +234,7 @@ def write_release(candidate: Candidate, out, master_key, kit: Kit, *, context: M
             reasons += [f"manifest:{e}" for e in validate_manifest(manifest)]
         if not reasons:
             (build / MANIFEST_FILENAME).write_bytes(canonical_bytes(manifest))
-            reasons += _self_scan(build, candidate, manifest, context)
+            reasons += _self_scan(build, candidate, context)
         reasons = tuple(sorted(set(reasons)))
         if reasons:
             shutil.rmtree(build)

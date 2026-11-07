@@ -156,7 +156,10 @@ def test_withheld_note_as_manifest_map_key_refuses(tmp_path, monkeypatch, capsys
     assert not out.exists()
     report = (out.parent / "rel.scoring" / "refusal_report.json").read_text(encoding="utf-8")
     reasons = json.loads(report)["reasons"]
-    assert reasons == ["selfscan:manifest-value"]  # the planted key passed every earlier check; only the scan refuses
+    # the planted key passed every earlier check; only the manifest value scan (the registered check, read by
+    # the writer's self-scan) refuses
+    assert reasons == ["selfscan:check:producer.manifest-source-values:status:fail", "selfscan:manifest-value",
+                       "selfscan:refused"]
     assert KEY_NOTE not in report
 
 
