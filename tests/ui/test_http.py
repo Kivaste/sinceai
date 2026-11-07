@@ -4,10 +4,11 @@ from __future__ import annotations
 import io
 import json
 import os
+import signal
 import subprocess
 import sys
 import time
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from pathlib import Path
 from urllib.error import HTTPError
 from urllib.parse import parse_qs, urlsplit
@@ -70,7 +71,7 @@ with response:
 
 @contextmanager
 def running(tmp_path, *, extra_env=None, edit=coarse_qis, probe=False, verifier_unavailable=False,
-            remove_refusal_report=False, record_commands=False, launch_extra=()):
+            remove_refusal_report=False, record_commands=False, launch_extra=(), waiting_probe_child=False):
     kit = build_kit(tmp_path / "kit", edit)
     env = server_env()
     env.update(extra_env or {})
@@ -78,7 +79,7 @@ def running(tmp_path, *, extra_env=None, edit=coarse_qis, probe=False, verifier_
     if probe:
         trigger, output = tmp_path / "probe-start", tmp_path / "probe-result.json"
         code = f'''
-import json, pathlib, runpy, socket, subprocess, sys, threading, time
+import json, os, pathlib, runpy, socket, subprocess, sys, threading, time
 def probe():
     trigger = pathlib.Path({str(trigger)!r})
     while not trigger.exists():
@@ -93,6 +94,11 @@ def probe():
     temporary = output.with_suffix(".tmp")
     temporary.write_text(json.dumps([blocked, child.returncode != 0 and b"offline guard" in child.stderr]))
     temporary.replace(output)
+if {waiting_probe_child!r}:
+    waiting_child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(300)"],
+                                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    pathlib.Path({str(tmp_path / 'probe-child-pid')!r}).write_text(str(waiting_child.pid))
+pathlib.Path({str(tmp_path / 'probe-pid')!r}).write_text(str(os.getpid()))
 threading.Thread(target=probe, daemon=True).start()
 sys.argv = {command[2:]!r}
 runpy.run_module("pets_release.ui", run_name="__main__")
@@ -119,15 +125,26 @@ sys.argv = {command[2:]!r}
 runpy.run_module("pets_release.ui", run_name="__main__")
 '''
         command = [sys.executable, "-c", code]
-    proc = subprocess.Popen(command, env=env, cwd=ROOT,
+    proc = subprocess.Popen(command, env=env, cwd=ROOT, start_new_session=os.name != "nt",
                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     try:
         line = proc.stdout.readline().strip()
         assert line.startswith("http://127.0.0.1:"), "server did not announce a loopback URL"
         yield proc, line, kit, tmp_path / "out"
     finally:
-        proc.terminate()
-        proc.ui_logs = proc.communicate(timeout=30)
+        try:
+            if os.name == "nt":
+                if proc.poll() is None:
+                    cleanup = subprocess.run(["taskkill", "/PID", str(proc.pid), "/T", "/F"],
+                                             capture_output=True, timeout=20, check=False)
+                    assert cleanup.returncode == 0, "could not terminate UI test process tree"
+            else:
+                try:
+                    os.killpg(proc.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass  # The entire session has already exited.
+        finally:
+            proc.ui_logs = proc.communicate(timeout=30)
 
 
 def request(url, path="/", *, auth=True, data=None, method=None):
@@ -293,6 +310,72 @@ def test_http_client_survives_guarded_pytest_worker(tmp_path):
     proc = subprocess.run([sys.executable, "-c", code], env=server_env(), cwd=ROOT,
                           capture_output=True, text=True, timeout=60, check=False)
     assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
+def process_is_alive(pid, *, wait_seconds=0):
+    """Observe the actual interpreter, not just a Windows venv launcher."""
+    if os.name == "nt":
+        import ctypes
+
+        kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel.OpenProcess.restype = ctypes.c_void_p
+        handle = kernel.OpenProcess(0x00100000, False, pid)  # SYNCHRONIZE
+        if not handle:
+            assert ctypes.get_last_error() == 87, "cannot establish probe process state"
+            return False  # ERROR_INVALID_PARAMETER: the PID no longer exists.
+        try:
+            state = kernel.WaitForSingleObject(ctypes.c_void_p(handle), int(wait_seconds * 1000))
+            assert state in (0, 258), "cannot wait on probe process"
+            return state == 258  # WAIT_TIMEOUT, rather than signalled process exit.
+        finally:
+            kernel.CloseHandle(ctypes.c_void_p(handle))
+    deadline = time.monotonic() + wait_seconds
+    while True:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return False
+        if time.monotonic() >= deadline:
+            return True
+        time.sleep(0.02)
+
+
+@pytest.mark.parametrize("body_fails", [False, True], ids=["pass", "planted-failure"])
+def test_probe_process_tree_is_stopped_on_context_exit(tmp_path, body_fails):
+    """HTTP harness seam: success or a planted failure leaves no waiting probe."""
+    proc = None
+    probe_pid = None
+    child_pid = None
+    try:
+        expected = pytest.raises(AssertionError, match="planted probe failure") if body_fails else nullcontext()
+        with expected:
+            with running(tmp_path, probe=True, waiting_probe_child=True) as (proc, url, _, _):
+                probe_pid = int((tmp_path / "probe-pid").read_text())
+                child_pid = int((tmp_path / "probe-child-pid").read_text())
+                assert process_is_alive(probe_pid)
+                assert process_is_alive(child_pid)
+                assert request(url)[0] == 200
+                # Deliberately leave the probe waiting for its trigger on both paths.
+                if body_fails:
+                    raise AssertionError("planted probe failure")
+        assert proc.poll() is not None
+        assert not process_is_alive(probe_pid, wait_seconds=5), "probe survived server teardown"
+        assert not process_is_alive(proc.pid, wait_seconds=5), "spawned launcher survived teardown"
+        assert not process_is_alive(child_pid, wait_seconds=5), "probe child survived server teardown"
+    finally:
+        # A red regression must not itself leave an orphan behind.
+        for pid in (child_pid, probe_pid):
+            if pid is None or not process_is_alive(pid, wait_seconds=1):
+                continue
+            if os.name == "nt":
+                cleanup = subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"],
+                                         capture_output=True, timeout=20, check=False)
+                assert cleanup.returncode == 0 or not process_is_alive(pid, wait_seconds=5)
+            else:
+                os.kill(pid, signal.SIGKILL)
+        if proc is not None and proc.poll() is None:
+            proc.kill()
+            proc.communicate(timeout=30)
 
 
 def test_only_aggregate_routes_and_scanned_dashboard_are_served(tmp_path):
