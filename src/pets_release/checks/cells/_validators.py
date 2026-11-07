@@ -267,6 +267,7 @@ def _cued_value_counts(s: str, pos: int, *, alpha_without_copula: bool,
         if low in _cues.HEDGES:
             if ends:
                 break
+            armed = armed or arms_after  # "password probably: x"
             continue
         if low in _cues.FUNCTION_WORDS:
             armed = arms_after  # "is a pain", "is not working": a description, not a value
@@ -275,6 +276,9 @@ def _cued_value_counts(s: str, pos: int, *, alpha_without_copula: bool,
             continue
         if _credential_shaped(val):
             return True
+        mid_clause_prose = plain_mid_clause_is_prose and not ends and nxt is not None and not _cues.is_punct(nxt)
+        if armed and _DATE_OR_TIME.fullmatch(word) and not mid_clause_prose:
+            return True  # a copula-cued date/time is a value, also directly before or glued to a placeholder
         plain_ok = (
             # (b) a plain word directly before a placeholder is not the value: the placeholder is
             not (nxt is not None and _cues.is_placeholder(nxt))
