@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import unicodedata
 import random
 from collections import Counter
 from datetime import datetime, timedelta
@@ -79,15 +80,15 @@ ICD_GROUPS = [
     ("R55", "other", ["fainted at home", "brief loss of consciousness"]),
     ("Z03.9", "other", ["observation after a minor event", "requested check-up"]),
     ("J18.9", "respiratory", ["cough with fever and breathlessness", "productive cough for a week"]),
-    ("J44.1", "respiratory", ["worsening breathlessness", "wheeze and cough"]),
+    ("J44.1", "respiratory", ["gets out of breath more easily each day", "wheeze and cough"]),
     ("J10.1", "ILI", ["fever, aching muscles and dry cough", "sudden fever with chills"]),
     ("J06.9", "ILI", ["sore throat and runny nose with fever", "cold symptoms with a fever"]),
     ("J21.0", "RSV", ["infant with fast breathing and cough", "child with wheeze and poor feeding"]),
     ("H66.9", "other_infection", ["earache and fever", "ear pain in a child"]),
     ("R50.9", "other_infection", ["fever of unknown cause", "high temperature for three days"]),
-    ("A08.4", "gastrointestinal", ["vomiting and diarrhoea", "stomach cramps and nausea"]),
+    ("A08.4", "gastrointestinal", ["repeated sickness with loose stools since last night", "stomach cramps and nausea"]),
     ("K35.8", "gastrointestinal", ["pain in the lower right abdomen", "abdominal pain with fever"]),
-    ("N20.0", "urological", ["severe flank pain", "colicky pain and blood in urine"]),
+    ("N20.0", "urological", ["sharp ache in the side of the back", "colicky pain and blood in urine"]),
     ("N39.0", "urological", ["burning on urination and fever", "frequent urination with pain"]),
     ("S52.5", "injury", ["fell on ice and hurt the wrist", "wrist pain after a fall"]),
     ("S72.0", "injury", ["fall with hip pain", "cannot bear weight after a slip"]),
@@ -97,7 +98,7 @@ ICD_GROUPS = [
     ("F32.9", "mental_health", ["low mood and exhaustion", "feels hopeless"]),
     ("E10.1", "endocrine", ["high blood sugar and thirst", "nausea with high glucose"]),
     ("E87.1", "endocrine", ["weakness and low sodium on a test", "confusion and thirst"]),
-    ("M54.5", "musculoskeletal", ["low back pain", "back pain after lifting"]),
+    ("M54.5", "musculoskeletal", ["low back pain", "strained the lower back moving furniture"]),
     ("L03.1", "skin", ["red swollen painful leg", "spreading skin redness"]),
     ("O20.0", "pregnancy", ["bleeding in early pregnancy", "cramping in early pregnancy"]),
     ("A41.9", "infection_severe", ["fever, chills and low blood pressure", "rigors and confusion"]),
@@ -246,6 +247,11 @@ def _last(rng: random.Random) -> str:
     return rng.choice(LAST_A) + rng.choice(LAST_B)
 
 
+def _ascii(text: str) -> str:
+    """Lower-case ASCII form of a name (strips diacritics) for e-mail local parts."""
+    return unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode("ascii").lower()
+
+
 def _street(rng: random.Random) -> str:
     return f"{rng.choice(STREET_STEM)}{rng.choice(STREET_END)} {rng.randint(1, 80)}"
 
@@ -279,7 +285,12 @@ def _iban(rng: random.Random, used: set[str]) -> str:
         iban = f"FI{check:02d}{bban}"
         if iban not in used:
             used.add(iban)
-            return " ".join([iban[i:i + 4] for i in range(0, 16, 4)] + [iban[16:]])
+            return iban
+
+def _spaced(iban: str) -> str:
+    """Print form of an IBAN: groups of four."""
+    return " ".join([iban[i:i + 4] for i in range(0, 16, 4)] + [iban[16:]])
+
 
 def _age_band(age: int) -> str:
     lo = min(age // 10 * 10, 80)
@@ -300,7 +311,7 @@ def _health(dest: Path, rng: random.Random, used_hetu: set[str]) -> None:
     for i in range(N_PATIENTS):
         female = rng.random() < 0.52
         age_roll = rng.random()
-        year = 2025 - (rng.randint(0, 9) if age_roll < 0.08 else rng.randint(10, 95))
+        year = 2025 - (rng.randint(1, 9) if age_roll < 0.08 else rng.randint(10, 95))
         dob = datetime(year, rng.randint(1, 12), rng.randint(1, 28))
         mi = rng.choices(range(len(MUNICIPALITIES)), MUNI_WEIGHTS)[0]
         municipality = NON_RESIDENT if rng.random() < 0.03 else MUNICIPALITIES[mi]
@@ -398,7 +409,7 @@ def _customer_service(dest: Path, rng: random.Random, used_hetu: set[str]) -> No
             "id": f"SYNC-{i:05d}", "name": f"{first} {last}", "number": f"SYN{rng.randint(1000000, 9999999)}",
             "hetu": _hetu(rng, dob, female, used_hetu), "street": _street(rng),
             "postcode": rng.choice(POSTCODES), "city": rng.choice(MUNICIPALITIES),
-            "email": f"{first.lower()}.{last.lower()}@example.test", "phone": _phone(rng),
+            "email": f"{_ascii(first)}.{_ascii(last)}@example.test", "phone": _phone(rng),
             "lang": rng.choice(LANGUAGES), "iban": _iban(rng, used_iban),
         })
     cust_rows = []
@@ -429,7 +440,7 @@ def _customer_service(dest: Path, rng: random.Random, used_hetu: set[str]) -> No
         contact = f"my name is {cust['name']} and my customer number is {cust['number']}"
         extras = [
             f"you can reach me at {cust['phone']}", f"my email is {cust['email']}",
-            f"I live at {cust['street']}", f"my account number is {cust['iban']}",
+            f"I live at {cust['street']}", f"my account number is {_spaced(cust['iban'])}",
         ]
         script = [
             ("agent", AGENT_OPEN[language]),
