@@ -23,13 +23,15 @@ def scan_file(path: Path) -> list[str]:
     local = {n.name for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)}
     imported = {a.asname or a.name for n in ast.walk(tree) if isinstance(n, ast.ImportFrom)
                 and (n.module or "").split(".")[0] == "pandas" for a in n.names}
+    kit_imported = {a.asname or a.name for n in ast.walk(tree) if isinstance(n, ast.ImportFrom)
+                    and (n.module or "").split(".")[0] == "pets_eval" for a in n.names}
     bad = []
     for n in ast.walk(tree):
         if not isinstance(n, ast.Call):
             continue
         f = n.func
         name = f.attr if isinstance(f, ast.Attribute) else f.id if isinstance(f, ast.Name) else None
-        if name in KIT_READERS and not (isinstance(f, ast.Name) and name in local):
+        if name in KIT_READERS and (isinstance(f, ast.Attribute) or name in kit_imported):
             bad.append(f"{path.name}:{n.lineno} {name}")
         if name != "read_csv":
             continue
@@ -63,9 +65,9 @@ def test_scan_flags_missing_keep_default_na_in_multiline_call(tmp_path):
 
 
 def test_scan_flags_kit_reader_and_pandas_import(tmp_path):
-    (tmp_path / "a.py").write_text("from pets_eval import io as kit_io\nkit_io.load_catalog('r')\n"
+    (tmp_path / "a.py").write_text("from pets_eval.io import load_tables\nload_tables(1)\nimport pets_eval\npets_eval.io.load_catalog('r')\n"
                                    "from pandas import read_csv\nread_csv('x')\n")
-    assert len(scan_tree(tmp_path)) == 3
+    assert len(scan_tree(tmp_path)) == 4
 
 
 def test_scan_passes_clean_and_local_wrapper(tmp_path):
