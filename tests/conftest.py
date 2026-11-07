@@ -152,6 +152,23 @@ FAST_CLI_SMOKE = frozenset({
     "tests/run/test_run.py::test_release_passes_gate_and_both_verify_tiers",
     "tests/run/test_run.py::test_two_runs_byte_identical",
 })
+# These modules exercise the release/gate/verification boundary on hand-made
+# synthetic fixtures. Keep the whole module fast, including shared fixture setup,
+# rather than letting noisy timings remove individual fail-closed cases.
+FAST_SYNTHETIC_CLI_MODULES = frozenset({
+    "tests/checks/test_runner.py",
+    "tests/checks/test_review_r3.py",
+    "tests/manifest/test_cli.py",
+})
+
+
+def keep_synthetic_cli_fast(item) -> bool:
+    module = item.nodeid.split("::", 1)[0]
+    return not requires_real_kit(item) and (
+        module.startswith(("tests/run/", "tests/verify/"))
+        or module in FAST_SYNTHETIC_CLI_MODULES
+        or item.nodeid in FAST_CLI_SMOKE
+    )
 
 
 def requires_real_kit(item) -> bool:
@@ -176,5 +193,5 @@ def pytest_collection_modifyitems(items):
     for item in items:
         if requires_real_kit(item):
             item.add_marker(pytest.mark.slow(reason="real-kit"))
-        elif item.nodeid in measured and item.nodeid not in FAST_CLI_SMOKE:
+        elif item.nodeid in measured and not keep_synthetic_cli_fast(item):
             item.add_marker(pytest.mark.slow(reason="profile"))

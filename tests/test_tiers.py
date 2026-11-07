@@ -96,6 +96,53 @@ def test_production_hook_deselects_only_when_requested(tmp_path):
         assert expected in result.stdout
 
 
+def test_live_collection_preserves_synthetic_cli_and_honours_slow_list(policy, tmp_path):
+    """Exercise the production hook and pytest's actual -m deselection, not a model of it."""
+    import json
+
+    snapshot = tmp_path / "collection.json"
+    (tmp_path / "tier_snapshot.py").write_text(
+        "import json, os\n"
+        "from pathlib import Path\n"
+        "deselected = []\n"
+        "def pytest_deselected(items): deselected.extend(items)\n"
+        "def pytest_collection_finish(session):\n"
+        "    all_items = [*session.items, *deselected]\n"
+        "    Path(os.environ['TIER_SNAPSHOT']).write_text(json.dumps({\n"
+        "        'fast': [i.nodeid for i in session.items],\n"
+        "        'slow': [i.nodeid for i in all_items if i.get_closest_marker('slow')],\n"
+        "    }), encoding='utf-8')\n", encoding="utf-8",
+    )
+    env = dict(os.environ, TIER_SNAPSHOT=str(snapshot),
+               PYTHONPATH=os.pathsep.join((str(tmp_path), str(ROOT / "src"))))
+    result = subprocess.run(
+        [sys.executable, "-m", "pytest", "tests", "--collect-only", "-q",
+         "-p", "no:cacheprovider", "-p", "tier_snapshot", "-m", "not slow"],
+        cwd=ROOT, env=env, capture_output=True, text=True, encoding="utf-8", check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    collected = json.loads(snapshot.read_text(encoding="utf-8"))
+    required_fast = {
+        "tests/run/test_purpose_gate.py::test_failing_purpose_checks_refuse_publication",
+        "tests/run/test_purpose_gate.py::test_full_verify_fails_when_signed_scores_differ_from_rerun",
+        "tests/run/test_purpose_gate.py::test_full_verify_reruns_purpose_checks",
+        "tests/run/test_recipient_cli.py::test_each_recipient_release_verifies_in_both_tiers",
+        "tests/checks/test_runner.py::test_cli_refuses_planted_card_and_passes_valid",
+        "tests/manifest/test_cli.py::test_duplicate_key_fails",
+        "tests/manifest/test_cli.py::test_non_canonical_bytes_fail",
+        "tests/manifest/test_cli.py::test_mutated_copies_fail_with_exit_1[_missing-$.exportAssertions: required]",
+        "tests/verify/test_recipient.py::test_planted_card_fails_even_with_rebound_digests",
+        "tests/verify/test_full.py::test_full_cli_bad_signature_fails",
+    }
+    assert required_fast <= set(collected["fast"]), sorted(required_fast - set(collected["fast"]))
+    assert policy.FAST_CLI_SMOKE <= set(collected["fast"])
+    listed_slow = {
+        line for line in (ROOT / "tests" / "slow_tests.txt").read_text(encoding="utf-8").splitlines()
+        if line and not line.startswith("#")
+    }
+    assert listed_slow <= set(collected["slow"]), sorted(listed_slow - set(collected["slow"]))
+
+
 @pytest.fixture
 def generator():
     spec = importlib.util.spec_from_file_location("slow_list_generator", ROOT / "tools" / "list_slow_tests.py")
