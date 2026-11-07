@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from pets_release.checks import all_checks, run_checks
+from pets_release.run.context import person_normaliser
 
 VISITS = [f"V{i}" for i in range(6)]
 SEX = ["F"] * 3 + ["M"] * 3  # two classes of 3
@@ -22,7 +23,7 @@ def setup(h):
         "source": {"ed_visits": h.frame({"visit_id": VISITS, "patient_hetu": [f"P{i}" for i in range(6)]})},
         "rowmaps": {"ed_visits": h.rowmap(VISITS)},
         "record_keys": {"ed_visits": "visit_id"},
-        "person": {"table": "ed_visits", "column": "patient_hetu"},
+        "person": {"table": "ed_visits", "column": "patient_hetu", "normalise": person_normaliser()},
         "joins": [],
     }
     return rel, ctx

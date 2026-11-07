@@ -26,6 +26,7 @@ where = ["src"]
 pythonpath = ["src"]
 testpaths = ["tests"]
 addopts = "--import-mode=importlib"
+markers = ["kit: needs the challenge kit (PETS_KIT or the pinned path); skipped if absent"]
 
 [tool.ruff]
 line-length = 110

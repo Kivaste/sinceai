@@ -177,12 +177,15 @@ _FIELD_JUSTIFICATION = {
 
 _RESIDUAL_RISK = _obj({
     "risk": _ref("id"),
-    "kind": {"enum": ["attribute_inference", "linkage", "note", "scorecard_defect", "tamper_limitation",
-                      "text_recall"]},
+    "kind": {"enum": ["attribute_inference", "gate_low_severity", "linkage", "note", "scorecard_defect",
+                      "tamper_limitation", "text_recall"]},
     "label": {"oneOf": [{"enum": list(SPAN_LABELS)}, {"type": "null"}]},
     "rate": {"oneOf": [
         _ref("notMeasured"), _ref("notApplicable"),
         _obj({"status": _status("measured"), "value": {"type": "number", "minimum": 0, "maximum": 1},
+              "denominator": _ref("denominator"), "source": _ref("text")}),
+        # gate_low_severity: low-severity hits a gate check counted (released; never an assertion)
+        _obj({"status": _status("counted"), "count": {"type": "integer", "minimum": 1},
               "denominator": _ref("denominator"), "source": _ref("text")}),
     ]},
     "description": _ref("text"),

@@ -51,7 +51,9 @@ def _pet(entry) -> tuple[str, dict]:
     return "generalisation", {"rung": rung}
 
 
-def build_narrative(*, policy, plan, scenario_ids, suppression: dict, k: int | None) -> dict:
+def build_narrative(*, policy, plan, scenario_ids, suppression: dict, k: int | None, purpose=None) -> dict:
+    """``purpose``: the accepted ``run.purpose.PurposeResult``; fills ``measured.utility`` and the sacrifices'
+    before/after scores (None leaves them not measured / null). ``k`` is None when the scenario has no k target."""
     by_key = sorted(plan, key=lambda e: (e["table"], e["column"]))
     inventory = [{"dataset": policy.dataset, "table": e["table"], "column": e["column"],
                   "role": _role(policy, e["table"], e["column"]),
@@ -79,6 +81,12 @@ def build_narrative(*, policy, plan, scenario_ids, suppression: dict, k: int | N
     measured = {"utility": not_measured(pending), "privacy": not_measured(pending),
                 "search": not_measured("hand-picked plan; no search run"),
                 "baselines": not_measured(pending), "redaction": not_measured("no free text released")}
+    scored = {}
+    if purpose is not None:
+        from pets_release.run.purpose import measured_utility, scores
+
+        measured["utility"] = measured_utility(purpose)
+        scored = scores(purpose)
     risks = []
     for n in policy.residual_notes:
         rate = not_measured(n["note"][:500]) if n["status"] == "open" else {"status": "not_applicable",
@@ -98,7 +106,9 @@ def build_narrative(*, policy, plan, scenario_ids, suppression: dict, k: int | N
          "rate": not_measured(pending), "description": "attribute inference from released quasi-identifiers"},
     ]
     risks.sort(key=lambda r: r["risk"])
-    sacrifices = sorted(({"check": s["check"], "floor": s["floor_score"], "before": None, "after": None,
+    sacrifices = sorted(({"check": s["check"], "floor": s["floor_score"],
+                          "before": scored.get(s["check"], (None, None))[0],
+                          "after": scored.get(s["check"], (None, None))[1],
                           "reason": s["reason"][:500]} for s in policy.sacrifices), key=lambda s: s["check"])
     checks = ", ".join(policy.purpose_checks)
     fit = [{"scenario": policy.scenario,
