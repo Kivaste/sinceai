@@ -91,8 +91,11 @@ POLICY = ScenarioPolicy(
         {"table": "ed_visits", "column": "sex", "derived": "sex"},
         {"table": "ed_visits", "column": "municipality", "derived": "municipality"},
         {"table": "ed_visits", "column": "arrival_ts", "derived": "arrival_ts"},
+        {"table": "ed_visits", "column": "discharge_ts", "derived": "discharge_ts",
+         "note": "conditional QI: counted if released; visit timing (arrival + stay)"},
         {"table": "lab_results", "column": "sampled_ts", "derived": "sampled_ts",
-         "note": "counted as a join-derived QI if released"},
+         "join_via": ["ed_visits", "visit_id"],
+         "note": "conditional QI: counted as a join-derived QI if released (arrival-date leak via visit join)"},
     ),
     risk_vector=("qi_k_shortfall", "qi_unique_rate", "join_derived_qi", "direct_identifier_leak", "attribute_inference"),
     sacrifices=(

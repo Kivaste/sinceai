@@ -92,7 +92,7 @@ def validate_plan(plan: list, policy: ScenarioPolicy) -> None:
         if not isinstance(e["params"], dict):
             raise PlanError(f"params must be an object for {key}")
         try:
-            json.dumps(e["params"], sort_keys=True)
+            json.dumps(e["params"], sort_keys=True, allow_nan=False)
         except (TypeError, ValueError):
             raise PlanError(f"params not JSON-serialisable for {key}") from None
         fl = policy.floors[key]
