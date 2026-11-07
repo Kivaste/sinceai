@@ -7,7 +7,11 @@ timestamp finer than the released hour. Rows:
 
   column not released                  -> not_applicable
   source / identifiers missing         -> not_run (refuses)
-  global counter IDs                   -> pass, n = turn rows
+  counter shuffled across conversations-> pass, n = turn rows
+  counter in (reverse) conversation order -> fail conversationOrder
+  few-valued prefix (< half the conversations) -> pass
+  values not in source, undeclared     -> fail undetermined
+  declared tokens over original source -> pass
   duplicate or empty key               -> fail duplicateKey / emptyKey
   conversation component (prefix/token)-> fail conversationComponent
   original conversation_id inside      -> fail conversationComponent
@@ -21,6 +25,7 @@ from __future__ import annotations
 
 import csv
 import hashlib
+import random
 
 import pandas as pd
 import pytest
@@ -47,8 +52,10 @@ def _tok(v):
     return hashlib.sha256(v.encode()).hexdigest()
 
 
-CONVS = [f"QX-{i:04d}" for i in range(1, 7)]
-SIZES = [3, 4, 2, 5, 3, 4]
+CONVS = [f"QX-{i:04d}" for i in range(1, 31)]
+SIZES = [3, 4, 2, 5, 3, 4] * 5
+_PERM = list(range(1, sum(SIZES) + 1))
+random.Random(11).shuffle(_PERM)  # turn numbers shuffled across conversations: no order information
 
 
 def _source(turn_ids=None):
@@ -56,13 +63,13 @@ def _source(turn_ids=None):
     for cid, size in zip(CONVS, SIZES):
         for s in range(1, size + 1):
             n += 1
-            rows.append({"turn_id": f"TT-{n:06d}", "conversation_id": cid, "seq": str(s),
+            rows.append({"turn_id": f"TT-{_PERM[n - 1]:06d}", "conversation_id": cid, "seq": str(s),
                          "ts": f"2025-03-0{s} 1{s}:2{s}:0{s}", "text": "hello"})
     turns = pd.DataFrame(rows, dtype=str)
     if turn_ids is not None:
         turns["turn_id"] = turn_ids(turns)
-    convs = pd.DataFrame({"conversation_id": CONVS, "customer_id": [f"CUSTOMER{i:05d}" for i in range(6)],
-                          "started_ts": ["2025-03-01 10:11:12"] * 6}, dtype=str)
+    convs = pd.DataFrame({"conversation_id": CONVS, "customer_id": [f"CUSTOMER{i:05d}" for i in range(len(CONVS))],
+                          "started_ts": ["2025-03-01 10:11:12"] * len(CONVS)}, dtype=str)
     return {"turns": turns, "conversations": convs}
 
 
@@ -109,9 +116,32 @@ def test_not_run_without_producer_inputs(tmp_path, drop):
     assert _run(tmp_path, _source(), context=ctx).status == "not_run"
 
 
-def test_global_counter_ids_pass(tmp_path):
+def test_shuffled_counter_ids_pass(tmp_path):
     rec = _run(tmp_path, _source())
     assert (rec.status, rec.hits, rec.denominator) == ("pass", 0, {"unit": "turns", "n": sum(SIZES)})
+
+
+def test_counter_in_conversation_order_fails(tmp_path):
+    # contiguous global counter: ranking conversations by turn_id rebuilds the conversation_id order
+    src = _source(lambda t: [f"TT-{i:06d}" for i in range(1, len(t) + 1)])
+    rec = _run(tmp_path, src)
+    assert rec.status == "fail" and _labels(rec) == {"conversationOrder"}
+
+
+def test_counter_in_reverse_conversation_order_fails(tmp_path):
+    src = _source(lambda t: [f"TT-{i:06d}" for i in range(len(t), 0, -1)])
+    rec = _run(tmp_path, src)
+    assert rec.status == "fail" and "conversationOrder" in _labels(rec)
+
+
+def test_few_valued_prefix_is_not_a_conversation_component(tmp_path):
+    # a high-order prefix constant within conversations but with 2 values over 30 conversations
+    # (e.g. a counter's leading digit) carries about one bit, not the conversation
+    src = _source()
+    t = src["turns"]
+    first = set(CONVS[::2])  # interleaved, so the split carries no conversation order either
+    t["turn_id"] = [("A" if c in first else "B") + v for c, v in zip(t.conversation_id, t.turn_id)]
+    assert _run(tmp_path, src).status == "pass"
 
 
 def test_duplicate_key_fails(tmp_path):
@@ -130,7 +160,7 @@ def test_conversation_prefix_fails(tmp_path):
     # conversation number encoded as a prefix, sequence as suffix
     src = _source(lambda t: [f"Z{CONVS.index(c) * 7 + 11:03d}{s:0>2}" for c, s in zip(t.conversation_id, t.seq)])
     rec = _run(tmp_path, src)
-    assert rec.status == "fail" and _labels(rec) == {"conversationComponent"}
+    assert rec.status == "fail" and "conversationComponent" in _labels(rec)
 
 
 def test_conversation_token_fails(tmp_path):
@@ -176,4 +206,51 @@ def test_single_multi_turn_conversation_is_undetermined(tmp_path):
 
 def test_release_scope_tokens_pass(tmp_path):
     src = _source(lambda t: [_tok("salt" + v) for v in t.turn_id])
-    assert _run(tmp_path, src).status == "pass"
+    assert _run(tmp_path, src, contract=_token_contract()).status == "pass"
+
+
+def test_fallback_tokens_over_original_source_pass(tmp_path):
+    # the real fallback: source keeps the (order-leaking) originals, the release carries keyed tokens
+    src = _source(lambda t: [f"TT-{i:06d}" for i in range(1, len(t) + 1)])
+    rel_src = {k: v.copy() for k, v in src.items()}
+    rel_src["turns"]["turn_id"] = [_tok("salt" + v) for v in src["turns"].turn_id]
+    rel = _release(tmp_path, rel_src)
+    rec = run_checks(rel, _token_contract(), _context(src), checks=[_check()]).records[0]
+    assert (rec.status, rec.hits) == ("pass", 0)
+
+
+def test_undeclared_values_not_in_source_are_undetermined(tmp_path):
+    # order can only be tested for kept source IDs or declared keyed tokens
+    src = {k: v.copy() for k, v in _source().items()}
+    rel_src = _source(lambda t: [f"ZZ-{v}" for v in t.turn_id])
+    rel = _release(tmp_path, rel_src)
+    rec = run_checks(rel, _contract(), _context(src), checks=[_check()]).records[0]
+    assert rec.status == "fail" and "undetermined" in _labels(rec)
+
+
+def _token_contract():
+    c = _contract()
+    c["files"]["turns.csv"]["columns"]["turn_id"] = {"form": "hex64", "params": {}}
+    c["tokens"] = sorted(c["tokens"] + [{"table": "turns", "column": "turn_id", "scope": "release"}],
+                         key=lambda r: (r["table"], r["column"]))
+    return c
+
+
+def test_declared_token_containing_identifier_by_chance_passes(tmp_path):
+    # a keyed 64-hex token can contain an 8+ char identifier by coincidence; not information
+    src = _source(lambda t: [_tok("salt" + v) for v in t.turn_id])
+    src["conversations"].loc[0, "customer_id"] = src["turns"].turn_id.iloc[2][10:20]
+    assert _run(tmp_path, src, contract=_token_contract()).status == "pass"
+
+
+def test_undeclared_hex_containing_identifier_fails(tmp_path):
+    src = _source(lambda t: [_tok("salt" + v) for v in t.turn_id])
+    src["conversations"].loc[0, "customer_id"] = src["turns"].turn_id.iloc[2][10:20]
+    rec = _run(tmp_path, src)
+    assert rec.status == "fail" and "identifierValue" in _labels(rec)
+
+
+def test_declared_token_still_needs_unique_keys(tmp_path):
+    src = _source(lambda t: [_tok("same")] * 2 + [_tok("salt" + v) for v in t.turn_id[2:]])
+    rec = _run(tmp_path, src, contract=_token_contract())
+    assert rec.status == "fail" and "duplicateKey" in _labels(rec)

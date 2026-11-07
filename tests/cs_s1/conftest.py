@@ -34,5 +34,20 @@ def prepared(minikit):
 
 
 @pytest.fixture(scope="session")
+def kept(minikit):
+    """Minikit with turn IDs shuffled across conversations: a synthetic key that passes."""
+    import random
+
+    from pets_release.cs_s1 import prepare
+
+    src = {k: v.copy() for k, v in minikit.items()}
+    n = len(src["turns"])
+    perm = list(range(1, n + 1))
+    random.Random(23).shuffle(perm)
+    src["turns"]["turn_id"] = [f"SYNT-{i:07d}" for i in perm]
+    return prepare(src, _make_keys())
+
+
+@pytest.fixture(scope="session")
 def make_keys():
     return _make_keys

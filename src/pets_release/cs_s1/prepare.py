@@ -65,58 +65,58 @@ def build_gazetteer(source: dict) -> lexicon.Gazetteer:
 
 # Controller identifier columns whose exact values are redacted wherever they occur in turns.
 CONTROLLER_VALUES = (
+    ("conversations", "agent_name", "PERSON"),
+    ("customers", "contract_number", "ACCOUNT_NUMBER"),
     ("customers", "customer_id", "ACCOUNT_NUMBER"),
     ("customers", "customer_number", "ACCOUNT_NUMBER"),
-    ("customers", "contract_number", "ACCOUNT_NUMBER"),
+    ("customers", "email", "EMAIL"),
+    ("customers", "full_name", "PERSON"),
     ("customers", "hetu", "NATIONAL_ID"),
     ("customers", "iban", "IBAN"),
-    ("customers", "email", "EMAIL"),
     ("customers", "phone", "PHONE"),
+    ("customers", "street_address", "ADDRESS"),
 )
 _TOKEN = re.compile(r"[^\W_](?:[\w.@+-]*[^\W_])?")
+_GAP = re.compile(r"[^\w]{1,3}")
 MIN_VALUE = 5
 
 
 class ControllerValuesPass:
     """Exact controller identifier values (from the source tables, in memory) in the text.
 
-    Single-token values match as whole tokens anywhere (case-folded); values with internal
-    whitespace match, whitespace-tolerant, in the conversations of their own customer
-    (``own``: conversation id -> {label: values}). Below the validators' priority, so a validated
-    hit keeps its span; it fills gaps such as letter-prefixed customer numbers.
+    A value is its token sequence (case-folded); it matches a run of whole text tokens separated by
+    at most 3 non-word characters each, in any conversation. The longest value at a position wins.
+    Values shorter than ``MIN_VALUE`` alphanumerics are ignored. Below the validators' priority,
+    so a validated hit keeps its span; it fills gaps such as letter-prefixed customer numbers and
+    names or addresses the lexicons miss.
     """
 
     name = "controller-values"
 
-    def __init__(self, values: dict, own: dict | None = None):
-        self._single = {}
+    def __init__(self, values: dict):
+        self._index: dict[str, list[tuple[tuple[str, ...], str]]] = {}
         for label in sorted(values):
-            for v in values[label]:
-                v = str(v).strip()
-                if len(v) >= MIN_VALUE and _TOKEN.fullmatch(v):
-                    self._single.setdefault(v.casefold(), label)
-        self._own = {}
-        for cid, by_label in (own or {}).items():
-            pats = []
-            for label in sorted(by_label):
-                for v in sorted(by_label[label]):
-                    parts = str(v).split()
-                    if len(parts) > 1 and len("".join(parts)) >= MIN_VALUE:
-                        pats.append((re.compile(r"(?<!\w)" + r"\s+".join(map(re.escape, parts)) + r"(?!\w)", re.IGNORECASE), label))
-            if pats:
-                self._own[cid] = pats
+            for v in sorted(values[label]):
+                toks = tuple(t.casefold() for t in _TOKEN.findall(str(v)))
+                if toks and sum(len(t) for t in toks) >= MIN_VALUE:
+                    self._index.setdefault(toks[0], []).append((toks, label))
+        for k in self._index:  # longest first; first label (sorted) wins on equal tokens
+            self._index[k].sort(key=lambda e: -len(e[0]))
         self.labels = frozenset(lab for _, _, lab in CONTROLLER_VALUES)
 
     def run(self, view):
         out = []
-        for i, t in enumerate(view.turns):
-            for m in _TOKEN.finditer(t.text):
-                label = self._single.get(m.group(0).casefold())
-                if label:
-                    out.append(Candidate(i, m.start(), m.end(), label, PRIORITY_CUE, None, self.name))
-            for pat, label in self._own.get(view.conversation_id, ()):
-                for m in pat.finditer(t.text):
-                    out.append(Candidate(i, m.start(), m.end(), label, PRIORITY_CUE, None, self.name))
+        for ti, t in enumerate(view.turns):
+            toks = [(m.start(), m.end(), m.group(0).casefold()) for m in _TOKEN.finditer(t.text)]
+            for i, (s, _e, first) in enumerate(toks):
+                for seq, label in self._index.get(first, ()):
+                    n = len(seq)
+                    if i + n > len(toks):
+                        continue
+                    if all(toks[i + j][2] == seq[j] and _GAP.fullmatch(t.text[toks[i + j - 1][1]:toks[i + j][0]])
+                           for j in range(1, n)):
+                        out.append(Candidate(ti, s, toks[i + n - 1][1], label, PRIORITY_CUE, None, self.name))
+                        break
         return out
 
 
@@ -125,22 +125,7 @@ def controller_values_pass(source: dict) -> ControllerValuesPass:
     for t, c, label in CONTROLLER_VALUES:
         if t in source and c in source[t].columns:
             values.setdefault(label, set()).update(v for v in source[t][c] if v)
-    own: dict = {}
-    cust = source.get("customers")
-    conv = source.get("conversations")
-    if cust is not None and conv is not None:
-        rows = {r["customer_id"]: r for r in cust.to_dict("records")}
-        for cid, cust_id in zip(conv["conversation_id"], conv["customer_id"]):
-            r = rows.get(cust_id)
-            if r is None:
-                continue
-            by: dict = {}
-            for t, c, label in CONTROLLER_VALUES:
-                if t == "customers" and r.get(c):
-                    by.setdefault(label, set()).add(r[c])
-            own[cid] = by
-    return ControllerValuesPass(values, own)
-
+    return ControllerValuesPass(values)
 
 def _seq_key(v: str):
     s = str(v).strip()

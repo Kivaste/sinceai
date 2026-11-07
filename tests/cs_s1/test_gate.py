@@ -47,7 +47,9 @@ def test_fixture_release_passes_gate(tmp_path, prepared):
     assert bad == [] and not res.refused
 
 
-def test_only_known_defect_refuses_fixture_release(tmp_path, prepared):
+@pytest.mark.parametrize("which", ["prepared", "kept"])  # turn_id pseudonymised / kept as-is
+def test_only_known_defect_refuses_fixture_release(tmp_path, request, which):
+    prepared = request.getfixturevalue(which)
     res = _gate(_write(tmp_path / "rel", prepared.tables), prepared)
     bad = sorted((r.check, r.status) for r in res.records if r.status not in ("pass", "not_applicable"))
     assert bad in ([], [("rescan.secrets", "fail")])

@@ -43,7 +43,8 @@ def run(release, contract, context) -> Outcome:
     frame = table.frame
     ids = frame.iloc[:, header.index(COLUMN)]
     conv = frame.iloc[:, header.index("conversation_id")]
-    hits = _rules.evaluate(ids, conv, context["source"], list(context["identifiers"]))
+    token = any(t.get("table") == "turns" and t.get("column") == COLUMN for t in (contract.get("tokens") or []))
+    hits = _rules.evaluate(ids, conv, context["source"], list(context["identifiers"]), token_column=token)
     viol = tuple(Violation(NAME, label, "high", FILE, COLUMN, len(rows), locations(rows))
                  for label, rows in sorted(hits.items()))
     return Outcome(n=len(ids), violations=viol)

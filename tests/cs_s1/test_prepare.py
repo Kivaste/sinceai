@@ -49,18 +49,32 @@ def test_timestamps_at_hour(prepared):
         assert s.map(lambda v: bool(HOUR.match(v))).all(), (t, c)
 
 
-def test_plan_is_valid_hand_plan_with_turn_id_kept(prepared):
-    validate_plan(prepared.plan, get_policy("CS-S1"))
-    entry = next(e for e in prepared.plan if (e["table"], e["column"]) == ("turns", "turn_id"))
+def test_plan_is_valid_hand_plan_with_turn_id_kept(kept):
+    validate_plan(kept.plan, get_policy("CS-S1"))
+    entry = next(e for e in kept.plan if (e["table"], e["column"]) == ("turns", "turn_id"))
     assert entry["rung"] == "keep"
-    assert prepared.turn_id.kept is True
-    assert prepared.turn_id.assessment == {"check": TURN_ID_CHECK, "status": "pass", "n": len(prepared.tables["turns"]),
-                                           "hits": {}}
+    assert kept.turn_id.kept is True
+    assert kept.turn_id.assessment == {"check": TURN_ID_CHECK, "status": "pass", "n": len(kept.tables["turns"]),
+                                       "hits": {}}
+    ids = {(d["table"], d["column"]) for d in kept.gate_context["identifiers"]}
+    assert ("turns", "turn_id") not in ids
 
 
-def test_turn_id_justification_names_the_check(prepared):
-    j = prepared.turn_id.justification
+def test_generated_minikit_turn_ids_leak_conversation_order(prepared):
+    # ticket 03's counter follows conversation order, as the real kit's does: fallback
+    assert prepared.turn_id.kept is False
+    assert prepared.turn_id.assessment["hits"] == {"conversationOrder": len(prepared.tables["turns"])}
+    assert prepared.tables["turns"].turn_id.map(lambda v: bool(HEX64.match(v))).all()
+
+
+@pytest.mark.parametrize("which", ["kept", "prepared"])
+def test_turn_id_justification_names_the_check(request, which):
+    p = request.getfixturevalue(which)
+    j = p.turn_id.justification
     assert j["table"] == "turns" and j["column"] == "turn_id" and TURN_ID_CHECK in j["reason"]
+    assert j["rung"] == ("keep" if p.turn_id.kept else "id.pseudonym")
+    assert set(j) == {"table", "column", "outputColumn", "decision", "rung", "floor", "reason", "source"}
+    assert 0 < len(j["reason"]) <= 500
 
 
 def test_text_redacted_with_per_conversation_placeholders(prepared, minikit):
@@ -97,14 +111,30 @@ def test_controller_values_pass_matches_whole_tokens_only():
     assert got == [(3, 11, "ACCOUNT_NUMBER")]
 
 
+def test_controller_values_pass_matches_multi_token_values_anywhere():
+    from pets_release.cs_s1.prepare import ControllerValuesPass
+    from pets_release.redactor import ConversationView, Turn
+
+    p = ControllerValuesPass({"PERSON": {"Aino Mäki-Ojala"}, "ADDRESS": {"Rantatie 12 B"}})
+    text = "hi aino  mäki-ojala, I moved from Rantatie 12 B 4 to Rantatie 12, Ainomäki-Ojala"
+    got = [(text[c.start:c.end], c.label) for c in p.run(ConversationView("other", (Turn("t", text),)))]
+    assert got == [("aino  mäki-ojala", "PERSON"), ("Rantatie 12 B", "ADDRESS")]
+
+
+def test_controller_values_cover_names_and_addresses(prepared, minikit):
+    for col in ("full_name", "street_address"):
+        values = {v for v in minikit["customers"][col] if v}
+        assert not any(v in t for t in prepared.tables["turns"].text for v in values), col
+
+
 def test_gazetteer_is_built_from_controller_tables(prepared):
     assert prepared.gazetteer  # non-empty, in memory only
     assert prepared.gazetteer.parties
 
 
-def test_gate_context_excludes_kept_turn_id_from_identifiers(prepared):
+def test_gate_context_lists_source_identifiers(prepared):
     ids = {(d["table"], d["column"]) for d in prepared.gate_context["identifiers"]}
-    assert ("turns", "turn_id") not in ids
+    assert ("turns", "turn_id") in ids  # pseudonymised: originals must not survive
     assert {("customers", "full_name"), ("conversations", "agent_name"), ("conversations", "conversation_id")} <= ids
     assert set(prepared.gate_context["source"]) == {"conversations", "customers", "turns"}
 
