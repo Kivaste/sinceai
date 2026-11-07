@@ -170,3 +170,34 @@ def test_full_error_check_fails(bed, kit, tb):
     rep = _full(tb, bed, kit, checks=(*all_checks(), *_stubs(tb, bed, outcome=boom)))
     assert not rep.ok
     assert any("error" in x for x in rep.lines)
+
+
+# --- not_applicable (ticket 04 runner status) ----------------------------------------------------------------
+
+def _na_check():
+    return Check(name="text.verify-na-stub", version="1.0.0", scope="release", unit="turns",
+                 run=lambda r, c, x: Outcome.not_applicable(), applies_to=("text",))
+
+
+def test_not_applicable_is_accepted_and_counted(bed, tb):
+    from pets_release.verify import verify_release
+
+    rep = verify_release(bed, checks=(*all_checks(), _na_check()))
+    assert rep.ok, rep.lines
+    assert any(r.status == "not_applicable" for r in rep.records)
+
+
+def test_only_not_applicable_fails(bed, tb):
+    from pets_release.verify import verify_release
+
+    rep = verify_release(bed, checks=(_na_check(),))
+    assert not rep.ok
+    assert any("nothing ran" in x for x in rep.lines)
+
+
+def test_unlisted_planted_file_name_is_not_echoed(bed, verify_cli):
+    (bed / "secret-name-4111111111111111.txt").write_bytes(b"x\n")
+    r = verify_cli(bed)
+    assert r.returncode == 1
+    assert "4111111111111111" not in r.stdout + r.stderr
+    assert "unlisted-file#" in r.stdout

@@ -48,12 +48,15 @@ def _sha256(path: Path) -> str:
     return h.hexdigest()
 
 
-def _digest_problems(release: Path, bound: dict) -> list[str]:
+def _digest_problems(release: Path, bound: dict, listed: set) -> list[str]:
+    """Bound names come from the validated manifest (== contract files); any other release-derived name is
+    reported as a content-free ``unlisted-file#<i>`` marker (same convention as ticket 04)."""
     out = []
-    present = sorted(p.name for p in release.iterdir() if p.name != MANIFEST_FILENAME)
-    for name in present:
-        if name not in bound:
-            out.append(f"files: {name}: not bound in manifest")
+    entries = sorted(p.name for p in release.iterdir())
+    for i, name in enumerate(entries):
+        if name != MANIFEST_FILENAME and name not in bound:
+            shown = name if name in listed else f"unlisted-file#{i}"
+            out.append(f"files: {shown}: not bound in manifest")
     for name in sorted(bound):
         p = release / name
         if not p.is_file():
@@ -161,7 +164,7 @@ def verify_release(release_dir, *, full: bool = False, kit=None, master_key=None
 
     problems: list[str] = []
     # 2. Every file digest, recomputed here.
-    problems += _digest_problems(release, manifest["bindings"]["files"])
+    problems += _digest_problems(release, manifest["bindings"]["files"], set(manifest["contract"]["files"]))
 
     # 3. Registry, and the manifest's claims against it.
     try:
@@ -198,11 +201,13 @@ def verify_release(release_dir, *, full: bool = False, kit=None, master_key=None
     result = run_checks(release, manifest["contract"], run_ctx, checks=selected)
     if result.registry_error is not None:
         problems.append("registry: discovery failed")
-    if not result.records:
+    if not any(r.status == "pass" for r in result.records):
         problems.append("checks: nothing ran")
     bad = [r for r in result.records if r.status not in OK_STATUSES]
     for r in bad:
         problems += _record_lines(r)
+    if result.refused and not problems:  # the runner's own verdict is a floor, never overridden
+        problems.append("checks: runner refused")
 
     if problems:
         return fail(problems, result.records)
