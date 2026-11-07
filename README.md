@@ -67,10 +67,71 @@ The demo has three parts: HEALTH-S1 (ED visits to a university research group) i
 
 `--created` pins the creation time. The same input, key, creation time and tool versions give a byte-identical release.
 
+#### Measured search (default)
+
+Omit `--plan` to run the deterministic, bounded search: it measures purpose checks,
+tries withholding and coarsening, then re-checks purpose checks and privacy targets
+after local suppression. No acceptable candidate means refusal, not a fallback to
+the hand plan. Field justifications and `measured.search` describe the search;
+the candidate log stays outside the release in `<out>.scoring/search_log.jsonl`.
+
+`--recipient` binds the recipient ID into the release scope and derives a separate
+pseudonym key. Joins survive within a release, but tokens do not link across
+recipients. Use a stable, non-sensitive ID matching `[A-Za-z0-9][A-Za-z0-9._-]{0,63}`;
+`default` and `manifest-signature` are reserved. Omission keeps the legacy default
+recipient; it does not select a recipient-specific derived key.
+
 <!-- docs-test: run -->
 ```powershell
-.\.venv\Scripts\pets-release.exe run --scenario HEALTH-S1 --out ..\sinceai-out\health-s1 --created 2026-11-07T08:00:00Z --kit "$env:PETS_KIT"
+.\.venv\Scripts\pets-release.exe run --scenario HEALTH-S1 --recipient research-group --out ..\sinceai-out\health-s1 --created 2026-11-07T08:00:00Z --kit "$env:PETS_KIT"
 ```
+
+The walking-skeleton hand plan remains available explicitly. It bypasses the
+search, not the gate, suppression or final purpose checks. Use a fresh output
+folder for each run:
+
+<!-- docs-test: run -->
+```powershell
+.\.venv\Scripts\pets-release.exe run --scenario HEALTH-S1 --plan hand --recipient research-group --out ..\sinceai-out\health-s1-hand --created 2026-11-07T08:00:00Z --kit "$env:PETS_KIT"
+```
+
+#### Full before/after measurement
+
+The default search measures candidate purpose checks; it does not by itself fill
+the scorecard's before/after utility, privacy and published baseline comparison.
+Use the measured wrapper for those. Its CLI accepts the same arguments as `run`:
+no `--plan` means search, `--plan hand` selects the hand plan, and `--recipient`
+is passed to both builds.
+
+<!-- docs-test: run -->
+```powershell
+.\.venv\Scripts\python.exe -m pets_release.measure.wire --help
+```
+
+The full command needs the real kit, its published `results/benchmark.json`, and
+the installed `pets-eval` toolkit. The synthetic README ledger therefore names
+that dependency as a skip; real-kit evidence must run it separately, not count
+the skip as success:
+
+<!-- docs-test: skip reason=measure-wire-needs-full-kit-scorecards -->
+```powershell
+.\.venv\Scripts\python.exe -m pets_release.measure.wire --scenario HEALTH-S1 --recipient research-group --out ..\sinceai-out\health-s1-measured --created 2026-11-07T08:00:00Z --kit "$env:PETS_KIT"
+```
+
+This builds a scratch release, scores before/after through the kit-eval adapter,
+then gates and signs a second build with the measured narrative. The protected
+tables must match the scratch build byte-for-byte. Raw scorecards and scratch
+tables remain local under `<out>.measure/`; row maps stay outside the release.
+Use fresh paths: an existing release or measure scratch folder is an error.
+The measured release supports the same `verify` and `verify --full` commands below.
+
+#### CS-S1 (planned, not supported by this merged build)
+
+The current `run` pipeline accepts only HEALTH-S1. This CS-S1 command is a
+planned demo step, not a working release command: the CS-S1 run integration
+(#24) still needs the synthetic `turn_id` check (#23); its search is follow-up
+#96. The command ledger reports the named skip below, not a successful run.
+The measured wrapper does not bypass this scenario restriction.
 
 <!-- docs-test: skip reason=cs-s1-run-needs-ticket-23 -->
 ```powershell
@@ -120,7 +181,7 @@ A static HTML file rendered from the manifest alone. No network assets and no ro
 
 ### 5. Submission bundle
 
-<!-- docs-test: pending ticket=29 -->
+<!-- docs-test: skip reason=submission-needs-ticket-30 -->
 ```powershell
 .\.venv\Scripts\pets-release.exe submission --out ..\pets_submission --kit "$env:PETS_KIT"
 ```

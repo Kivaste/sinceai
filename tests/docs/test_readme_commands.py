@@ -1,7 +1,7 @@
 """Extract every command block from README.md and run the ones that can run today.
 
 Each ```powershell block must be preceded by exactly one marker comment:
-  <!-- docs-test: run -->                    run it (`pets-release ...`, venv-qualified CLI, or `$env:X = "v"`)
+  <!-- docs-test: run -->                    run it (venv-qualified CLI/module, or `$env:X = "v"`)
   <!-- docs-test: skip reason=<name> -->     not run; the reason is named and listed in the report
   <!-- docs-test: pending ticket=NN -->      subcommand not built yet ("available after ticket NN")
 A block without a marker fails. A `pending` block whose subcommand now exists is reported
@@ -30,6 +30,8 @@ ALLOWED_SKIP_REASONS = (
     "environment-setup",
     "sets-secret-placeholder-only",
     "runs-the-whole-test-suite-recursively",
+    "measure-wire-needs-full-kit-scorecards",
+    "submission-needs-ticket-30",
     # the CS-S1 release needs ticket 23 (turn_id check); guarded below
     "cs-s1-run-needs-ticket-23",
 )
@@ -101,6 +103,40 @@ def _transcript(line: str) -> None:
 
 def test_readme_has_command_blocks():
     assert BLOCKS, "README has no powershell blocks; the docs check would pass vacuously"
+
+
+def test_health_examples_cover_default_search_recipient_and_hand_plan():
+    """CLI ledger seam: both documented plans execute, with a recipient on the default search."""
+    commands = [statement for block in BLOCKS if block["kind"] == "run"
+                for statement in _statements(block["body"])
+                if statement.startswith(r".\.venv\Scripts\pets-release.exe run --scenario HEALTH-S1")]
+    assert any("--plan" not in command and "--recipient research-group" in command for command in commands), (
+        "Document the default search with its recipient, without an invented --plan search flag"
+    )
+    assert any("--plan hand" in command for command in commands), "Keep an executable hand-plan example"
+
+
+def test_measured_path_documents_module_cli_and_names_full_kit_dependency():
+    """CLI ledger seam: parse the real wire flags here; full scorecards run on the real kit separately."""
+    wire = [block for block in BLOCKS if "-m pets_release.measure.wire" in block["body"]]
+    assert any(block["kind"] == "run" and "--help" in block["body"] for block in wire), (
+        "The measured module's real argparse entry point must run in the command ledger"
+    )
+    release = [block for block in wire if "--scenario HEALTH-S1" in block["body"]]
+    assert len(release) == 1
+    assert release[0]["kind"] == "skip" and release[0]["arg"] == "reason=measure-wire-needs-full-kit-scorecards"
+    assert "--recipient research-group" in release[0]["body"] and "--plan" not in release[0]["body"]
+
+
+@pytest.mark.parametrize("command,reason", [
+    ("run --scenario CS-S1", "cs-s1-run-needs-ticket-23"),
+    ("submission --out", "submission-needs-ticket-30"),
+])
+def test_unmerged_commands_have_explicit_named_skips(command, reason):
+    """CLI ledger seam: planned commands cannot masquerade as executed checks."""
+    planned = [block for block in BLOCKS if command in block["body"]]
+    assert len(planned) == 1
+    assert planned[0]["kind"] == "skip" and planned[0]["arg"] == f"reason={reason}"
 
 
 def _windows_quick_start() -> str:
@@ -236,14 +272,19 @@ def test_block(block, tmp_path):
     def execute(stmt):
         stmt_x = _expand(stmt, env).replace("..\\sinceai-out\\", str(out_root) + os.sep)
         args = [a.strip('"') for a in shlex.split(stmt_x, posix=False)][1:]
+        module = "pets_release"
+        if stmt.startswith(r".\.venv\Scripts\python.exe "):
+            assert args[:2] == ["-m", "pets_release.measure.wire"], "Unknown README Python module"
+            module = args[1]
+            args = args[2:]
         for s in SUBCOMMANDS:
             if args and args[0] == s:
                 assert _subcommand_exists(s), f"run block uses unbuilt subcommand {s}"
-        proc = subprocess.run([sys.executable, "-m", "pets_release", *args], cwd=ROOT, env=env,
-                              capture_output=True, text=True, encoding="utf-8", check=False)
+        proc = subprocess.run([sys.executable, "-m", module, *args], cwd=ROOT, env=env,
+                              capture_output=True, text=True, encoding="utf-8", timeout=180, check=False)
         return args, proc
 
-    if "health-s1" in block["body"] and not block["body"].lstrip().startswith(r".\.venv\Scripts\pets-release.exe run"):
+    if re.search(r"pets-release\.exe (?:verify|dashboard)\b", block["body"]):
         _, pre = execute(run_cmd)  # earlier README step: the release the later commands act on
         assert pre.returncode == 0, f"prerequisite run failed: {pre.stdout[-300:]}{pre.stderr[-300:]}"
 
@@ -253,7 +294,8 @@ def test_block(block, tmp_path):
         if m:
             env[m.group(1)] = m.group(2)
             continue
-        assert stmt.startswith(("pets-release ", r".\.venv\Scripts\pets-release.exe ")), (
+        assert stmt.startswith(("pets-release ", r".\.venv\Scripts\pets-release.exe ",
+                                r".\.venv\Scripts\python.exe ")), (
             f"block {block['n']}: unrunnable statement {stmt!r}"
         )
         args, proc = execute(stmt)
@@ -266,6 +308,18 @@ def test_block(block, tmp_path):
             assert "VERIFIED (full)" not in proc.stdout
         assert proc.returncode == 0, f"{stmt!r} exited {proc.returncode}: {proc.stdout[-300:]}{proc.stderr[:300]}"
     assert executed, f"block {block['n']} is marked run but executed no command"
+
+
+@pytest.mark.parametrize("prefix", [
+    r".\.venv\Scripts\pets-release.exe run --scenario HEALTH-S1",
+    r".\.venv\Scripts\python.exe -m pets_release.measure.wire --scenario HEALTH-S1",
+])
+def test_ledger_rejects_wrong_flags_through_real_cli(prefix, tmp_path):
+    """CLI seam: both launch forms must really parse arguments, not silently discard flags."""
+    source = next(block for block in BLOCKS if block["body"].strip().startswith(prefix))
+    mutated = {**source, "kind": "run", "arg": "", "body": source["body"].strip() + " --wrong-readme-flag"}
+    with pytest.raises(AssertionError, match="unrecognized arguments: --wrong-readme-flag"):
+        test_block(mutated, tmp_path)
 
 
 @pytest.mark.parametrize(
