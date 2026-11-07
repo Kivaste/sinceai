@@ -117,6 +117,25 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/overnight/test-main-
 
 This is path-transition polling, not a filesystem audit: it cannot detect a write restored entirely between cycles, another overwrite of an already-dirty path, ignored files, or attribute a write to an agent rather than the orchestrator. A committed clean orchestrator change produces no dirty path. A disappeared path alerts again if it reappears after an observed cycle without it. Deploying the merged script to the existing scheduled monitor remains the orchestrator's job; worktree tests never modify the live task.
 
+### Session wait / idle guards (#125, #126)
+
+After the checkout guard, but before CPU, GitHub, phase and cooldown checks, each cycle checks session health. A checkout alert does not suppress this scan. The monitor discovers idle workers by searching session titles for the heartbeat's running issue numbers (including `merge:N` entries), plus legacy ticket numbers resolved through the issue map. It follows session-list cursors, including workers under earlier or nested parents; `/api/session/active` alone omits idle sessions. `-IssueMapPath` overrides the normal `.scratch/local-spec/issue-map.json` for isolated runs.
+
+- An idle implementer, fixer or merger on a running ticket is flagged when its newest assistant text lacks a `## Done-report`, `## Merger report` or `## Merge report` heading. Older reports cannot hide newer waiting text. Tool-only message pages are followed until the newest text is found.
+- Every active session, including the root orchestrator, is checked for running shell tools. PowerShell command syntax identifies file/process polling loops, sleep loops, `Start-Sleep` over 120 seconds, `waitany` over two minutes (or without a bound), and `Wait-Process` targets absent from the local process inventory. Explicit wait patterns alert immediately; they do not wait ten minutes.
+- Other shell calls older than ten minutes are flagged if their process tree has no live worker. The root is identified by tool PID metadata, or its command line; shell/sleep wrapper processes alone are not workers. A live pytest/Python/Git descendant is not a blocked wait. If process identity cannot be established, the result is **unknown**, not a guessed pass.
+
+Alerts use the real `send-to-orchestrator.ps1` **steer** path, without utilization cooldown. They contain only session ID, ticket number (or `none`), status, a fixed pattern name and age; never assistant text, commands, process command lines or API diagnostics. No worker is killed or interrupted. API, response-shape, pagination-budget and process-probe failures report **unknown**. A failed delivery fails the run.
+
+`-SessionCheckOnly` runs checkout and session guards without capacity/GitHub probes: exit 0 = healthy, 1 = flagged, 2 = unknown, 3 = runner/delivery failure (combined with the checkout result). `-DryRun` logs classifications and prints the would-be steer, but sends nothing. Use an external state directory containing a content-free heartbeat when probing from a worktree:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/overnight/utilization-check.ps1 -SessionCheckOnly -DryRun -StateDir C:\Users\kivas\AI\sinceai-out\fu125\state -IssueMapPath C:\Users\kivas\AI\sinceai-out\fu125\issue-map.json
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/overnight/test-session-waits.ps1 -Case workers
+```
+
+This is a monitor-cycle snapshot, not a proof of useful progress: it cannot predict writes from arbitrary external processes, interpret arbitrary programs, or see a wait that starts and ends between cycles. An unreadable probe remains unknown. Implementers and mergers must run tests and real runs in the foreground with a long timeout, never end their turn while background work runs, and finish with the template's report heading.
+
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/overnight/utilization-check.ps1 -DryRun   # decision + message, nothing sent
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/overnight/install-utilization.ps1
