@@ -21,6 +21,10 @@ _SCENARIO_ASSERTIONS = {
 SCENARIOS = tuple(sorted(_SCENARIO_ASSERTIONS))
 ALL_ASSERTIONS = tuple(sorted(set().union(*_SCENARIO_ASSERTIONS.values())))
 
+# Verification scope each assertion's evidence must carry (spec §14 "Scopes", D18).
+_PRODUCER = ("keyMaterial", "quasiIdentifiersBelowK", "reversibleHashes")
+ASSERTION_SCOPES = {n: ("producer" if n in _PRODUCER else "release") for n in ALL_ASSERTIONS}
+
 ROLES = ("direct_identifier", "free_text", "non_sensitive", "quasi_identifier", "record_key", "sensitive_attribute",
          "technical_identifier")
 SPAN_LABELS = ("ACCOUNT_NUMBER", "ADDRESS", "AGE", "DATE", "DEVICE_ID", "EMAIL", "HEALTH", "IBAN", "IP_ADDRESS",
@@ -163,7 +167,9 @@ def _scenario_rule(scenario: str) -> dict:
         "then": {"properties": {
             "exportAssertions": {"type": "object", "properties": {n: {"const": False} for n in names},
                                  "required": list(names), "additionalProperties": False},
-            "assertionEvidence": {"type": "object", "properties": {n: _ref("evidence") for n in names},
+            "assertionEvidence": {"type": "object", "properties": {
+                n: {"allOf": [_ref("evidence"), {"properties": {"scope": {"const": ASSERTION_SCOPES[n]}}}]}
+                for n in names},
                                   "required": list(names), "additionalProperties": False},
         }},
     }

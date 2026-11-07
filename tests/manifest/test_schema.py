@@ -9,6 +9,7 @@ import pytest
 
 from pets_release.manifest import (
     ALL_ASSERTIONS,
+    ASSERTION_SCOPES,
     LABEL_ASSERTIONS,
     not_measured,
     required_assertions,
@@ -77,6 +78,51 @@ def test_cs_scenario_requires_health_in_text_and_forbids_k(m):
     m["release"]["scenario"] = "CS-S1"
     errs = invalid(m, "$.exportAssertions: required")
     assert any("$.exportAssertions: additionalProperties" in e for e in errs)
+
+
+# --- verification scope is pinned per assertion (spec §14, D18) -------------------------------------------------
+
+SPEC_SCOPES = {**{n: "release" for n in LABEL_ASSERTIONS}, "healthInText": "release", "rawTimestamps": "release",
+               "rowMaps": "release", "reversibleHashes": "producer", "keyMaterial": "producer",
+               "quasiIdentifiersBelowK": "producer"}
+
+
+def _as_cs(m):
+    """Turn the HEALTH-S1 fixture into a valid CS-S1 manifest (k assertion -> healthInText)."""
+    m["release"]["scenario"] = "CS-S1"
+    m["fitFor"] = [{"scenario": "CS-S1", "reason": "test variant"}]
+    m["notFitFor"] = [{"scenario": "HEALTH-S1", "reason": "test variant"}]
+    del m["exportAssertions"]["quasiIdentifiersBelowK"]
+    old = m["assertionEvidence"].pop("quasiIdentifiersBelowK")["check"]
+    ev = {"check": "rescan-health-text", "version": "0.1.0", "scope": "release", "status": "pass",
+          "denominator": {"unit": "turns", "n": 40}, "hits": 0}
+    m["exportAssertions"]["healthInText"] = False
+    m["assertionEvidence"]["healthInText"] = ev
+    m["gate"]["checks"] = sorted([c for c in m["gate"]["checks"] if c["check"] != old] + [dict(ev)],
+                                 key=lambda c: c["check"])
+    m["bindings"]["checkVersions"] = {c["check"]: c["version"] for c in m["gate"]["checks"]}
+    return m
+
+
+def test_cs_variant_is_valid(m):
+    assert validate_manifest(_as_cs(m)) == []
+
+
+def test_spec_scope_table_covers_every_assertion():
+    assert set(SPEC_SCOPES) == set(ALL_ASSERTIONS)
+    assert ASSERTION_SCOPES == SPEC_SCOPES
+
+
+@pytest.mark.parametrize("name", ALL_ASSERTIONS)
+def test_flipping_assertion_scope_with_its_gate_record_is_invalid(m, name):
+    if name not in HEALTH:
+        m = _as_cs(m)
+    ev = m["assertionEvidence"][name]
+    assert ev["scope"] == SPEC_SCOPES[name]
+    flipped = "release" if ev["scope"] == "producer" else "producer"
+    ev["scope"] = flipped
+    next(c for c in m["gate"]["checks"] if c["check"] == ev["check"])["scope"] = flipped
+    invalid(m, f"$.assertionEvidence.{name}.scope: const")
 
 
 # --- assertion evidence ---------------------------------------------------------------------------------------

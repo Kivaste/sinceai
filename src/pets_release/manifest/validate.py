@@ -35,9 +35,23 @@ def signing_bytes(manifest: dict) -> bytes:
     return canonical_bytes({k: v for k, v in manifest.items() if k != "signature"})
 
 
-def compute_signature(manifest: dict, signing_key: bytes) -> str:
-    """HMAC-SHA256 hex over ``signing_bytes(manifest)``."""
-    return hmac.new(signing_key, signing_bytes(manifest), hashlib.sha256).hexdigest()
+def compute_signature(manifest: dict, signing_key: Any) -> str:
+    """HMAC-SHA256 hex over ``signing_bytes(manifest)``.
+
+    ``signing_key`` is either an opaque key object with ``hmac_sha256(data: bytes) -> bytes`` (ticket 06's
+    ``manifest_signing_key(master)``; its bytes are never read) or raw ``bytes`` (test fixtures only).
+    Anything else raises TypeError.
+    """
+    payload = signing_bytes(manifest)
+    if isinstance(signing_key, (bytes, bytearray)):
+        return hmac.new(bytes(signing_key), payload, hashlib.sha256).hexdigest()
+    mac = getattr(signing_key, "hmac_sha256", None)
+    if not callable(mac):
+        raise TypeError("signing key must be bytes or expose hmac_sha256(data) -> bytes")
+    digest = mac(payload)
+    if not isinstance(digest, bytes) or len(digest) != 32:
+        raise TypeError("hmac_sha256 must return 32 bytes")
+    return digest.hex()
 
 
 def _fmt(path) -> str:

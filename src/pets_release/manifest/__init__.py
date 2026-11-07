@@ -9,9 +9,10 @@ Canonical JSON
 
 Signature payload
     signing_bytes(manifest) -> bytes   canonical bytes of the manifest with the ``signature`` key removed
-    compute_signature(manifest, signing_key: bytes) -> str
-                                       HMAC-SHA256 hex over signing_bytes. Key derivation (HKDF of the master key,
-                                       info="manifest-signature") belongs to the caller.
+    compute_signature(manifest, signing_key) -> str
+                                       HMAC-SHA256 hex over signing_bytes. ``signing_key`` is an opaque object with
+                                       ``hmac_sha256(data: bytes) -> bytes`` (ticket 06 ``manifest_signing_key``; its
+                                       ``key_id()`` fits ``signature.keyId``) or raw bytes (test fixtures only).
 
 Schema and validation
     SCHEMA_VERSION                     the only accepted ``schemaVersion`` value
@@ -21,6 +22,8 @@ Schema and validation
     LABEL_ASSERTIONS, ALL_ASSERTIONS   export-assertion names
     SCENARIOS                          scenarios a manifest may be issued for ("HEALTH-S1", "CS-S1")
     required_assertions(scenario)      exact, sorted tuple of assertion names the scenario's manifest must carry
+    ASSERTION_SCOPES                   {assertion: "release"|"producer"}; each evidence record's scope is pinned to
+                                       it (producer: keyMaterial, quasiIdentifiersBelowK, reversibleHashes)
     validate_manifest(obj) -> list[str]
                                        sorted, content-free error codes ``"<json path>: <rule>"``; empty = valid.
                                        Runs the schema plus cross-field rules (evidence <-> assertions <-> gate
@@ -31,6 +34,12 @@ Schema and validation
                                        Accepts a release folder (reads ``privacy_manifest.json``).
     not_measured(reason) -> dict       the schema-valid "not yet measured" value for any ``measured.*`` section
                                        and any residual-risk ``rate``.
+
+Writer obligations the schema imposes
+    Evidence records have ``status`` "pass", ``hits`` const 0 and ``denominator.n >= 1``; gate records have
+    ``status`` "pass". A failing, errored, not-run or zero-denominator check therefore cannot be recorded: the
+    writer must refuse the release instead. Scenario, PET, column-role, span-label and residual-risk-kind enums are
+    closed; extending them is a schema change (bump ``SCHEMA_VERSION``).
 
 CLI
     python -m pets_release.manifest validate <manifest.json | release_dir>
@@ -43,6 +52,7 @@ Fixture: ``tests/fixtures/manifest/release/`` is a hand-made HEALTH-S1 release (
 from pets_release.manifest.canonical import canonical_bytes, canonical_digest, loads_strict
 from pets_release.manifest.schema import (
     ALL_ASSERTIONS,
+    ASSERTION_SCOPES,
     LABEL_ASSERTIONS,
     MANIFEST_SCHEMA,
     SCENARIOS,
@@ -60,6 +70,7 @@ from pets_release.manifest.validate import (
 
 __all__ = [
     "ALL_ASSERTIONS",
+    "ASSERTION_SCOPES",
     "LABEL_ASSERTIONS",
     "MANIFEST_FILENAME",
     "MANIFEST_SCHEMA",
