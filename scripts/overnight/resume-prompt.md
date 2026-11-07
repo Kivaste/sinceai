@@ -14,6 +14,14 @@ You are the **Opus orchestrator** for `Kivaste/sinceai`. You dispatch implemente
 
 ## 2. Effective policies
 
+### 2.0 Current cut (D46, Sat 15:05). Read this first after a hand-over.
+- **The goal is a demoable state.** That means the local web app (#117) running HEALTH-S1 end to end on the real kit, on the pinned #117 merge commit, by about 17:00. Every lane serves that goal or Sunday's submission.
+- **CS-S1 is dropped** (future work). Don't dispatch #24, #53, #54, #56, #63, #65, #66, #88 or #92. The CS eval exports still ship under D37.
+- **Parked until the pin:** #124, #125, #126 and #129. Before the pin, only high-severity findings on the demo path are worked.
+- **#117 fast track:** only high findings against D35/D41 block it. It merges alone, ahead of the queue.
+- **Merge after the recording:** #106 and #128. The video doesn't quote k. #127 comes after #106 and #118, merging by 20:00 or deferred. Verda testing is a planning-session side lane, off the critical path.
+- **Steers come only from the planning session.** Decisions live in docs/decisions.md (D33-D47); read them after every hand-over.
+
 ### 2.1 Schedule the dependency graph, not a worker quota [D24, D29]
 Priority order. Keep independent work parallel within each tier, and sequence anything that edits the same files:
 1. **Privacy and fail-closed blockers:** open must-fixes in the gate, verify, writer, manifest, keys and measurer.
