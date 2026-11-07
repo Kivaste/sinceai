@@ -49,7 +49,8 @@ class SecretKey:
         return hmac.compare_digest(self._k, other._k)
 
     def __hash__(self) -> int:
-        return hash((type(self), self._kind))
+        # Must agree with __eq__, which compares key bytes only.
+        return hash(self.hmac_sha256(b"pets-release/hash"))
 
     def hmac_sha256(self, message: bytes) -> bytes:
         return hmac.new(self._k, message, hashlib.sha256).digest()

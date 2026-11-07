@@ -4,8 +4,8 @@ Rules shared by all generalising rungs:
 - null in -> null out (position preserved);
 - a non-null value the rung cannot parse becomes ``""`` and is never passed through
   (a coarse rung must not leak the raw value);
-- identity rungs (``ts.exact``, ``num.exact``, ``icd.full``, ``geo.full``, ``keep``)
-  are the only ones that return source text.
+- ``geo.full`` and ``keep`` are the only identity rungs; ``ts.exact``, ``num.exact`` and
+  ``icd.full`` normalise to canonical text (offsets in ``ts.exact`` are dropped, not converted).
 """
 
 from __future__ import annotations
@@ -30,8 +30,19 @@ def _isnull(v: Any) -> bool:
     return v is None or (isinstance(v, float) and np.isnan(v)) or v is pd.NA
 
 
+def _safe(fn: Callable[[str], str]) -> Callable[[str], str]:
+    def run(v: str) -> str:
+        try:
+            return fn(v)
+        except ArithmeticError:
+            return ""  # beyond Decimal context: blank, never raise
+
+    return run
+
+
 def _mapped(s: pd.Series, fn: Callable[[str], str]) -> pd.Series:
     """Apply ``fn`` once per distinct non-null value; keep nulls and index."""
+    fn = _safe(fn)
     uniq = {v: fn(v) for v in pd.unique(s.dropna())}
     return s.map(lambda v: v if _isnull(v) else uniq[v]).astype(object)
 
@@ -76,6 +87,7 @@ def _week(y: int, mo: int, d: int, *_: int) -> str:
 ts_exact = _ts_fmt(lambda y, mo, d, h, mi, sec: f"{y:04d}-{mo:02d}-{d:02d} {h:02d}:{mi:02d}:{sec:02d}")
 ts_hour = _ts_fmt(lambda y, mo, d, h, *_: f"{y:04d}-{mo:02d}-{d:02d}T{h:02d}:00")
 ts_month_hour = _ts_fmt(lambda y, mo, d, h, *_: f"{y:04d}-{mo:02d}-01T{h:02d}:00")
+ts_hour_of_day = _ts_fmt(lambda y, mo, d, h, *_: f"{h:02d}:00")
 ts_day = _ts_fmt(lambda y, mo, d, h, *_: f"{y:04d}-{mo:02d}-{d:02d}")
 ts_week = _ts_fmt(_week)
 ts_month = _ts_fmt(lambda y, mo, d, h, *_: f"{y:04d}-{mo:02d}")
@@ -139,10 +151,10 @@ def geo_topn(s: pd.Series, params: dict) -> pd.Series:
     n = params.get("n")
     if not isinstance(n, int) or isinstance(n, bool) or n < 1:
         raise LadderError("geo.topn needs integer params.n >= 1")
-    counts = s.dropna().value_counts()
+    counts = s.dropna()[lambda x: x != ""].value_counts()
     ordered = sorted(counts.items(), key=lambda kv: (-kv[1], str(kv[0])))
     keep = {k for k, _ in ordered[:n]}
-    return s.map(lambda v: v if _isnull(v) else (v if v in keep else "other")).astype(object)
+    return s.map(lambda v: v if _isnull(v) else (v if v == "" or v in keep else "other")).astype(object)
 
 
 # ------------------------------------------------------------------ icd10
@@ -205,7 +217,10 @@ def num_exact(s: pd.Series, params: dict) -> pd.Series:
         t = v.strip()
         q = t[0] if t[:1] in ("<", ">") else ""  # censored measurement ("<5") keeps its qualifier
         d = _dec(t[len(q):])
-        return "" if d is None else q + format(d, "f")
+        if d is None:
+            return ""
+        out = q + format(d, "f")
+        return re.sub(r"^([<>]?)-(0(?:\.0+)?)$", r"\1\2", out)
 
     return _mapped(s, one)
 
@@ -225,7 +240,13 @@ def num_round(s: pd.Series, params: dict) -> pd.Series:
 
 def num_bin(s: pd.Series, params: dict) -> pd.Series:
     width = _positive(params, "width")
-    origin = Decimal(str(params.get("origin", 0)))
+    raw_origin = params.get("origin", 0)
+    try:
+        origin = Decimal(str(raw_origin))
+    except InvalidOperation:
+        raise LadderError("params.origin must be a finite number") from None
+    if raw_origin is None or isinstance(raw_origin, bool) or not origin.is_finite():
+        raise LadderError("params.origin must be a finite number")
     places = _decimals(width, origin)
 
     def one(v: str) -> str:

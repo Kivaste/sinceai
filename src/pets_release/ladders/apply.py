@@ -1,7 +1,9 @@
-"""``apply(plan, tables, keys)``: pure, plan-driven application of the rungs."""
+﻿"""``apply(plan, tables, keys)``: pure, plan-driven application of the rungs."""
 
 from __future__ import annotations
 
+import math
+import re
 from collections.abc import Callable, Mapping
 from typing import Any, Protocol
 
@@ -25,6 +27,7 @@ _SIMPLE: dict[str, Callable[[pd.Series, dict], pd.Series]] = {
     "ts.exact": T.ts_exact,
     "ts.hour": T.ts_hour,
     "ts.month_hour": T.ts_month_hour,
+    "ts.hour_of_day": T.ts_hour_of_day,
     "ts.day": T.ts_day,
     "ts.week": T.ts_week,
     "ts.month": T.ts_month,
@@ -39,6 +42,17 @@ _SIMPLE: dict[str, Callable[[pd.Series, dict], pd.Series]] = {
     "keep": T.identity,
 }
 _AGE = {"age.band5": T.age_band5, "age.band10": T.age_band10}
+
+
+def _null(v: Any) -> bool:
+    return v is None or v is pd.NA or (isinstance(v, float) and math.isnan(v))
+
+
+def _token(keys: KeyMaterial, value: str, label: str) -> str:
+    t = keys.token(value, label)
+    if not isinstance(t, str) or not re.fullmatch(r"[0-9a-f]{64}", t):
+        raise LadderError("pseudonymiser returned a token that is not hex64")
+    return t
 
 
 def output_column(entry: Mapping[str, Any]) -> str:
@@ -90,11 +104,14 @@ def apply(
 
     Pure: inputs are not mutated, there is no I/O, plan order does not matter, and rows keep
     their order and index. Columns keep source order; an age rung replaces its source column
-    with a derived column. Tables whose columns are all withheld are omitted. Fail closed:
+    with a derived column. Tables whose columns are all withheld are omitted; a table with no columns is refused. A redactor result is realigned by index (same labels, any order) or refused. An age rung's output name may not equal any source column of its table. Fail closed:
     every source column needs exactly one plan entry, every rung must be known and not finer
     than its floor, and ``text.redacted`` needs an injected ``redactor(table, column, frame,
     params) -> Series`` (ticket 12).
     """
+    for tname, df in tables.items():
+        if len(df.columns) == 0:
+            raise LadderError(f"table {tname} has no columns")
     by_key = _validate(list(plan), tables)
     out: dict[str, pd.DataFrame] = {}
     for tname in sorted(tables):
@@ -106,9 +123,11 @@ def apply(
             if rung == WITHHELD:
                 continue
             name = output_column(e)
-            if name in cols or (name != col and name in src.columns):
+            if name in cols or (name != col and name in src.columns) or (rung in _AGE and name in src.columns):
                 raise LadderError(f"output column collision on {tname}.{name}")
             s = src[col]
+            if not all(isinstance(v, str) or _null(v) for v in pd.unique(s)):
+                raise LadderError(f"non-string cells in {tname}.{col}; tables must be read with dtype=str")
             if rung in _AGE:
                 ref = None
                 if params.get("ref_column"):
@@ -119,14 +138,18 @@ def apply(
                 res = _AGE[rung](s, params, ref)
             elif rung == "id.pseudonym":
                 label = params.get("label", "RECORD_KEY")
-                res = s.map(lambda v, label=label: v if pd.isna(v) or v == "" else keys.token(str(v), label))
+                res = s.map(lambda v, label=label: v if _null(v) or v == "" else _token(keys, str(v), label))
             elif rung == "text.redacted":
                 if redactor is None:
                     raise LadderError("text.redacted needs a redactor")
                 res = redactor(tname, col, src, params)
                 if not isinstance(res, pd.Series) or len(res) != len(src):
                     raise LadderError("redactor must return a Series aligned to the table")
-                res = res.set_axis(src.index)
+                if not res.index.equals(src.index):
+                    if res.index.is_unique and src.index.is_unique and res.index.isin(src.index).all():
+                        res = res.reindex(src.index)
+                    else:
+                        raise LadderError("redactor result index does not match the table index")
             else:
                 res = _SIMPLE[rung](s, params)
             cols[name] = res.astype(object)
