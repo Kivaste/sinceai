@@ -16,6 +16,8 @@ import re
 import sys
 from pathlib import Path
 
+from pets_release.offline import entry_point
+
 _ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:+-]{0,63}$")
 _METHODS = {
     "linkage": ("reidentification_rate", "linkage",
@@ -62,6 +64,7 @@ def residual_risks(attack: dict) -> list:
     return sorted(out, key=lambda r: r["risk"])
 
 
+@entry_point
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="pets_attacker.bridge")
     ap.add_argument("--attack", required=True, type=Path)

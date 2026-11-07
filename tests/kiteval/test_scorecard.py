@@ -1,6 +1,7 @@
 """The out-of-process scorecard, through the real pets-eval CLI, on a tiny synthetic kit."""
 
 import json
+from pathlib import Path
 
 import pandas as pd
 import pytest
@@ -232,3 +233,96 @@ def test_linkage_is_expected_exactly_when_the_kit_has_identity_data_for_the_tabl
     identity.write_text("record_id,person_id\nc1,p1\nc2,\n", encoding="utf-8")
     assert linkage() == {"attacks": [], "no_attack_columns": []}
 
+
+
+# ---- must-fix #64: the evaluator's table status is checked against the real release ----
+
+
+def _evaluator_then(mutate, monkeypatch):
+    """Run the real pets-eval child, then rewrite its report the way a silent skip would look."""
+    import subprocess
+
+    real = subprocess.run
+
+    def run(cmd, *a, **k):
+        proc = real(cmd, *a, **k)
+        out = Path(cmd[cmd.index("--out") + 1])
+        report = json.loads((out / "scorecard.json").read_text(encoding="utf-8"))
+        mutate(report)
+        (out / "scorecard.json").write_text(json.dumps(report), encoding="utf-8")
+        return proc
+
+    monkeypatch.setattr(subprocess, "run", run)
+
+
+def test_released_table_reported_as_withheld_is_refused_through_the_adapter(kit, release, monkeypatch):
+    def skip(report):
+        report["tables"]["conversations"] = {"table": "conversations", "status": "withheld", "rows_original": 4}
+        report["risk_components"] = {}
+
+    _evaluator_then(skip, monkeypatch)
+    with pytest.raises(ScorecardRejected) as caught:
+        _run(kit, release)
+    assert caught.value.reason == "status_mismatch"
+
+
+def test_protected_row_count_disagreeing_with_the_release_is_refused_through_the_adapter(kit, release, monkeypatch):
+    _evaluator_then(lambda r: r["tables"]["conversations"].update(rows_protected=3), monkeypatch)
+    with pytest.raises(ScorecardRejected) as caught:
+        _run(kit, release)
+    assert caught.value.reason == "row_count_mismatch"
+
+
+# ---- must-fix #82: run_scorecard is offline, and so is the evaluator child it starts ----
+
+_PROBE = ("import socket,sys\n"
+          "try:\n    socket.socket(socket.AF_INET, socket.SOCK_STREAM)\n"
+          "except Exception:\n    print('BLOCKED'); sys.exit(0)\n"
+          "print('OPEN'); sys.exit(1)\n")
+
+
+def _scorecard_probe(kit, release, tmp_path, *, call: bool) -> list[str]:
+    """In a fresh interpreter with no guard in its environment, call the real run_scorecard; the
+    evaluator child slot runs a planted socket probe with exactly the env= run_scorecard built.
+    Then probe the calling process itself."""
+    import subprocess
+    import sys
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from conftest import cli_env
+
+    prot, rms, out = release
+    code = (
+        "import json, subprocess, sys\n"
+        "from pathlib import Path\n"
+        "real = subprocess.run\n"
+        f"PROBE = {_PROBE!r}\n"
+        "def planted(cmd, *a, env=None, **k):\n"
+        "    p = real([sys.executable, '-c', PROBE], env=env, capture_output=True, text=True)\n"
+        "    print('child', p.stdout.strip())\n"
+        "    return subprocess.CompletedProcess(cmd, 1, stdout=b'', stderr=b'')\n"
+        "subprocess.run = planted\n"
+        "from pets_release.kiteval import Lineage, run_scorecard\n"
+        f"args = json.loads({json.dumps(json.dumps({'orig': str(kit / 'data' / 'customer_service'), 'prot': str(prot), 'root': str(kit), 'rm': str(rms['conversations']), 'out': str(out), 'final': list(LINEAGE.final)}))})\n"
+        "try:\n"
+        + ("    run_scorecard(args['orig'], args['prot'], scenario='TEST-S1', root=args['root'],\n"
+           "                  rowmaps={'conversations': args['rm']}, out_dir=args['out'],\n"
+           "                  lineage={'conversations': Lineage(tuple(args['final']), frozenset())})\n"
+           if call else "    pass\n") +
+        "except Exception as e:\n"
+        "    print('raised', type(e).__name__)\n"
+        "subprocess.run = real\n"
+        "try:\n    exec(PROBE)\nexcept SystemExit:\n    pass\n"
+    )
+    r = subprocess.run([sys.executable, "-c", code], cwd=tmp_path, env=cli_env(), capture_output=True, text=True,
+                       encoding="utf-8", check=False)
+    return [line for line in r.stdout.splitlines() if line] or [r.stderr[-400:]]
+
+
+def test_scorecard_child_and_caller_are_offline_without_a_guard_in_the_environment(kit, release, tmp_path):
+    assert _scorecard_probe(kit, release, tmp_path, call=True) == [
+        "child BLOCKED", "raised ScorecardRejected", "BLOCKED"]
+
+
+def test_scorecard_probe_control_opens_a_socket_without_run_scorecard(kit, release, tmp_path):
+    assert _scorecard_probe(kit, release, tmp_path, call=False) == ["OPEN"]

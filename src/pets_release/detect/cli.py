@@ -16,6 +16,7 @@ import pandas as pd
 
 from pets_release.detect import inventory, serialise
 from pets_release.kit import Kit, KitError, refuse_forbidden_path
+from pets_release.offline import entry_point
 
 
 class _Parser(argparse.ArgumentParser):
@@ -24,6 +25,7 @@ class _Parser(argparse.ArgumentParser):
         self.exit(2, f"{self.prog}: error: {message}\n")
 
 
+@entry_point
 def main(argv: list[str]) -> int:
     p = _Parser(prog="pets-release detect", description="detect column roles in a kit dataset or a CSV")
     p.add_argument("target", help="kit dataset name, or path to a CSV file")
