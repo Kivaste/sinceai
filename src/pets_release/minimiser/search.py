@@ -28,6 +28,7 @@ mean; ties prefer the coarser plan, then the earlier candidate. At most ``budget
 from __future__ import annotations
 
 import hashlib
+import heapq
 import json
 import math
 from collections.abc import Callable, Mapping
@@ -353,6 +354,33 @@ class _Search:
             except WorkerFailed as e:
                 raise MinimiserRefused(str(e), self.log, self.stats) from None
 
+    def _speculate(self, state, step, rate) -> list:
+        """The next candidates of a phase, most likely first (#127; affects scoring order only, never results).
+        ``step(state)`` -> None at the end, else (candidate or None to skip, state if adopted, state if rejected).
+        Both outcomes of each pending step are explored best-first, weighted by the phase's adoption rate so far
+        (``rate`` = [adopted, tried], Laplace-smoothed), up to 2 x workers candidates."""
+        if self.pool is None:
+            return []
+        p = (rate[0] + 1) / (rate[1] + 2)
+        out, heap, n, limit = [], [(-1.0, 0, state)], 1, 2 * self.pool.workers
+        for _ in range(64 * limit):  # bounded walk; skipped steps cost no candidate
+            if not heap or len(out) >= limit:
+                break
+            negp, _, st = heapq.heappop(heap)
+            nxt = step(st)
+            if nxt is None:
+                continue
+            cand, adopted, rejected = nxt
+            if cand is None or self._dropped_record_keys(cand):  # never tried: the search stays at ``rejected``
+                heapq.heappush(heap, (negp, n, rejected))
+                n += 1
+                continue
+            out.append(cand)
+            heapq.heappush(heap, (negp * p, n, adopted))
+            heapq.heappush(heap, (negp * (1 - p), n + 1, rejected))
+            n += 2
+        return out
+
     def main_columns(self, cand) -> dict:
         """The candidate's keyed columns (``MAIN_ONLY_RUNGS``), built here: a pool worker holds no key material."""
         out = {}
@@ -545,18 +573,49 @@ class _Search:
             return ok, step
 
         # withholding pass
-        for i, u in enumerate(self.units):
+        # speculation (#127, scoring order only): state (i, cur) -> (candidate or None, if adopted, if rejected)
+        units, joints = self.units, self.p.joint_qi_moves
+
+        def wh_step(st):
+            i, c = st
+            if i >= len(units):
+                return None
+            cand = self._withheld(units[i], c)
+            return cand, (i + 1, cand), (i + 1, c)
+
+        def co_step(st):
+            i, c = st
+            if i >= len(units):
+                return None
+            cand = self._coarser(units[i], c)
+            return cand, (i, cand), (i + 1, c)
+
+        def jo_step(st):
+            i, c = st
+            if i >= len(joints):
+                return None
+            cand = self._joint(joints[i], c)
+            return (None if cand == c else cand), (i + 1, cand), (i + 1, c)
+
+        rate = {"withhold": [0, 0], "coarsen": [0, 0], "joint": [0, 0]}
+
+        def seen(phase, ok):
+            rate[phase][0] += int(bool(ok))
+            rate[phase][1] += 1
+
+        for i, u in enumerate(units):
             if self.out_of_budget():
                 break
             if cur[u[0]][0] == WITHHELD:
                 continue
-            self.ahead([self._withheld(v, cur) for v in self.units[i:]])
+            self.ahead(self._speculate((i, cur), wh_step, rate["withhold"]))
             cand = self._withheld(u, cur)
             ok, step = try_strict(cand, f"withhold {self._name(u)}")
+            seen("withhold", ok)
             if ok:
                 step_reason(u[0], "withheld; every purpose check passes without it", step)
         # coarsening pass
-        for i, u in enumerate(self.units):
+        for i, u in enumerate(units):
             ok = True
             while ok and not self.out_of_budget():
                 rung = cur[u[0]][0]
@@ -567,20 +626,21 @@ class _Search:
                     break
                 cand = self._coarser(u, cur)
                 r2 = nxt[0]
-                # next: this candidate; if adopted, this unit one more rung; if rejected, the next units
-                self.ahead([cand, self._coarser(u, cand)] + [self._coarser(v, cur) for v in self.units[i + 1:]])
+                self.ahead(self._speculate((i, cur), co_step, rate["coarsen"]))
                 ok, step = try_strict(cand, f"coarsen {self._name(u)} to {r2}")
+                seen("coarsen", ok)
                 if ok:
                     step_reason(u[0], f"{r2}: coarsest rung at which every purpose check passes", step)
         # joint QI moves
-        for i, mv in enumerate(self.p.joint_qi_moves):
+        for i, mv in enumerate(joints):
             if self.out_of_budget():
                 break
-            self.ahead([c for c in (self._joint(m, cur) for m in self.p.joint_qi_moves[i:]) if c != cur])
+            self.ahead(self._speculate((i, cur), jo_step, rate["joint"]))
             cand = self._joint(mv, cur)
             if cand is None or cand == cur:
                 continue
             ok, step = try_strict(cand, f"joint QI move {i + 1}", strictly_better=True)
+            seen("joint", ok)
             if ok:
                 for m in mv:
                     step_reason((m["table"], m["column"]), f"{m['rung']}: joint QI move {i + 1} lowers risk", step)
