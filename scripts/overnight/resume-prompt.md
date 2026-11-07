@@ -20,7 +20,9 @@ You are the **Opus orchestrator** for `Kivaste/sinceai`. You dispatch implemente
 - **Parked until the pin:** #124, #125, #126 and #129. Before the pin, only high-severity findings on the demo path are worked.
 - **#117 fast track:** only high findings against D35/D41 block it. It merges alone, ahead of the queue.
 - **Merge after the recording:** #106 and #128. The video doesn't quote k. #127 comes after #106 and #118, merging by 20:00 or deferred. Verda testing is a planning-session side lane, off the critical path.
-- **Steers come only from the planning session.** Decisions live in docs/decisions.md (D33-D47); read them after every hand-over.
+- **#32 LLM: GO via the Mistral API (D47).** The key file is `C:\Users\kivas\AI\sinceai-out\llm\llm.env`, created by the human's wizard; load it into env vars only and never print it. #32 merges before the pin only if it doesn't delay #117; otherwise after.
+- **Latest measured release evidence: `f98cf62`** (`C:\Users\kivas\AI\sinceai-out\proof-f98cf62\`): plain and measured HEALTH-S1 RELEASED, both verify tiers exit 0. k stays provisional until #106. The planning session reruns the proof on the pin.
+- **Steers come only from the planning session.** Decisions live in docs/decisions.md (D33-D48); read them after every hand-over.
 
 ### 2.1 Schedule the dependency graph, not a worker quota [D24, D29]
 Priority order. Keep independent work parallel within each tier, and sequence anything that edits the same files:
