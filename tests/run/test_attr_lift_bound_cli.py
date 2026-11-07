@@ -259,6 +259,9 @@ def test_lift_under_the_bound_releases_and_states_the_bound(tmp_path):
     assert p.returncode == 0, p.stdout + p.stderr
     m = json.loads((out / "privacy_manifest.json").read_text(encoding="utf-8"))
     note = next(r for r in m["residualRisks"] if r["risk"] == "attribute-lift-bound")
+    # measured, but a ratio: not_measured with a reason code (the closed rate form holds [0, 1] only)
+    assert note["kind"] == "note" and note["rate"]["status"] == "not_measured"
+    assert note["rate"]["reason"].startswith("lift-is-a-ratio: measured by the producer on every released row")
     d = note["description"]
     assert f"los_minutes bound {MAX_LIFT}, else refused" in d
     assert "icd10_primary: no bound, a disclosed residual risk" in d and "chapter-level coding makes H-U4 0.0" in d

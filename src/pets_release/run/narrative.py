@@ -49,6 +49,11 @@ def _pet(entry) -> tuple[str, dict]:
 
 
 LIFT_NOTE_ID = "attribute-lift-bound"  # D64 (#157)
+# #157 r3: the producer lift WAS measured, but it is a ratio (accuracy from the QIs / base rate), which the closed
+# residualRisks rate form (a value in [0, 1] over a denominator) cannot carry; the measured lifts are in the
+# description. Reason code first, then plain words.
+LIFT_RATE_REASON = ("lift-is-a-ratio: measured by the producer on every released row, but a lift is a ratio, not a "
+                    "rate in [0, 1]; the measured lifts per attribute are in this entry's description")
 
 
 def _lift_text(search) -> str:
@@ -113,6 +118,8 @@ def build_narrative(*, policy, plan, scenario_ids, suppression: dict, k: int, pu
         text = n["note"] + (_lift_text(search) if n["id"] == LIFT_NOTE_ID else "")
         rate = not_measured(text[:500]) if n["status"] == "open" else {"status": "not_applicable",
                                                                        "reason": "no free text released"}
+        if n["id"] == LIFT_NOTE_ID and (search or {}).get("attribute_lift"):
+            rate = not_measured(LIFT_RATE_REASON)  # measured, but a ratio: the closed rate form holds [0, 1] only
         risks.append({"risk": n["id"], "kind": "note", "label": None, "rate": rate, "description": text[:500]})
     risks += [
         {"risk": "recipient-verify-tamper-limitation", "kind": "tamper_limitation", "label": None,

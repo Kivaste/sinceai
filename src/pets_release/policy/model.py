@@ -179,9 +179,10 @@ class ScenarioPolicy:
                 if to is not None:  # #157 r3: the purpose cost of holding the bound, recorded (never a waiver)
                     _exact(to, {"check", "rung", "from_params"}, "attribute lift tradeoff")
                     fl = self.floors.get((a["table"], a["column"]))
-                    if a["max_lift"] is None or to["check"] not in self.purpose_checks or fl is None or \
+                    # (its check is resolved at run time: lift_steps fails closed when it is not scored)
+                    if a["max_lift"] is None or not isinstance(to["check"], str) or fl is None or \
                             to["rung"] not in LADDERS[fl.family] or not isinstance(to["from_params"], dict):
-                        raise PolicyError("attribute lift tradeoff needs a bound, a purpose check, a ladder rung "
+                        raise PolicyError("attribute lift tradeoff needs a bound, a check, a ladder rung "
                                           "and from_params")
                 if (a["table"], a["column"]) not in cols:
                     raise PolicyError("attribute lift names an unknown column")
