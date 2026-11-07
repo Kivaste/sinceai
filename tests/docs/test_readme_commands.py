@@ -206,7 +206,7 @@ def test_block(block, tmp_path):
 
     assert block["kind"] == "run", f"block {block['n']} has no marker"
     rh = _load_run_helpers()
-    kit = rh.build_kit(tmp_path / "kit", rh.coarse_qis)  # synthetic minikit, QIs coarsened so the hand plan reaches k
+    kit = rh.build_kit(tmp_path / "kit", rh.grouped_qis)  # synthetic minikit, person-consistent QI groups so the search reaches k
     # synthetic stand-in for the unlabelled `unseen` export (one table), copied from the synthetic fixture
     (kit / "data" / "unseen").mkdir()
     shutil.copy(ROOT / "tests" / "fixtures" / "minikit" / "health" / "ed_visits.csv", kit / "data" / "unseen")

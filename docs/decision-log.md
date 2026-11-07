@@ -418,3 +418,123 @@ CS-S1 chain done-report + 4 reviews (23 + #53/#54/#56/#92) -> merge -> #63 -> 25
 - The CS-S1 done-report and its four round-1 reviews; CS-S1 verify exit codes at the final chain head.
 - No real-kit run of either release on the integration tip 9d139b3.
 - #81/#83/#94: head-bound real run at 9bbad25 (running).
+### Sat 13:28-13:50 - orchestrator hand-over; #119 and #107 closed; #107 split to #123; close-gate encoding defect (#122); CS-S1 done-report at 926765f; server restart
+
+- **When:** Sat 13:28-13:50 EET
+- **Decision:**
+  1. New orchestrator session ses_e4a3c596... claimed the heartbeat at 13:28 (start-orchestrator; the previous session ses_e4a8c046 replied "retired"). The scripts are run with `-ExecutionPolicy Bypass`, as docs/operations/overnight.md documents; the default policy blocks `-File`.
+  2. Close gate defect: `check-done-report.ps1` decoded `gh` output in the OEM code page, so the arrows in Red/Green/affected-tests lines did not match (false gaps, still fail-closed). The same mangling hit done-reports fetched with `opencode api` in PowerShell. Filed #122 (Sol, Grok + Sonnet APPROVE, in merge train 16 to main). Until it lands, the orchestrator runs the gate and the session fetches with `[Console]::OutputEncoding=UTF8`. One mangled #107 comment was deleted and re-posted.
+  3. #119 closed (merged 98c62aa): the done-report was re-posted with "Same command" expanded to the Red command, and the gate then exited 0. templates.md section 4 now forbids "Same command" (#122).
+  4. #107: Spec r1 (Sonnet) asked for script/agent writes outside pytest. The orchestrator descoped that to #123 (Sol, dispatched on main). Spec r2 APPROVE, Grok APPROVE. Merged in train 15 at 4cd4a0a: fast tier exit 0, 2452 passed, 5 skipped; slow tier exit 0, 123 passed. Closed; gate exit 0; worktree and branch removed (also fu119's).
+  5. Train 15 culprit: #26 at a3c2bc8. Its new tests/run/test_run_search.py trips the CSV read-policy guard (2 findings). Sol fixer dispatched. Train 15 found that `pets_release` is not installed in the shared venv, so subprocess tests need `PYTHONPATH=<worktree>\src`. Merger prompts now set it, which earlier trains did implicitly. Without it, test_fu85_low_audit fails on the base too.
+  6. Reviews: #114 got 4/4 APPROVE after the orchestrator ruled the extra strict loaders in scope (same defect class; AGENTS.md "found twice"); Sol r2 APPROVE. #115 got 4/4 APPROVE. Train 16 has #114, #115 and #122 (main). #121 is approved (Grok, Sonnet) and Merge after #117. #109 r1: Sol Spec found a high (the validator rejects the turn_id -> id.pseudonym alt-floor fallback, which CS-S1's CS-U5 relies on) and Sol Standards found a high (unmasked names in diagnostics). Opus fixer round 2 is running. #110+#113 r1: 3 APPROVE, Grok Spec CHANGES REQUIRED. There is no measured real-kit release because of #120. Ruling: the measure CLI seam is accepted, #110 waits on #120 (native edge), and a measured run is required afterwards. #113 met.
+  7. Human steering 13:52 relayed to the owners: #120 (bounded manifest fix, both CLI regressions, measured run with default and alternate recipient, both verify tiers), the CS-S1 owner (head-bound evidence; n/a vs missing; no fallback claim with 0 withheld), #30 (D37 gate before publication, planted-miss regression, complete by default, `submission_index.json`, rehearsal without uploads), #116 (measured path in the smoke, temporary CS refusal expectation, missing/errored = fail), #117 (aggregate views only, no row view until confirmed). D40: #96, #99, #100, #101 deferred (commented). Steer point 7 (the close gate must validate machine records, not prose) filed as #124, sequenced after #122.
+  8. Utilization-monitor items that cannot be dispatched: ticket/fu53, fu54, fu92 (and #56) are in the CS-S1 chain on ticket/23-cs-s1, which has one owner (D29). ticket/fu63, fu65, fu66, fu69 have native blocked_by #24 edges and comments. #118 is blocked by #26 (native edge), with an Opus dispatch after #26 merges. Per steer 4 it must cover the whole missing-PersonK class in search.
+  9. CS-S1: the chain owner finished at 926765f (includes 98c62aa). Real kit: gate 40 pass + 2 not_applicable (producer.person-k and producer.row-k; no k target), 0 fail, 0 hits; 42 registry checks = 42 records. run, verify (limited) and verify --full exit 0. Scorecard: CS-U1 0.9984, CS-U3 1.0, CS-U4 1.0, CS-U5 adapted 0.8803 (turn_id pseudonymised). D29/D38 fallback not used, 0 turns withheld. Four round-1 reviews were dispatched at once (Grok + Sol on both axes).
+  10. The OpenCode server restarted at about 13:50. The CS-S1 owner and #117 had already finished. #116 was interrupted and was resumed in its own session. The #109 fixer had ended its turn waiting on background tests; it was resumed with foreground tests.
+  11. Time-stamp correction: some issue comments from this session say 13:58-14:10 EET. The actual times were 13:38-13:46 EET.
+- **Why:** Brief v3 section 2 tiers (fail-closed blockers, CS-S1, search, packaging); close only on evidence (D31); human steering 13:52; D38-D40.
+- **Evidence:** merge train 15 session ses_e4a35d72; review sessions ses_e4a39565, ses_e4a3936e, ses_e4a3728, ses_e4a370c6, ses_e4a36e7a, ses_e4a36c86, ses_e4a36add, ses_e4a3696, ses_e4a3676, ses_e4a3656, ses_e4a3640, ses_e4a362c, ses_e4a31e9, ses_e4a31ce, ses_e4a31b8, ses_e4a31a5, ses_e4a318a, ses_e4a3170, ses_e4a315b, ses_e4a3147, ses_e4a3582, ses_e4a356c, ses_e4a3283, ses_e4a326a; close comments on #107 and #119; C:\Users\kivas\AI\sinceai-out\cs-s1\evidence-926765f9b62978d829808047269a2c744537d1e2\.
+
+### Sat 14:18 - STATUS
+
+#### Effective policies (changes only)
+- D38 (human, 13:35): CS-S1 keeps the strict gate until 15:00, then the D29 fallback and merge. Planning steer 14:14: Sol's round-1 high (text-form applicability fails open to not_applicable) must be fixed before merge regardless of time. The fallback withholds flagged turns; it does not cover a check that fails open.
+- D39 amended (human, 14:02): #32 is being prepared now. It merges only if both releases pass gate + verify on integration by 16:00.
+- D40 (human, 13:50): #96, #99, #100 and #101 are deferred, not dispatched. D41: the web app shows real-kit protected rows, labelled, only from a release that passes verify at display time. Agents never view rows. D42: hosted demo on exe.dev (planning lane).
+- templates.md section 5 (main aa5c3a0): merger tiers run in the foreground with a timeout and a PID check, and a tier lost to a restart is rerun. The orchestrator fetches and runs the close gate with UTF-8 console decoding until #122 is on main.
+
+#### Critical path
+#24 chain fix (alternation fail-open + SECRET recall) -> delta reviews -> merge -> #63 -> CS-S1 evidence on integration; #120 -> #110/#113 measured evidence -> measured HEALTH-S1 release; #30 fix -> complete bundle after #24 -> pets_submission 16:00; D39 check -> #32 by 16:00; then final review (D32), fresh proof, #103, PR #95.
+
+#### Blocker -> owner -> next proof
+- #24 + #53/#54/#56/#92 (CS-S1) -> ses_e4aac068 (claude-agent/opus, D29 owner) -> fix of the Sol Standards high (`_shape()` alternation/repeat counted as non-text) and the held-out SECRET recall 15/17 (spec target 0.98; escalate to the human by 14:40 if not reachable), red-first, then a real-kit run + verify (limited) + verify --full + scorecard at the new head, then Sol Standards and Sol Spec deltas. Round 1 at 926765f: Grok APPROVE on both axes.
+- #120 (manifest value scan; measured HEALTH-S1 refuses) -> ses_e4a44ed4 (opus) -> foreground measured run, default and `--recipient acme`, both verify tiers, plus the two CLI regressions; then 4 round-1 reviews.
+- #110 + #113 -> no live owner. Branch ticket/fu110-scorecard-k at 289a88c: 3 of 4 round-1 APPROVE; Grok Spec CHANGES REQUIRED for the missing measured real-kit run. Blocked by #120 (native edge). Next proof: a measured real-kit run + both verify tiers at a head that includes #120, then a Grok Spec delta. Dispatched (Opus evidence session) when #120 merges.
+- #118 (missing PersonK as zero shortfall in search) -> no owner yet; blocked by #26 (native edge). Opus dispatched after #26 merges (train 17). Steer: it must cover the whole failure class in search.
+- #106 (D33 HEALTH QI policy) -> after #26 and #109 merge -> Opus; measure the CRP-vs-other rung, H-U7, person-k and suppression.
+- #30 (packager, D37) -> round 2 at 4112335. Sol Spec CHANGES REQUIRED: the masking effect on the redaction metrics is not recorded; README example broken / wrong destination; the README submission test is still skipped. Grok Standards pending. Opus fixer next. Complete bundle after #24.
+- #116 (release smoke) -> round 1 at 0b83256. Sonnet Spec CHANGES REQUIRED: the CS-S1 expectation is "refused" but this base exits 2 (run is HEALTH-S1-only until #24). Grok pending. Fixer next; Merge after #24.
+- #117 (web app, D35/D41) -> ses_e4a27f3f (Sol), round 2 with D40-D42 scope; must merge by about 17:00.
+- #32 (LLM) -> prepared at 3aec8c5. Delta review after #26 merges (cli.py). Merge held for D39.
+- Merge train 16 (#114, #115; #122 to main) -> ses_e4a2d88e (sonnet). Its background fast tier was killed by the 13:50 restart; it was interrupted and rerun in the foreground. Train 17 is ready: #26 at 4dc9eb5 and #109 at cf92ae3 (both axes APPROVE), #123 to main at acb2d71 (both axes APPROVE).
+- #121 approved at d326ffe, Merge after #117. #124 after #122. #125/#126 (wait/idle guards) after #123 (same script). #63, #65, #66, #69, #80, #93 Merge after #24.
+
+#### Latest exact revision with measured release evidence
+- None. No `measure.wire` (measured) release has been released at any head; every measured run refuses on #120.
+- Plain HEALTH-S1 real-kit releases (gate 41/41, run + verify (limited) + verify --full exit 0, toolRevision match) on branch heads: cf92ae3 (#109), 4dc9eb5 (#26 search plan), 3aec8c5 (#32), 289a88c (#110).
+- CS-S1 real-kit release on branch head 926765f (#24): gate 40 pass + 2 allowed not_applicable, 0 hits; both verify tiers exit 0; 0 turns withheld.
+- Integration tip 4cd4a0a: fast tier exit 0 (2452 passed, 5 skipped), slow tier exit 0 (123 passed); no real-kit run on it yet.
+
+#### Complete-bundle status
+- Not built. At 4112335 (#30) a complete build refuses with `REFUSED: incomplete (missing datasets: customer_service)` and nothing is written. `--partial` builds with `submission_index.json` (198 masked CS eval turns). The delivery folder is untouched and there was no upload. A complete build needs #24 merged plus the #30 round-3 fixes.
+
+#### Remaining unknowns
+- CS-S1 held-out SECRET recall below target (15/17).
+- The measured HEALTH-S1 release (blocked on #120); the #110 k behaviour on a measured release.
+- Real-kit runs of both releases on the integration tip.
+- #116 smoke is red on the real kit until #24 and #120 merge.
+- 5 README-ledger skips (named reasons; not passes).
+
+### Sat 14:28-14:52 - orchestrator hand-over; merge train 18 (#120); #110/#113 evidence dispatched
+
+- **When:** Sat 14:28-14:52 EET
+- **Decision:**
+  1. New orchestrator session ses_e4a056b3... claimed the heartbeat at 14:28 (start-orchestrator). The previous session ses_e4a3c596 had already replied "retired". Its children (#24 chain owner, #30, #32, #106, #116, #117, #118, #124, #125+#126) were still live and are polled each turn. Scripts still need `-ExecutionPolicy Bypass`.
+  2. #120: Grok Standards r1 returned APPROVE at c30f5a4, completing 4/4 (Standards: Grok, Sol; Spec: Sol, Grok). Merge train 18 merged it at 9ef58f9: fast tier exit 0, 2558 passed, 5 skipped; slow tier exit 0, 123 passed. Done-report posted, check-done-report exit 0, closed; worktree and branch removed.
+  3. #110 + #113: an Opus evidence session (ses_e4a02df0) merges the integration tip (now with #120) into ticket/fu110-scorecard-k and produces a head-bound measured real-kit run (default and `acme` recipients, both verify tiers), then a Grok Spec delta.
+  4. #94 stays open. Its measured `--recipient acme` run RELEASED with both verify tiers exit 0 at c30f5a4 (#120's evidence). The close gate binds evidence to #94's own head (9bbad25), so #94 closes on the final-SHA proof (section 4).
+  5. Planning steers 14:31 and 14:33 received. Trains 16 and 17 had already merged (integration 809bbce). #127 (D44) is dispatched to a fresh Opus session once #118 and #106 merge; the search owner's session has ended. #63, #65, #66, #69, #80 and #93 build on or edit ticket/23-cs-s1 files, so they wait for #24 (D29). #96, #99, #100 and #101 are deferred (D40).
+- **Why:** Single orchestrator; tier-1 fail-closed first; close only on evidence (D31).
+- **Evidence:** merger ses_e4a0370d; reviews ses_e4a08319, ses_e4a0814b, ses_e4a07dec, ses_e4a07f88; C:\Users\kivas\AI\sinceai-out\fu120\evidence-c30f5a469ccafa0a5cd6488cc89abc103fbe1769; #120 close comments.
+
+### Sat 14:52 - STATUS
+
+#### Blocker -> owner -> next proof
+- #24 + #53/#54/#56/#92 (CS-S1) -> ses_e4aac068 (claude-agent/opus, D29 owner) -> held-out SECRET recall is now 17/17 (59c4652). It is re-merging integration and fixing the README CS-S1 command test (red first). Next: the fix for Sol's round-1 Standards high (repeated alternation counted as non-text, failing open to not_applicable), required before merge (steer 14:14). Then a real-kit run + verify (limited) + verify --full + scorecard at the new head, Sol Standards and Spec deltas, and a merge. D38 time-box 15:00 (fallback only withholds flagged turns; it does not cover a fail-open check).
+- #118 (missing PersonK as zero shortfall, blocks #127) -> ses_e4a0a7cb (claude-agent/opus) -> red covered the five pre-fix sites, all fixed; merging the integration tip and running affected tests. Next: done-report, then 4 round-1 reviews. ETA for reviews about 15:10, merge about 15:40.
+- #106 (D33 QI policy, blocks #127) -> ses_e4a0a4c1 (claude-agent/opus) -> recording the before-baseline real-kit search run at 809bbce; then the CRP-vs-other rung, H-U7, person-k and suppression measurements.
+- #127 (D44 parallel search scoring) -> not dispatched; native blocked by #118 and #106 -> Opus at merge; by 20:00 or deferred.
+- #110 + #113 -> ses_e4a02df0 (claude-agent/opus) -> measured real-kit evidence at a head including #120, then Grok Spec delta.
+- #30 (packager, D37) -> ses_e4a0f100 (claude-agent/opus), round 3 -> submission suite green locally; then the rehearsal without uploads; complete bundle after #24.
+- #116 (release smoke) -> ses_e4a0ee60 (Sol), round 2 -> planted-junction gap found and fixed; Merge after #24.
+- #117 (web app) -> ses_e4a27f3f (Sol), round 2 -> protected-row guards pass; it is allowing the 64-char keyed-pseudonym shape only on freshly verified row responses. Reviewers must check that against D35 (every response passes the identifier-shape scan). Must merge by about 17:00.
+- #32 (LLM) -> ses_e4a237c0 (Sol) -> affected tests 416 passed; rerun after a main-checkout guard hit from a main pull. Merge only on the D39 condition by 16:00.
+- #124 -> ses_e4a0c81f (Sol); #125+#126 -> ses_e4a07b94 (Sol).
+
+#### Latest exact revision with measured release evidence
+- c30f5a4 (#120 head, now merged at 9ef58f9): measured HEALTH-S1 RELEASED for default and `acme`; verify (limited) and verify --full exit 0 for both; plain run gate 41/41.
+- Integration tip 9ef58f9: fast tier exit 0 (2558 passed, 5 skipped), slow tier exit 0 (123 passed); no real-kit run on it yet.
+- CS-S1: last real-kit release at 926765f (branch); no run at the chain's current head.
+
+#### Complete-bundle status
+- Not built. A complete build needs #24 merged plus the #30 round-3 fixes. No upload; delivery folder untouched.
+
+#### Remaining unknowns
+- The CS-S1 alternation fail-open (open, high).
+- Real-kit runs of both releases on the integration tip.
+- #110 behaviour on a measured release (evidence running).
+- 5 README-ledger skips (named reasons; not passes).
+
+### Sat 14:38 - time-stamp correction
+
+- **When:** Sat 14:38 EET
+- **Decision:** The two entries above headed "14:28-14:52" and "14:52 - STATUS" were written at 14:37 EET. The orchestrator misread the clock. The #120 close comment's "14:50 EET" is also 14:37 EET. The content is unchanged.
+- **Why:** The log is append-only, so the times are corrected in a new entry.
+- **Evidence:** heartbeat timestamp 2026-11-07T12:37:35Z.
+
+### Sat 14:45 - D45 relayed with a recall conflict; utilization nudge (12:38Z) handled; #129 filed
+
+- **When:** Sat 14:40-14:45 EET
+- **Decision:**
+  1. D45 (human, 14:39) was relayed to the CS-S1 owner (ses_e4aac068) by steer. Conflict logged: D45 cites held-out SECRET recall 15/17, but the owner reported 17/17 at 59c4652 after e47bedb changed the redactor in response to Sol r1 Spec findings about the held-out misses. The steer requires both figures in the manifest target notes and residualRisks, with counts and denominators, and states that the post-change figure is optimistic (held-out contamination). The 0.98 target stays and is reported as not shown met on untouched data. No further recall tuning. The rest of the D38 window goes to the `_shape()` alternation/repeat fail-open (high), red first, then head-bound real-kit evidence and Sol delta reviews.
+  2. Nudge items that cannot be dispatched:
+     - ticket/23-cs-s1: owner live (ses_e4aac068).
+     - fu53, fu54, fu92: superseded leftovers; their fixes are on ticket/23-cs-s1 (D29). Native blocked-by #24 added.
+     - #121: approved; native blocked-by #117 added.
+     - fu63, fu65, fu66, fu69: built on ticket/23-cs-s1, with existing native #24 edges.
+     - #94: the code merged; it closes on the final-SHA proof (close-gate head binding).
+     Commented on each issue.
+  3. The monitor ignores native blockers on branch items. This is the second occurrence (13:28, 14:38), filed as #129 (Sol). It is blocked by #125, because #125+#126 edit the same script.
+- **Why:** AGENTS.md: a defect class found twice becomes an automated check. Single owner for the CS-S1 chain (D29). Transparency on unmet targets (D40, D45).
+- **Evidence:** steer message msg_1b605012 to ses_e4aac068; issue comments on #53, #54, #63, #65, #66, #69, #92, #94, #121; #129.

@@ -17,19 +17,13 @@ import pandas as pd
 from pets_release.checks import all_checks, run_checks
 from pets_release.checks.producer.kanon import PERSON_K, ROW_K, person_k_values
 from pets_release.ladders import WITHHELD, output_column
+from pets_release.policy.contract_rules import k_target  # noqa: F401  (the one k-target rule; search uses R.k_target)
 from pets_release.pseudonym import RECORD_KEY, normalise
 
 BUILTIN_COMPONENTS = frozenset(
     {"qi_k_shortfall", "qi_unique_rate", "join_derived_qi", "direct_identifier_leak", "attribute_inference"}
 )
 K_COMPONENTS = frozenset({"qi_k_shortfall", "qi_unique_rate"})
-
-
-def k_target(policy) -> int | None:
-    ks = [t["k"] for t in policy.privacy_targets if t["kind"] == "k_anonymity"]
-    if len(ks) > 1:
-        raise ValueError("more than one k target")
-    return ks[0] if ks else None
 
 
 def contract_for(policy, plan: list, k: int | None) -> dict:

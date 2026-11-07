@@ -31,7 +31,6 @@ from __future__ import annotations
 import base64
 import binascii
 import hashlib
-import json
 import re
 from collections import defaultdict
 
@@ -131,14 +130,16 @@ def _cells(release, contract):
     return n, out
 
 
-def _refuse_constant(_name):
-    raise CheckError("manifest holds a non-finite number")
-
-
 def _load_manifest(p):
-    """Parse the manifest keeping every number as its exact JSON text, so numbers are scanned as strings."""
-    return json.loads(p.read_text(encoding="utf-8"), parse_int=str, parse_float=str,
-                      parse_constant=_refuse_constant)
+    """Parse the manifest strictly (#114: the shared loader; duplicate keys and NaN/Infinity are an error), keeping
+    every number as its exact JSON text, so numbers are scanned as strings."""
+    # lazy: manifest.schema imports pets_release.checks
+    from pets_release.manifest.canonical import loads_strict
+
+    try:
+        return loads_strict(p.read_bytes(), numbers_as_text=True)
+    except ValueError:
+        raise CheckError("manifest is not strict JSON") from None
 
 
 def _walk(node, acc):
