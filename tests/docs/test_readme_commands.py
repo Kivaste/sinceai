@@ -31,13 +31,10 @@ ALLOWED_SKIP_REASONS = (
     "runs-the-whole-test-suite-recursively",
     # the CS-S1 release needs ticket 23 (turn_id check); guarded below
     "cs-s1-run-needs-ticket-23",
-    # ticket 23 landed; the fixture CS-S1 release still refuses on #53 (rescan.secrets false positive).
-    # tests/cs_s1/test_run_cli.py strict xfails flip when #53 lands: then promote this block (needs a CS kit here)
-    "cs-s1-release-blocked-by-53",
 )
 SUBCOMMANDS = ("run", "verify", "detect", "dashboard", "submission")
 MARKER = re.compile(r"<!--\s*docs-test:\s*(run|skip|pending)\b([^>]*?)-->")
-BLOCK = re.compile(r"(?:^(<!--.*?-->)[ \t]*\r?\n)?^```powershell[ \t]*\r?\n(.*?)^```", re.S | re.M)
+BLOCK = re.compile(r"(?:^(<!--.*?-->)[ \t]*\r?\n)?^```powershell[ \t]*\r?\n(.*?)^```", re.DOTALL | re.MULTILINE)
 
 
 def _load_conftest():
@@ -143,6 +140,9 @@ def test_block(block, tmp_path):
     # synthetic stand-in for the unlabelled `unseen` export (one table), copied from the synthetic fixture
     (kit / "data" / "unseen").mkdir()
     shutil.copy(ROOT / "tests" / "fixtures" / "minikit" / "health" / "ed_visits.csv", kit / "data" / "unseen")
+    # synthetic customer_service tables for the CS-S1 run block (ticket 23)
+    shutil.copytree(ROOT / "tests" / "fixtures" / "minikit" / "customer_service", kit / "data" / "customer_service",
+                    ignore=shutil.ignore_patterns(".*"))
     out_root = tmp_path / "out"
     env = rh.env({"PETS_KIT": str(kit)})  # PETS_HMAC_KEY is the published test-only constant
     run_cmd = next(s for b2 in BLOCKS if b2["kind"] == "run" for s in _statements(b2["body"])

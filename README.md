@@ -65,7 +65,7 @@ pets-release detect unseen --out ..\sinceai-out\unseen_field_labels.csv --format
 pets-release run --scenario HEALTH-S1 --out ..\sinceai-out\health-s1 --created 2026-11-07T08:00:00Z --kit "$env:PETS_KIT"
 ```
 
-<!-- docs-test: skip reason=cs-s1-release-blocked-by-53 -->
+<!-- docs-test: run -->
 ```powershell
 pets-release run --scenario CS-S1 --out ..\sinceai-out\cs-s1 --created 2026-11-07T08:00:00Z --kit "$env:PETS_KIT"
 ```

@@ -180,6 +180,14 @@ def _self_scan(build: Path, c: Candidate, manifest: dict, context: dict) -> list
     reasons += _gate_reasons(verify, "selfscan")
     reasons += [r.replace("gate:", "selfscan:") for r in _registry_reasons(verify.records)]
     text = "\x00".join(_strings({k: v for k, v in manifest.items() if k != "contract"}, []))
+    # schema names (the dataset's table and column names) are permitted manifest content: mask them, so a
+    # released value that is also part of a schema name (CS-S1 speaker "customer" vs table "customers") is not
+    # a hit; any other occurrence of the value still is (ticket 23)
+    names = {str(e.get(k, "")) for e in manifest.get("inventory", []) for k in ("dataset", "table", "column")}
+    names |= {f[:-4] for f in c.contract.get("files", {})}
+    names |= {col for f in c.contract.get("files", {}).values() for col in f.get("columns", {})}
+    for n in sorted((n for n in names if n), key=len, reverse=True):
+        text = text.replace(n, "\x00")
     values = set()
     for t in c.tables:
         values.update(v for v in pd.unique(t.frame.to_numpy(dtype=object).ravel()) if len(v) >= SCAN_MIN_LEN)

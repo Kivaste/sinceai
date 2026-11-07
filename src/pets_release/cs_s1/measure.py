@@ -95,7 +95,7 @@ def redaction(kit_root, spans) -> dict:
                 "split": "template-held-out (skeleton hash, 20%, turn level); scores on held-out turns",
                 "labels": labels or [{"label": "PERSON", "support": 0, "tp": 0, "fp": 0, "fn": 0,
                                       "precision": None, "recall": None}],
-                "summary": summary}
+                "summary": sorted(summary, key=lambda s: s["metric"])}
     by = {lab["label"]: lab for lab in labels}
     risks = []
     for lab in RESIDUAL_LABELS:

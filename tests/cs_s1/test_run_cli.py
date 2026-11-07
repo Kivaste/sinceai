@@ -22,7 +22,7 @@ from cs_kit import build_cs_kit, cs_run_args
 from run_helpers import cli
 
 HEX64 = re.compile(r"^[0-9a-f]{64}$")
-PENDING_53 = pytest.mark.xfail(strict=True, reason="#53: rescan.secrets false positive refuses the fixture release")
+
 
 
 @pytest.fixture(scope="module")
@@ -42,10 +42,10 @@ def _gate(out):
     raise AssertionError("no gate report")
 
 
-def test_only_known_blocker_refuses(cs_run):
+def test_gate_passes_with_turn_id_record(cs_run):
     _, out, proc = cs_run
     bad = sorted((r["check"], r["status"]) for r in _gate(out)["records"] if r["status"] not in ("pass", "not_applicable"))
-    assert bad in ([], [("rescan.secrets", "fail")]), proc.stdout
+    assert bad == [], proc.stdout
     recs = {r["check"]: r for r in _gate(out)["records"]}
     assert recs["turn-id-synthetic"]["status"] == "pass" and recs["turn-id-synthetic"]["hits"] == 0
     assert recs["producer.person-k"]["status"] == "not_applicable"
@@ -70,7 +70,6 @@ def test_spot_check_sheet_written_outside_repo(cs_run):
     assert sheet.read_text(encoding="utf-8-sig").splitlines()[0] == "turn_id,original,redacted,missed,over_redacted"
 
 
-@PENDING_53
 def test_released_and_both_verify_tiers(cs_run):
     kit, out, proc = cs_run
     assert proc.returncode == 0, proc.stdout + proc.stderr
@@ -81,7 +80,6 @@ def test_released_and_both_verify_tiers(cs_run):
     assert full.returncode == 0 and "VERIFIED (full)" in full.stdout, full.stdout + full.stderr
 
 
-@PENDING_53
 def test_manifest_turn_id_measurements_and_risks(cs_run):
     _, out, proc = cs_run
     assert proc.returncode == 0
@@ -106,7 +104,6 @@ def test_manifest_turn_id_measurements_and_risks(cs_run):
     assert set(turns.conversation_id) == set(conv.conversation_id)
 
 
-@PENDING_53
 def test_two_runs_byte_identical(cs_run, tmp_path):
     kit, out, proc = cs_run
     assert proc.returncode == 0

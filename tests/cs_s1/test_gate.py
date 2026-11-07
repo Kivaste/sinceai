@@ -39,8 +39,6 @@ def _rec(res, name):
     return next(r for r in res.records if r.check == name)
 
 
-@pytest.mark.xfail(strict=True, reason="ticket 04 defect: rescan.secrets treats an ordinary word after a "
-                   "secret cue ('wifi password for the router') as a secret; 05's text.secrets does not")
 def test_fixture_release_passes_gate(tmp_path, prepared):
     res = _gate(_write(tmp_path / "rel", prepared.tables), prepared)
     bad = sorted((r.check, r.status) for r in res.records if r.status not in ("pass", "not_applicable"))
