@@ -14,6 +14,7 @@ from collections.abc import Mapping
 
 ENV_VAR = "PETS_HMAC_KEY"
 MIN_KEY_CHARS = 32
+MIN_KEY_BYTES = 32  # enforced on every SecretKey, incl. MasterKey(bytes)
 MANIFEST_SIGNATURE_INFO = "manifest-signature"
 
 _HASH_LEN = 32
@@ -29,8 +30,8 @@ class SecretKey:
     __slots__ = ("_k", "_kind")
 
     def __init__(self, material: bytes, kind: str) -> None:
-        if not isinstance(material, bytes) or len(material) == 0:
-            raise KeyConfigError("key material must be non-empty bytes")
+        if not isinstance(material, bytes) or len(material) < MIN_KEY_BYTES:
+            raise KeyConfigError(f"key material must be at least {MIN_KEY_BYTES} bytes")
         self._k = material
         self._kind = kind
 
@@ -72,7 +73,16 @@ class MasterKey(SecretKey):
             raise KeyConfigError(
                 f"{ENV_VAR} must be at least {MIN_KEY_CHARS} characters"
             )
-        return cls(text.encode("utf-8"))
+        # The codec error would carry the key text, so it must not even be
+        # kept as __context__: raise only after leaving the except block.
+        material = None
+        try:
+            material = text.encode("utf-8")
+        except UnicodeError:
+            pass
+        if material is None:
+            raise KeyConfigError(f"{ENV_VAR} must be valid UTF-8 text")
+        return cls(material)
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> MasterKey:

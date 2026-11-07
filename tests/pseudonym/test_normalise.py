@@ -46,15 +46,13 @@ def tok(value, label, scope=REL, p=None):
                 "040 123 45 67",
                 "nolla neljä nolla yksi kaksi kolme neljä viisi kuusi seitsemän",
                 "00358401234567",
+                "+358 (0)40 123 4567",
+                "+358 040 123 4567",
             ],
         ),
         (
             "PHONE",
-            [
-                "+46 70 123 45 67",
-                "070-1234567",
-                "noll sju noll ett två tre fyra fem sex sju",
-            ],
+            ["+46 70 123 45 67", "0046701234567", "+46 (0)70 123 45 67"],
         ),
         (
             "PAYMENT_CARD",
@@ -62,9 +60,8 @@ def tok(value, label, scope=REL, p=None):
         ),
         ("IBAN", ["FI21 1234 5600 0007 85", "fi2112345600000785"]),
         ("EMAIL", [" Anna.Example@Example.FI ", "anna.example@example.fi"]),
-        ("PERSON", ["Anna", "Annalle", "Annan", "annas", "ANNA"]),
+        ("PERSON", ["Anna", " anna ", "ANNA"]),
         ("PERSON", ["Matti Virtanen", "Matti Virtasen", "matti  virtaselle"]),
-        ("PERSON", ["Erik", "Eriks"]),
         ("RECORD_KEY", ["V-0001", " V-0001 "]),
     ],
 )
@@ -81,15 +78,140 @@ def test_variants_of_one_value_get_one_token(label, variants):
         ("RECORD_KEY", "V-0001", "V0001"),
         ("PERSON", "Johan", "Johanna"),
         ("PERSON", "Anna", "Hanna"),
+        # distinct names that differ by what looks like a case ending
+        ("PERSON", "Anna", "Annan"),
+        ("PERSON", "Kristia", "Kristian"),
+        ("PERSON", "Hans", "Hansen"),
+        ("PERSON", "Jens", "Jensen"),
+        ("PERSON", "Lars", "Lar"),
+        ("PERSON", "Isabella", "Isabelle"),
+        ("PERSON", "Jane", "Janelle"),
+        ("PERSON", "Lari", "Larissa"),
+        ("PERSON", "Noe", "Noelle"),
+        ("PERSON", "Erik", "Eriks"),
     ],
 )
 def test_distinct_values_stay_distinct(label, a, b):
     assert tok(a, label) != tok(b, label)
 
 
+@pytest.mark.parametrize(
+    "a,b",
+    [
+        ("Anna", "Annan"),
+        ("Hans", "Hansen"),
+        ("Erik", "Eriks"),
+        ("Isabella", "Isabelle"),
+        ("Lari", "Larissa"),
+        ("Augu", "Augusta"),
+    ],
+)
+def test_distinct_names_stay_distinct_in_a_fresh_conversation(a, b):
+    p = pseudonymiser_for(MasterKey.from_text(TEST_KEY))
+    c = Scope.conversation("conv-1")
+    assert p.token(a, label="PERSON", scope=c) != p.token(b, label="PERSON", scope=c)
+    p = pseudonymiser_for(MasterKey.from_text(TEST_KEY))
+    assert p.token(b, label="PERSON", scope=c) != p.token(a, label="PERSON", scope=c)
+
+
+@pytest.mark.parametrize(
+    "seen,inflected",
+    [
+        ("Anna", "Annalle"),
+        ("Anna", "Annalta"),
+        ("Maria", "Marialla"),
+        ("Kalle", "Kallelle"),
+    ],
+)
+def test_case_ending_links_to_a_name_seen_in_the_conversation(seen, inflected):
+    p = pseudonymiser_for(MasterKey.from_text(TEST_KEY))
+    c = Scope.conversation("conv-1")
+    base = p.token(seen, label="PERSON", scope=c)
+    assert p.token(inflected, label="PERSON", scope=c) == base
+
+
+def test_inflected_first_name_links_through_to_the_full_name():
+    p = pseudonymiser_for(MasterKey.from_text(TEST_KEY))
+    c = Scope.conversation("conv-1")
+    full = p.token("Anna Korhonen", label="PERSON", scope=c)
+    assert p.token("Annalle", label="PERSON", scope=c) == full
+
+
+def test_inflected_surname_in_full_name_links_only_to_the_same_full_name():
+    p = pseudonymiser_for(MasterKey.from_text(TEST_KEY))
+    c = Scope.conversation("conv-1")
+    full = p.token("Maria Salo", label="PERSON", scope=c)
+    assert p.token("Maria Salolle", label="PERSON", scope=c) == full
+    # same surname form with another first name is not linked to Maria Salo
+    assert p.token("Liisa Salolle", label="PERSON", scope=c) != full
+    # a surname that looks like a seen bare name plus an ending is another person
+    p.token("Anna", label="PERSON", scope=c)
+    kofi = p.token("Kofi Annan", label="PERSON", scope=c)
+    assert kofi != p.token("Kofi Anna", label="PERSON", scope=c)
+
+
+def test_name_seen_as_itself_is_not_reinterpreted_as_an_inflection():
+    p = pseudonymiser_for(MasterKey.from_text(TEST_KEY))
+    c = Scope.conversation("conv-1")
+    annan = p.token("Annan", label="PERSON", scope=c)
+    anna = p.token("Anna", label="PERSON", scope=c)
+    assert annan != anna
+    assert p.token("Annan", label="PERSON", scope=c) == annan
+
+
+def test_bare_name_does_not_link_to_a_different_full_name():
+    p = pseudonymiser_for(MasterKey.from_text(TEST_KEY))
+    c = Scope.conversation("conv-1")
+    johan = p.token("Johan Lind", label="PERSON", scope=c)
+    assert p.token("Johanna", label="PERSON", scope=c) != johan
+    stefan = p.token("Stefan Berg", label="PERSON", scope=c)
+    assert p.token("Stefa", label="PERSON", scope=c) != stefan
+
+
+@pytest.mark.parametrize("label", ["RECORD_KEY", "NATIONAL_ID"])
+@pytest.mark.parametrize("value", ["", "   ", "\t"])
+def test_empty_identifier_values_are_refused(label, value):
+    p = pseudonymiser_for(MasterKey.from_text(TEST_KEY))
+    with pytest.raises(ValueError) as e:
+        p.token(value, label=label, scope=REL)
+    assert repr(value) not in str(e.value)
+
+
 def test_normalise_is_public_and_label_aware():
-    assert normalise("040-123 4567", "PHONE") == "0401234567"
+    assert normalise("040-123 4567", "PHONE") == "+358401234567"
+    assert normalise("+46 70 123 45 67", "PHONE") == "+46701234567"
     assert normalise("Virtaselle", "PERSON") == normalise("Virtanen", "PERSON")
+    assert normalise("+358 (0)40 123 4567", "PHONE") == "+358401234567"
+
+
+@pytest.mark.parametrize(
+    "a,b",
+    [
+        ("+358 70 123 4567", "+46 70 123 4567"),
+        ("00358701234567", "0046701234567"),
+        ("+46 70 123 4567", "070 123 4567"),  # domestic defaults to FI
+        ("+1 701 234 5670", "0701 234 5670"),
+    ],
+)
+def test_same_national_digits_in_different_countries_stay_distinct(a, b):
+    assert normalise(a, "PHONE") != normalise(b, "PHONE")
+    assert tok(a, "PHONE") != tok(b, "PHONE")
+
+
+def test_domestic_phone_country_is_a_parameter():
+    se = [
+        "+46 70 123 45 67",
+        "070-1234567",
+        "noll sju noll ett två tre fyra fem sex sju",
+    ]
+    assert {normalise(v, "PHONE", phone_country="46") for v in se} == {"+46701234567"}
+    p = pseudonymiser_for(MasterKey.from_text(TEST_KEY), phone_country="46")
+    assert len({p.token(v, label="PHONE", scope=REL) for v in se}) == 1
+    assert p.token("070-1234567", label="PHONE", scope=REL) != tok(
+        "070-1234567", "PHONE"
+    )
+    with pytest.raises(ValueError):
+        normalise("0401234567", "PHONE", phone_country="+358")
     with pytest.raises(ValueError):
         normalise("x", "NOT_A_LABEL")
 
