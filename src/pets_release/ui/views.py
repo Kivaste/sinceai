@@ -53,28 +53,29 @@ details{margin-top:15px}summary{cursor:pointer;font-weight:650}pre{white-space:p
 <a class="button" data-route="/result">Back to aggregate proof</a>
 {% elif view == 'rows' %}
 <h1>Protected release rows</h1><p class="notice">{{ preview.label }}</p>
-<p>After protection only. Limited verification re-ran at display time. Before values are never shown as rows.</p>
+<p>After protection only. Full verification (signature, server key) re-ran at display time on these exact bytes. Before values are never shown as rows.</p>
 {% for table in preview.tables %}<section class="card wide"><h2>{{ table.file }}</h2><div style="overflow:auto"><table><tr>{% for column in table.columns %}<th>{{ column }}</th>{% endfor %}</tr>{% for row in table.rows %}<tr>{% for value in row %}<td>{{ value }}</td>{% endfor %}</tr>{% endfor %}</table></div></section>{% endfor %}
 <a class="button" data-route="/result">Back to aggregate proof</a>
 {% else %}
 <div class="eyebrow">{{ result.scenario | default('Sharing scenario') }} · Release proof</div>
 <nav>{% for route, title in demonstrations.items() %}<a class="tag" data-route="/demo/{{ route }}">{{ loop.index }}. {{ title }}</a>{% endfor %}</nav>
-<h1>{{ result.status }}</h1><p class="intro">{% if result.status == 'RELEASED' %}The gate passed. Both verification tiers re-ran on this release.{% elif result.status == 'RUNNING' %}Running the production CLI locally. Unknown is never a pass.{% elif result.status == 'REFUSED' %}The candidate was refused. Nothing was published.{% elif result.status == 'IDLE' %}Choose a sharing scenario to begin.{% else %}A step failed or could not complete. This is not a verified release.{% endif %}</p>
+<h1>{{ result.status }}</h1><p class="intro">{% if result.status == 'RELEASED' %}The gate passed. Verified (limited + full) at {{ result.verification.at }} on revision {{ result.verification.revision }}; the release files still match those verified bytes. This page does not re-run full verification; rows and the dashboard do on each request.{% elif result.status == 'CHANGED' %}The release folder changed since verification. No proof is shown; run the scenario again to re-verify.{% elif result.status == 'RUNNING' %}Running the production CLI locally. Unknown is never a pass.{% elif result.status == 'REFUSED' %}The candidate was refused. Nothing was published.{% elif result.status == 'IDLE' %}Choose a sharing scenario to begin.{% else %}A step failed or could not complete. This is not a verified release.{% endif %}</p>
 <ol class="steps">{% for step in result.steps %}<li class="{{ 'done' if step.exit == 0 else '' }}">{{ step.name }} · {{ 'passed' if step.exit == 0 else ('running' if step.exit is none and result.status == 'RUNNING' else 'failed') }}</li>{% endfor %}</ol>
 {% if result.supported is defined and not result.supported %}<p class="notice">Not yet supported by this build. The outcome above is from the production CLI.</p>{% endif %}
-{% if result.gate is defined %}<div class="stats">
-<section class="card"><div class="eyebrow">Gate</div><div class="value">{{ result.gate.passed }}/{{ result.gate.total }}</div><div class="muted">checks completed</div></section>
-<section class="card"><div class="eyebrow">Person k</div><div class="value">{{ result.personK.minK if result.personK else 'N/A' }}</div><div class="muted">{{ 'minimum group size' if result.personK else 'not a scenario target' }}</div></section>
+{% set released = result.status == 'RELEASED' and result.gate is defined %}
+{% if result.steps | length > 1 %}<div class="stats">
+{% if released %}<section class="card"><div class="eyebrow">Gate</div><div class="value">{{ result.gate.passed }}/{{ result.gate.total }}</div><div class="muted">checks passed · {{ result.gate.notApplicable }} not applicable</div></section>
+<section class="card"><div class="eyebrow">Person k</div><div class="value">{% if not result.personK %}N/A{% elif result.personK.minK is not none %}{{ result.personK.minK }}{% else %}{{ result.personK.belowK }} below k={{ result.personK.k }}{% endif %}</div><div class="muted">{{ ('minimum group size' if result.personK.minK is not none else 'persons below k (producer.person-k, verified at run time)') if result.personK else 'not a scenario target' }}</div></section>{% endif %}
 <section class="card"><div class="eyebrow">Recipient verification</div><div class="value">{{ verification(result.steps, 1, 'Limited') }}</div><div class="muted">producer claims remain attested</div></section>
-<section class="card"><div class="eyebrow">Controller verification</div><div class="value">{{ verification(result.steps, 2, 'Full') }}</div><div class="muted">kit + key, server-side only</div></section></div>
-<div class="grid"><section class="card"><h2>Purpose, before &amp; after</h2>
+<section class="card"><div class="eyebrow">Controller verification</div><div class="value">{{ verification(result.steps, 2, 'Full') }}</div><div class="muted">kit + key, server-side only</div></section></div>{% endif %}
+{% if released %}<div class="grid"><section class="card"><h2>Purpose, before &amp; after</h2>
 {% if result.measured.utility.tasks is defined %}<table><tr><th>Purpose check</th><th>Before</th><th>After</th><th>Status</th></tr>{% for task in result.measured.utility.tasks %}<tr><td>{{ task.task }}</td><td>{{ task.before }}</td><td>{{ task.after }}</td><td>{{ task.status }}</td></tr>{% endfor %}</table>{% else %}<p class="muted">{{ result.measured.utility.status | replace('_',' ') }}</p>{% endif %}
 <details><summary>Sacrifices ({{ result.sacrifices | length }})</summary><pre>{{ result.sacrifices | tojson(indent=2) }}</pre></details></section>
 <section class="card"><h2>Export assertions</h2><p class="muted">Narrow claims, each bound to its own check.</p><table><tr><th>Assertion</th><th>Check / scope</th><th>Hits</th></tr>{% for name, evidence in result.assertionEvidence.items() %}<tr><td>{{ name }}</td><td>{{ evidence.check }}<br><span class="muted">{{ evidence.scope }}</span></td><td>{{ evidence.hits }}</td></tr>{% endfor %}</table></section></div>
 <section class="card wide"><h2>Residual risks</h2><p class="notice">Limited verification does not prove producer claims. Digests catch accidents; only full verification checks the signature.</p><details><summary>Measured risks and limitations ({{ result.residualRisks | length }})</summary><pre>{{ result.residualRisks | tojson(indent=2) }}</pre></details></section>
 {% endif %}
 {% if result.failures is defined %}<section class="card"><h2>Failing checks</h2>{% if not result.refusalReportAvailable %}<p>No refusal report available. Failing check names and counts are unknown.</p>{% elif result.failures %}<table><tr><th>Check</th><th>Status</th><th>Hits</th></tr>{% for failure in result.failures %}<tr><td>{{ failure.check }}</td><td>{{ failure.status }}</td><td>{{ failure.hits }}</td></tr>{% endfor %}</table>{% else %}<p>No gate check records available; see the pre-gate refusal reasons below.</p>{% endif %}<pre>{{ result.reasons | default([]) | tojson(indent=2) }}</pre></section>{% endif %}
-{% if result.targets is defined %}<section class="card wide"><h2>Targets met / not met</h2><p>Strict utility targets and allowed sacrifice floors are separate. Unknown is never met.</p><table><tr><th>Privacy floor / utility threshold</th><th>Target</th><th>Measured</th><th>Outcome</th></tr>{% for target in result.targets %}<tr><td>{{ target.name }}</td><td>{{ target.threshold }}</td><td>{{ target.measured if target.measured is not none else 'not measured' }}</td><td>{{ target.status }}</td></tr>{% endfor %}</table></section>{% endif %}
+{% if result.targets is defined %}<section class="card wide"><h2>Targets met / not met</h2><p>Strict utility targets and allowed sacrifice floors are separate. Unknown is never met.</p><table><tr><th>Privacy floor / utility threshold</th><th>Target</th><th>Measured</th><th>Outcome</th></tr>{% for target in result.targets %}<tr><td>{{ target.name }}</td><td>{{ target.threshold }}</td><td>{{ target.measured if released and target.measured is not none else 'not measured' }}</td><td>{{ target.status if released else 'not measured' }}</td></tr>{% endfor %}</table></section>{% endif %}
 {% if result.status == 'RELEASED' %}<a class="button" data-route="/dashboard">Open full dashboard →</a><a class="button" data-route="/rows">Protected release rows →</a>{% endif %}
 <a class="button" data-route="/">Choose another scenario</a>
 {% endif %}
@@ -119,7 +120,7 @@ def rows_page(preview, banner=""):
 
 
 DEMO = r'''
-{% macro value(v) %}{{ v if v is not none else 'not measured' }}{% endmacro %}
+{% macro value(v) %}{{ v if v is not none else 'not measured' }}{% endmacro %}{% set released = result.status == 'RELEASED' and result.get('gate') %}
 <div class="eyebrow">{{ result.scenario | default('Sharing scenario') }} · {{ result.status }}</div>
 <nav>{% for route, title in demonstrations.items() %}<a class="tag" data-route="/demo/{{ route }}">{{ loop.index }}. {{ title }}</a>{% endfor %}</nav>
 <h1>{{ demonstrations[item] }}</h1>
@@ -139,15 +140,15 @@ DEMO = r'''
 {% if result.status == 'RELEASED' %}<a class="button" data-route="/rows">Protected release rows (fresh verify required) →</a>{% endif %}
 {% elif item == 'measurements' %}
 <section class="card"><h2>pets-eval scorecard, before &amp; after</h2><p>The production manifest is the source. Missing scores remain not measured; purpose-check scores are not aggregate utility or composite.</p><table><tr><th>Score</th><th>Before</th><th>After</th></tr>
-{% for name in ['privacy', 'utility', 'composite'] %}{% set component = scorecard.get(name, {}) %}<tr><td>{{ name }}</td><td>{{ value(component.get('before')) }}</td><td>{{ value(component.get('after')) }}</td></tr>{% endfor %}</table>
+{% set component = scorecard.get('privacy', {}) %}<tr><td>privacy</td><td>{{ value(component.get('before')) }}</td><td>{{ value(component.get('after')) }}</td></tr>{% for name in ['utility', 'composite'] %}<tr><td>{{ name }}</td><td colspan="2">not in the signed manifest (purpose-check scores below)</td></tr>{% endfor %}</table>
 <h3>Measured risk components (including attacker rates when available)</h3><table><tr><th>Component</th><th>Before</th><th>After</th></tr>{% for component in measured.get('privacy', {}).get('components', []) %}<tr><td>{{ component.component }}</td><td>{{ value(component.before) }}</td><td>{{ value(component.after) }}</td></tr>{% else %}<tr><td colspan="3">not measured</td></tr>{% endfor %}</table>
 <h3>Person-k after protection</h3>{% if result.get('personK') %}<pre>{{ result.personK | tojson(indent=2) }}</pre>{% else %}<p>not measured</p>{% endif %}
 <h3>Purpose-check scores</h3><table><tr><th>Check</th><th>Before</th><th>After</th><th>Status</th></tr>{% for task in measured.get('utility', {}).get('tasks', []) %}<tr><td>{{ task.task }}</td><td>{{ value(task.before) }}</td><td>{{ value(task.after) }}</td><td>{{ task.status }}</td></tr>{% else %}<tr><td colspan="4">not measured</td></tr>{% endfor %}</table></section>
-<section class="card wide"><h2>Targets met / not met</h2><p>Strict targets and allowed sacrifice floors are separate.</p><table><tr><th>Target</th><th>Threshold</th><th>Measured</th><th>Outcome</th></tr>{% for t in result.get('targets', []) %}<tr><td>{{ t.name }}</td><td>{{ t.threshold }}</td><td>{{ value(t.measured) }}</td><td>{{ t.status }}</td></tr>{% endfor %}</table></section>
+<section class="card wide"><h2>Targets met / not met</h2><p>Strict targets and allowed sacrifice floors are separate.</p><table><tr><th>Target</th><th>Threshold</th><th>Measured</th><th>Outcome</th></tr>{% for t in result.get('targets', []) %}<tr><td>{{ t.name }}</td><td>{{ t.threshold }}</td><td>{{ value(t.measured) if released else 'not measured' }}</td><td>{{ t.status if released else 'not measured' }}</td></tr>{% endfor %}</table></section>
 {% elif item == 'limitations' %}
 <section class="card"><h2>Recipient, purpose and Trust context</h2><p>Recipient: {{ policy.get('recipient', 'not available') }}</p><p>Purpose: {{ policy.get('purpose', 'not available') }}</p><p>Trust: {{ policy.get('trust', 'not available') }}</p><h3>Not-fit-for uses</h3>{% for use in result.get('notFitFor', []) %}<p>{{ use.scenario }} · {{ use.reason }}</p>{% else %}<p>No published fit-for assessment available</p>{% endfor %}</section>
 <section class="card wide"><h2>Sacrifices</h2><p>Scores, rung changes, fallback counts and checker-independence limitations are shown only when recorded by the production manifest. No fallback is assumed from a successful status.</p><pre>{{ result.get('sacrifices', []) | tojson(indent=2) }}</pre><h2>Residual risks</h2><pre>{{ result.get('residualRisks', []) | tojson(indent=2) }}</pre></section>
-<section class="card wide"><h2>Proof and honest refusal</h2>{% if result.get('gate') %}<p>Gate {{ result.gate.passed }}/{{ result.gate.total }}</p>{% endif %}<p>Limited verify: {{ verification(result.steps, 1, 'passed (limited)') }} · Full verify: {{ verification(result.steps, 2, 'passed (full)') }}</p>
+<section class="card wide"><h2>Proof and honest refusal</h2>{% if released %}<p>Gate {{ result.gate.passed }}/{{ result.gate.total }} passed · {{ result.gate.notApplicable }} not applicable</p><p>Verified (limited + full) at {{ result.verification.at }} on revision {{ result.verification.revision }}; not re-run for this page.</p>{% elif result.status == 'CHANGED' %}<p>The release folder changed since verification. No proof is shown; run the scenario again to re-verify.</p>{% endif %}{% if result.status != 'CHANGED' %}<p>Limited verify: {{ verification(result.steps, 1, 'passed (limited)') }} · Full verify: {{ verification(result.steps, 2, 'passed (full)') }}</p>{% endif %}
 {% if result.status == 'REFUSED' or result.status == 'FAILED' %}<h3>Failing checks</h3>{% if not result.get('refusalReportAvailable') %}<p>No refusal report available. Failing check names and counts are unknown.</p>{% endif %}{% for f in result.get('failures', []) %}<p>{{ f.check }} · {{ f.status }} · hits {{ f.hits }}</p>{% endfor %}<pre>{{ result.get('reasons', []) | tojson(indent=2) }}</pre>{% endif %}<p>Limited verification does not prove producer claims. Only full verification checks the signature.</p></section>
 {% endif %}'''
 
@@ -155,8 +156,11 @@ DEMO = r'''
 def demonstration_page(result, item, banner=""):
     policy = result.get("policy", {})
     measured = result.get("measured", {})
-    scorecard = {c["component"]: c for c in measured.get("privacy", {}).get("components", [])
-                 if c["component"] in {"privacy", "utility", "composite"}}
+    # The manifest records only the privacy score here; aggregate utility/composite are not written
+    # to it (measure.core), so they are never looked up in the privacy block.
+    privacy = measured.get("privacy", {})
+    scorecard = {c["component"]: c for c in privacy.get("components", [])
+                 if privacy.get("status") == "measured" and c["component"] == "privacy"}
     families = {f["table"] + "." + f["column"]: f["family"] for f in policy.get("floors", [])}
     content = ENV.from_string(DEMO).render(result=result, item=item, demonstrations=DEMONSTRATIONS,
                                          policy=policy, measured=measured, families=families,

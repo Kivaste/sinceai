@@ -92,6 +92,35 @@ def _rowmap(stem: str, src: pd.DataFrame, key_col: str, released: pd.DataFrame, 
                         dtype=str)
 
 
+def released_rowmaps(*, scenario_id: str, source: Mapping[str, pd.DataFrame], released: Mapping[str, pd.DataFrame],
+                     master: MasterKey, scope_id: str, recipient: str, contract: Mapping) -> dict:
+    """Row maps for ``released`` tables, derived by inverting their record-key tokens against the source (never read
+    from a file). A table whose map cannot be derived is left out (person-k then refuses on it)."""
+    spec = SCENARIO_SPEC.get(scenario_id)
+    if spec is None:
+        raise ContextError("no producer-context spec for this scenario")
+    keys = token_keys(master, scope_id, recipient)
+    rowmaps = {}
+    for stem, df in sorted(released.items()):
+        key_col = spec["record_keys"].get(stem)
+        rm = _rowmap(stem, source[stem], key_col, df, keys, contract) if key_col and stem in source else None
+        if rm is not None:
+            rowmaps[stem] = rm
+    return rowmaps
+
+
+def read_released(release_dir, contract: Mapping) -> dict[str, pd.DataFrame]:
+    """The contract's published tables in ``release_dir`` (``dtype=str``, no NA inference); a missing file is left
+    out."""
+    release = Path(release_dir)
+    out = {}
+    for name in sorted(contract["files"]):
+        p = release / name
+        if p.is_file():
+            out[name[:-4]] = pd.read_csv(p, dtype=str, keep_default_na=False, na_filter=False, encoding="utf-8")
+    return out
+
+
 def producer_context(*, scenario_id: str, policy, source: Mapping[str, pd.DataFrame], master: MasterKey,
                      scope_id: str, recipient: str, contract: Mapping,
                      released: Mapping[str, pd.DataFrame] | None) -> dict:
@@ -118,12 +147,8 @@ def producer_context(*, scenario_id: str, policy, source: Mapping[str, pd.DataFr
         ctx["k"] = k
     if released is not None:
         keys = token_keys(master, scope_id, recipient)
-        rowmaps = {}
-        for stem, df in sorted(released.items()):
-            key_col = spec["record_keys"].get(stem)
-            rm = _rowmap(stem, source[stem], key_col, df, keys, contract) if key_col and stem in source else None
-            if rm is not None:
-                rowmaps[stem] = rm
+        rowmaps = released_rowmaps(scenario_id=scenario_id, source=source, released=released, master=master,
+                                   scope_id=scope_id, recipient=recipient, contract=contract)
         ctx["rowmaps"] = rowmaps
         # #106 / D33: the detector's QI classification of what is released (values and source columns); person-k
         # refuses on one missing from contract.qi. Computed from the kit and the released tables, never declared.
@@ -145,12 +170,7 @@ def verify_context(kit, master: MasterKey, release_dir) -> dict:
     scenario_id = m["release"]["scenario"]
     policy = get_policy(scenario_id)
     source = kit.load_dataset(policy.dataset)
-    released = {}
-    for name in sorted(m["contract"]["files"]):
-        p = release / name
-        if p.is_file():
-            released[name[:-4]] = pd.read_csv(p, dtype=str, keep_default_na=False, na_filter=False,
-                                              encoding="utf-8")
+    released = read_released(release, m["contract"])
     return producer_context(scenario_id=scenario_id, policy=policy, source=source, master=master,
                             scope_id=m["release"]["releaseScopeId"], recipient=m["release"]["recipient"],
                             contract=m["contract"], released=released)

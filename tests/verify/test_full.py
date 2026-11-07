@@ -268,5 +268,9 @@ def test_full_real_registry_producer_checks_fail_closed(bed, kit, tb):
     rep = _full(tb, bed, kit)
     assert not rep.ok
     claimed = {c["check"] for c in tb.load(bed)["gate"]["checks"] if c["scope"] == "producer"}
-    for name in claimed:
+    # #149: producer.manifest-source-values needs only the source, which verify --full loads from the kit itself,
+    # so it really re-runs here (it is never silently not_run when the kit is readable)
+    by = {r.check: r.status for r in rep.records}
+    assert by.get("producer.manifest-source-values") not in (None, "not_run"), rep.lines
+    for name in claimed - {"producer.manifest-source-values"}:
         assert any(name in x and ("not_run" in x or "unavailable" in x) for x in rep.lines), (name, rep.lines)

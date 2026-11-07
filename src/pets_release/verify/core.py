@@ -302,6 +302,17 @@ def lift_step_problems(manifest: dict, release: Path, kit: Kit, source: dict, ma
     return []
 
 
+def k_sets_problems(manifest: dict, source: dict, master_key, release_dir) -> list[str]:
+    """Producer-scope re-measure (``--full``) of ``measured.kSets`` (#146) with the run's own ``run.ksets``; the
+    released figures are measured on the published tables in ``release_dir``."""
+    from pets_release.run.ksets import k_sets_problems as problems
+
+    try:
+        return problems(manifest, source, master_key, release_dir)
+    except Exception:  # noqa: BLE001 - unknown state fails closed, content-free
+        return ["measured.kSets: re-measure failed"]
+
+
 def verify_release(release_dir, *, full: bool = False, kit=None, master_key=None, checks=None,
                    context: dict | None = None, purpose=None) -> VerifyReport:
     """Verify ``release_dir``. Recipient mode by default; ``full=True`` needs ``kit`` and ``master_key``.
@@ -402,6 +413,7 @@ def verify_release(release_dir, *, full: bool = False, kit=None, master_key=None
             problems += (purpose or purpose_problems)(manifest, release, kit, run_ctx["source"])
             problems += rung_step_problems(manifest, run_ctx["source"], master_key)
             problems += lift_step_problems(manifest, release, kit, run_ctx["source"], master_key)
+            problems += k_sets_problems(manifest, run_ctx["source"], master_key, release)
     if result.refused and not problems:  # the runner's own verdict is a floor, never overridden
         problems.append("checks: runner refused")
 
