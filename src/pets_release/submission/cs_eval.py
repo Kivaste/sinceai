@@ -28,6 +28,7 @@ MASK = "[REDACTED]"  # a placeholder shape the gate's normaliser masks, so a mas
 # and grouping come from the kit by turn_id), and every spans line as its own free-text row.
 _TURNS_FILE = "eval_turns.csv"
 _SPANS_FILE = "eval_spans.csv"
+_IDS_FILE = "eval_ids.csv"  # the turn ids as decoded from both exports; a hit here cannot be masked
 _CONTRACT = {
     "healthInTextRequired": True,  # CS-S1 privacy target no-health-in-text: max_hits 0
     "files": {
@@ -36,6 +37,7 @@ _CONTRACT = {
             "seq": {"form": "categorical"},
             "text": {"form": "text", "params": {"conversation": "conversation_id", "order": "seq"}}}},
         _SPANS_FILE: {"columns": {"line": {"form": "text"}}},
+        _IDS_FILE: {"columns": {"id": {"form": "text"}}},
     },
 }
 
@@ -177,8 +179,30 @@ def _text_checks() -> list:
     return [got[n] for n in sorted(want)]
 
 
-def _parse_export(redacted: bytes, spans: bytes) -> tuple[list, list]:
-    """(turn rows, spans lines) as a reader of the exact bytes recovers them; refuses anything ambiguous."""
+_SPAN_KEYS = {"start", "end", "label"}
+
+
+def _decode_line(line: str) -> tuple[str, list]:
+    """(record_id, decoded strings of the spans) of one spans line, decoded strictly; refuses any other shape."""
+    try:
+        rec = json.loads(line)
+    except ValueError:
+        raise SubmissionRefused("cs_eval_format") from None
+    if not isinstance(rec, dict) or set(rec) != {"record_id", "spans"} or not isinstance(rec["record_id"], str) \
+            or not isinstance(rec["spans"], list):
+        raise SubmissionRefused("cs_eval_format")
+    strings = []
+    for s in rec["spans"]:
+        if not isinstance(s, dict) or set(s) != _SPAN_KEYS or not isinstance(s["label"], str) \
+                or any(type(s[k]) is not int for k in ("start", "end")):
+            raise SubmissionRefused("cs_eval_format")
+        strings.append(s["label"])
+    return rec["record_id"], strings
+
+
+def _parse_export(redacted: bytes, spans: bytes) -> tuple[list, list, list]:
+    """(turn rows, spans lines, decoded spans lines) as a reader of the exact bytes recovers them; refuses
+    anything ambiguous. Decoded lines undo the JSON escaping (``\\t``, ``\\u001f``) that hides text from a raw scan."""
     try:
         rows = list(csv.reader(io.StringIO(redacted.decode("utf-8"), newline="")))
         lines = spans.decode("utf-8").split("\n")
@@ -186,7 +210,7 @@ def _parse_export(redacted: bytes, spans: bytes) -> tuple[list, list]:
         raise SubmissionRefused("cs_eval_format") from None
     if not rows or rows[0] != EXPORT_HEADER or any(len(r) != 2 for r in rows[1:]) or lines[-1] != "":
         raise SubmissionRefused("cs_eval_format")
-    return rows[1:], lines[:-1]
+    return rows[1:], lines[:-1], [_decode_line(x) for x in lines[:-1]]
 
 
 def _write_csv(path: Path, header: list, rows: list) -> None:
@@ -200,14 +224,17 @@ def _scan(redacted: bytes, spans: bytes, order: dict, checks: list):
     """Run the checks on the exact export bytes. Returns (turn ids, records) of the redacted-file rows."""
     from pets_release.checks.runner import run_checks
 
-    rows, lines = _parse_export(redacted, spans)
+    rows, lines, decoded = _parse_export(redacted, spans)
     ids = [r[0] for r in rows]
-    if len(lines) != len(ids) or set(ids) != set(order):
+    if len(lines) != len(ids) or set(ids) != set(order) or [d[0] for d in decoded] != ids:
         raise SubmissionRefused("cs_eval_format")
     with tempfile.TemporaryDirectory(prefix="pets-cs-eval-gate-") as tmp:
         stage = Path(tmp)
         _write_csv(stage / _TURNS_FILE, ["conversation_id", "seq", "text"], [[*order[t], x] for t, x in rows])
-        _write_csv(stage / _SPANS_FILE, ["line"], [[x] for x in lines])
+        # Every ID as both readers recover it: the CSV turn_id and the decoded JSON record_id (#148).
+        _write_csv(stage / _IDS_FILE, ["id"], [[t] for t in ids] + [[d[0]] for d in decoded])
+        # The raw spans lines and every decoded string value in them.
+        _write_csv(stage / _SPANS_FILE, ["line"], [[x] for x in lines] + [[s] for d in decoded for s in d[1]])
         res = run_checks(stage, _CONTRACT, {"phase": "gate"}, checks=checks)
     if (res.registry_error is not None or sorted(r.check for r in res.records) != sorted(c.name for c in checks)
             or any(r.status not in ("pass", "fail") for r in res.records)):
@@ -223,8 +250,12 @@ def _gate(texts: dict, spans: dict, order: dict, lengths: dict) -> tuple[bytes, 
         redacted, spans_bytes = _serialise(texts, spans)
         ids, records = _scan(redacted, spans_bytes, order, checks)
         high = [v for r in records for v in r.violations if v.severity == "high"]
+        if any(v.file == _IDS_FILE for v in high):
+            raise SubmissionRefused("cs_eval_id_flagged")  # turn ids must ship as they are; nothing to mask
         if any(v.file == _SPANS_FILE for v in high):
-            raise SubmissionRefused("cs_eval_spans_flagged")  # turn ids must ship as they are; nothing to mask
+            raise SubmissionRefused("cs_eval_spans_flagged")
+        if any(v.file != _TURNS_FILE for v in high):
+            raise SubmissionRefused("cs_eval_check_error")  # a hit in a file this gate did not stage: never guess
         new = {}
         for v in high:
             for row in v.locations:

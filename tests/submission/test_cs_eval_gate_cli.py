@@ -9,7 +9,8 @@ redactor run is not proof. A hit the packager cannot mask (in the spans file) or
 Failure rows (trigger -> result):
   planted miss: an eval turn the redactor leaves but text.ip-addresses flags -> that turn masked whole, counted 1
   no miss                                                                   -> maskedTurns 0, texts unchanged
-  an identifier in an exported turn id (spans file flagged)                 -> exit 1 cs_eval_spans_flagged
+  an identifier in an exported turn id (CSV turn_id / JSON record_id)       -> exit 1 cs_eval_id_flagged
+  the same, hidden by JSON escaping (tab -> \\t, U+001F -> \\u001f) (#148)    -> exit 1 cs_eval_id_flagged
   a text check missing from the registry                                    -> refused cs_eval_checks_unavailable
   a text check that errors                                                  -> refused cs_eval_check_error
 """
@@ -76,7 +77,20 @@ def test_an_identifier_in_an_exported_turn_id_refuses(world, tmp_path):
     kit, rel = _kit_with_turn(world, tmp_path, "t-8 . 8 . 8 . 8", "fine thanks")
     out = tmp_path / "pets_submission"
     p = submission("--out", str(out), "--release", str(rel), "--kit", str(kit), "--partial")
-    assert p.returncode == 1 and "cs_eval_spans_flagged" in p.stdout
+    assert p.returncode == 1 and "cs_eval_id_flagged" in p.stdout
+    assert not out.exists()
+
+
+# #148: JSON escaping hid an identifier in the turn id from the spans-line scan, and the staged CSV dropped turn_id.
+# A Luhn-valid synthetic test card split by tabs (JSON writes "\t"), and one glued to a unit separator (JSON writes
+# "\u001f4111...", so the raw line shows no card boundary).
+@pytest.mark.parametrize("turn_id", ["4111\t1111\t1111\t1111", "\x1f4111111111111111"],
+                         ids=["json-escaped-tab", "unicode-escaped"])
+def test_an_escaped_identifier_in_a_turn_id_refuses(world, tmp_path, turn_id):
+    kit, rel = _kit_with_turn(world, tmp_path, turn_id, "fine thanks")
+    out = tmp_path / "pets_submission"
+    p = submission("--out", str(out), "--release", str(rel), "--kit", str(kit), "--partial")
+    assert (p.returncode, p.stdout.strip()) == (1, "REFUSED: cs_eval_id_flagged"), p.stdout + p.stderr
     assert not out.exists()
 
 
