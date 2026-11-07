@@ -213,3 +213,26 @@ def test_cli_never_reads_catalog_or_truth(tmp_path, cli, make_kit):
         text = f.read_text(encoding="utf-8")
         assert "field_catalog" not in text.replace("field_catalog is never read", ""), f.name
         assert "truth" not in text.replace("truth/", ""), f.name
+
+
+# --- follow-up #45 ---------------------------------------------------------
+
+
+@pytest.mark.parametrize("rel", ["truth/export.csv", "metadata/field_catalog.csv", "a/TRUTH/b/x.csv"])
+def test_cli_refuses_direct_csv_in_forbidden_locations(tmp_path, cli, rel):
+    src = tmp_path / rel
+    src.parent.mkdir(parents=True)
+    _write_csv(src, _frame(n=80))
+    out = tmp_path / "labels.csv"
+    p = cli("detect", str(src), "--out", str(out))
+    assert p.returncode == 2
+    assert not out.exists()
+    assert "forbidden" in p.stderr
+
+
+def test_unknown_role_raises_instead_of_asserting(monkeypatch):
+    from pets_release.detect import inventory
+
+    monkeypatch.setattr(inventory, "_classify", lambda profile, link: ("bogus", "", ""))
+    with pytest.raises(ValueError, match="unknown role"):
+        inventory.detect_table(_frame(n=5), "csv", "t")
