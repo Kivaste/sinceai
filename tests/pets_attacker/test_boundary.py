@@ -17,6 +17,7 @@ from pets_attacker.boundary import (
     BoundaryError,
     attacker_importers,
     attacker_reads_truth,
+    launcher_shape_violates,
     runtime_violations,
     truth_references,
 )
@@ -214,29 +215,24 @@ def test_runtime_unknown_open_target_type_is_a_hook_error(tmp_path: Path):
 
 
 # --- #138: the measured run's attacker launcher ----------------------------------------------------------
-# Rule (structural allowlist, round 2): pets_release/measure/attackers.py starts the attacker as a separate child
-# process. It may name the attacker only in exactly two top-level assignments, ATTACKER_MODULE = "pets_attacker"
-# and BRIDGE_MODULE = "pets_attacker.bridge", and may use those two names only as the third element of a list
-# literal [sys.executable, "-m", <NAME>, ...] passed as the only positional argument of subprocess.run (no
-# executable= or shell=). The names subprocess, sys, ATTACKER_MODULE and BRIDGE_MODULE are never rebound.
-# Any other mention or use (import, comment, other string, alias, concatenation, formatting, getattr/builtins,
-# importlib, exec), an unparseable or unreadable file, or the same content in any other file is a violation.
-# Rows: the approved launch form -> clean; each planted route -> flagged; the clean form elsewhere -> flagged.
+# Rule (round 3, identity): the attacker-name exemption applies only to pets_release/measure/attackers.py whose
+# canonical content (UTF-8, LF line endings) has the SHA-256 pinned in boundary.py. Any other content at that
+# path, or the same content at any other path, gets the any-mention rule. Changing the launcher needs a visible,
+# reviewed digest update in boundary.py.
+# Defence in depth (round 2): the launcher must also have the approved shape (launcher_shape_violates): the two
+# module-name constants only as the -m module of subprocess.run([sys.executable, "-m", NAME, ...]); subprocess
+# and sys used only as subprocess.run / subprocess.TimeoutExpired / sys.executable; nothing rebound.
+# Rows: real launcher unchanged (LF or CRLF) -> clean; one byte changed -> flagged; real launcher + each planted
+# route -> flagged; real launcher at any other path -> flagged; shape check flags every planted route on CLEAN.
 LAUNCHER = "pets_release/measure/attackers.py"
+REAL = (SRC / LAUNCHER).read_bytes().replace(b"\r\n", b"\n")
 CONSTANTS = 'ATTACKER_MODULE = "pets_attacker"\nBRIDGE_MODULE = "pets_attacker.bridge"\n'
 CLEAN = ("import subprocess\nimport sys\n\n" + CONSTANTS + "\n\n"
          "def attack(argv):\n"
          "    return subprocess.run([sys.executable, \"-m\", ATTACKER_MODULE, *argv], check=False, timeout=5)\n\n\n"
          "def bridge(argv):\n"
          "    return subprocess.run([sys.executable, \"-m\", BRIDGE_MODULE, *argv], check=False)\n")
-
-
-def test_launcher_in_the_approved_child_launch_form_is_clean(tmp_path: Path):
-    _plant(tmp_path, LAUNCHER, CLEAN)
-    assert attacker_importers(tmp_path / "src") == []
-
-
-@pytest.mark.parametrize("extra", [
+ROUTES = [
     "import pets_attacker\n",
     "from pets_attacker import cli\n",
     "from pets_attacker.bridge import main\n",
@@ -250,7 +246,7 @@ def test_launcher_in_the_approved_child_launch_form_is_clean(tmp_path: Path):
     "eval(compile('1', 'x', 'eval'))\n",
     "from importlib import import_module\n",
     "def (:\n",
-    # round 2 (Sol Standards, high): routes the denylist alone missed or might miss
+    # round 2 (Sol Standards, high)
     'import builtins\ndef load():\n    return getattr(builtins, "__import__")(ATTACKER_MODULE)\n',
     'def load():\n    m = ATTACKER_MODULE\n    return getattr(__builtins__, "__imp" + "ort__")(m)\n',
     "def load():\n    m = ATTACKER_MODULE\n    import importlib as il\n    return il.import_module(m)\n",
@@ -272,20 +268,64 @@ def test_launcher_in_the_approved_child_launch_form_is_clean(tmp_path: Path):
     "def f(sys):\n    return sys\n",
     "def subprocess():\n    return None\n",
     "try:\n    pass\nexcept Exception as ATTACKER_MODULE:\n    pass\n",
-    # round 2 (Grok Standards, high): the computed-attribute variant, and computed getattr / namespace lookups
+    # round 2 (Grok Standards, high)
     'def load():\n    return getattr(__builtins__, "__imp" + "ort__")(ATTACKER_MODULE)\n',
     'import os\ndef load(n):\n    return getattr(os, "sys" + "tem")(n)\n',
     'def load():\n    return globals()["ATTACKER_" + "MODULE"]\n',
     'def load():\n    return vars()["BRIDGE_MODULE"]\n',
-], ids=["import", "from", "from_sub", "comment", "other_string", "importlib", "dunder_import", "runpy", "pkgutil",
-        "exec", "eval_compile", "from_importlib", "unparseable", "getattr_builtins", "alias_getattr_computed",
-        "alias_importlib", "concat", "fstring", "format", "percent", "other_list", "dash_c", "other_executable",
-        "executable_kw", "shell_kw", "popen", "rebind_constant", "rebind_subprocess", "rebind_sys",
-        "store_sys_attr", "store_subprocess_attr", "shadow_param", "shadow_def", "shadow_except", "grok_computed_dunder", "computed_getattr",
-        "globals_lookup", "vars_lookup"])
-def test_launcher_with_any_other_route_to_the_attacker_is_a_violation(tmp_path: Path, extra):
-    _plant(tmp_path, LAUNCHER, CLEAN + extra)
-    assert any(h.endswith("attackers.py") for h in attacker_importers(tmp_path / "src"))
+    # round 3 (Grok Standards r2, high): routes that passed the shape check at 79c4055
+    'def load():\n    return sys.modules["import" + "lib"].__dict__["import" + "_module"]("pets_" + "attacker")\n',
+    'def load():\n    return sys._getframe(0).f_builtins["__imp" + "ort__"]("pets_" + "attacker")\n',
+    'def patch(fn):\n    setattr(subprocess, "run", fn)\n',
+    "def patch(fn):\n    type(subprocess).run = fn\n",
+]
+ROUTE_IDS = ["import", "from", "from_sub", "comment", "other_string", "importlib", "dunder_import", "runpy",
+             "pkgutil", "exec", "eval_compile", "from_importlib", "unparseable", "getattr_builtins",
+             "alias_getattr_computed", "alias_importlib", "concat", "fstring", "format", "percent", "other_list",
+             "dash_c", "other_executable", "executable_kw", "shell_kw", "popen", "rebind_constant",
+             "rebind_subprocess", "rebind_sys", "store_sys_attr", "store_subprocess_attr", "shadow_param",
+             "shadow_def", "shadow_except", "grok_computed_dunder", "computed_getattr", "globals_lookup",
+             "vars_lookup", "sys_modules_importlib", "getframe_builtins", "setattr_subprocess_run",
+             "type_store_subprocess_run"]
+
+
+def _flagged(tmp_path: Path, rel: str = LAUNCHER) -> bool:
+    return any(Path(h).relative_to(tmp_path / "src").as_posix() == rel for h in attacker_importers(tmp_path / "src"))
+
+
+@pytest.mark.parametrize("eol", [b"\n", b"\r\n"], ids=["lf", "crlf"])
+def test_real_launcher_unchanged_is_clean(tmp_path: Path, eol):
+    _plant(tmp_path, LAUNCHER, REAL.replace(b"\n", eol))
+    assert attacker_importers(tmp_path / "src") == []
+
+
+@pytest.mark.parametrize("edit", [
+    lambda b: b.replace(b"Attacker rates", b"attacker rates", 1),  # one byte, in the docstring
+    lambda b: b + b"\n",
+    lambda b: b.replace(b"TIMEOUT_S = 3600", b"TIMEOUT_S = 3601", 1),
+], ids=["docstring_byte", "trailing_newline", "constant_byte"])
+def test_real_launcher_with_one_byte_changed_is_flagged(tmp_path: Path, edit):
+    changed = edit(REAL)
+    assert changed != REAL
+    _plant(tmp_path, LAUNCHER, changed)
+    assert _flagged(tmp_path)
+
+
+@pytest.mark.parametrize("extra", ROUTES, ids=ROUTE_IDS)
+def test_real_launcher_with_any_planted_route_is_flagged(tmp_path: Path, extra):
+    _plant(tmp_path, LAUNCHER, REAL + b"\n" + extra.encode("utf-8"))
+    assert _flagged(tmp_path)
+
+
+def test_shape_check_accepts_the_approved_form_and_the_real_launcher():
+    assert not launcher_shape_violates(CLEAN)
+    assert not launcher_shape_violates(REAL.decode("utf-8"))
+
+
+@pytest.mark.parametrize("extra", ROUTES, ids=ROUTE_IDS)
+def test_shape_check_flags_every_planted_route(extra):
+    """Defence in depth: without the digest pin, the shape check alone still flags each route."""
+    assert launcher_shape_violates(CLEAN + extra)
 
 
 @pytest.mark.parametrize("text", [
@@ -293,22 +333,21 @@ def test_launcher_with_any_other_route_to_the_attacker_is_a_violation(tmp_path: 
     CLEAN.replace("ATTACKER_MODULE = ", "ATTACKER_MODULE: str = "),
     "if True:\n    " + CLEAN.replace("\n", "\n    "),
 ], ids=["other_constant_value", "annotated_assignment", "nested_assignment"])
-def test_launcher_constants_outside_the_two_exact_top_level_assignments_are_a_violation(tmp_path: Path, text):
-    _plant(tmp_path, LAUNCHER, text)
-    assert any(h.endswith("attackers.py") for h in attacker_importers(tmp_path / "src"))
+def test_shape_check_flags_constants_outside_the_two_exact_top_level_assignments(text):
+    assert launcher_shape_violates(text)
 
 
 @pytest.mark.parametrize("rel", ["pets_release/attackers.py", "pets_release/ui/attackers.py",
                                  "pets_release/measure/sub/attackers.py", "pets_release/measure/other.py"])
-def test_the_approved_launcher_form_in_any_other_file_is_a_violation(tmp_path: Path, rel):
-    _plant(tmp_path, LAUNCHER, CLEAN)
-    _plant(tmp_path, rel, CLEAN)
+def test_the_real_launcher_in_any_other_file_is_a_violation(tmp_path: Path, rel):
+    _plant(tmp_path, LAUNCHER, REAL)
+    _plant(tmp_path, rel, REAL)
     assert [Path(h).relative_to(tmp_path / "src").as_posix() for h in attacker_importers(tmp_path / "src")] == [rel]
 
 
 def test_launcher_unreadable_is_a_violation(tmp_path: Path):
     _plant(tmp_path, LAUNCHER, b"\xff\xfe\x00\x80 not utf8")
-    assert any(h.endswith("attackers.py") for h in attacker_importers(tmp_path / "src"))
+    assert _flagged(tmp_path)
 
 
 def test_kit_module_is_exempt_from_the_truth_scan_only(tmp_path: Path):
