@@ -344,3 +344,39 @@ def test_policy_rung_ids_are_07_ids():
         for e in hand_plan(sid):
             assert e["rung"] in CONTRACT_FORMS or e["rung"] == WITHHELD
             assert e["floor"] in CONTRACT_FORMS or e["floor"] == WITHHELD
+
+def test_every_releasable_timing_age_geo_column_is_a_qi_under_a_k_target():
+    """Regression: discharge_ts (exact floor) was missing from the HEALTH-S1 QI set."""
+    pol = get_policy("HEALTH-S1")
+    qis = {(q["table"], q["column"]) for q in pol.qi}
+    for key, fl in pol.floors.items():
+        if fl.family in ("timestamp", "age", "geo") and fl.rung != "withheld":
+            assert key in qis, key
+    assert ("ed_visits", "discharge_ts") in qis
+
+
+def test_join_derived_qi_declares_join_via():
+    pol = get_policy("HEALTH-S1")
+    row = [q for q in pol.qi if (q["table"], q["column"]) == ("lab_results", "sampled_ts")][0]
+    assert row["join_via"] == ["ed_visits", "visit_id"]
+    assert ("ed_visits", "visit_id") in pol.floors
+    for q in pol.qi:
+        if "join_via" in q:
+            assert len(q["join_via"]) == 2 and tuple(q["join_via"]) in pol.floors
+    assert "joinVia" in str(get_policy("HEALTH-S1").to_json()["qi"]) or "join_via" in str(get_policy("HEALTH-S1").to_json()["qi"])
+
+
+def test_cs_has_no_k_target_so_no_qi_set():
+    pol = get_policy("CS-S1")
+    assert not [t for t in pol.privacy_targets if t["kind"] == "k_anonymity"]
+    assert pol.qi == ()
+
+
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), float("-inf")])
+def test_validate_rejects_non_finite_params(bad):
+    p = _mutated("HEALTH-S1", lambda pl: pl[0].update(params={"x": bad}))
+    with pytest.raises(PlanError, match="params"):
+        validate_plan(p, get_policy("HEALTH-S1"))
+    p = _mutated("HEALTH-S1", lambda pl: pl[0].update(params={"nested": [{"y": bad}]}))
+    with pytest.raises(PlanError, match="params"):
+        validate_plan(p, get_policy("HEALTH-S1"))
