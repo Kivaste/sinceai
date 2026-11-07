@@ -8,6 +8,8 @@ import ipaddress
 import re
 from urllib.parse import parse_qsl, urlsplit
 
+import pets_release.checks._cues as _cues
+
 _NB = r"(?<![0-9A-Za-z])"  # no alnum before
 _NA = r"(?![0-9A-Za-z])"  # no alnum after
 
@@ -178,33 +180,28 @@ def device_ids(s):
 
 
 # --- cue + value rule shared by usernames and secrets ------------------------------------------
-# Same shape as the redactor (ticket 12): a value counts after a cue + copula/colon ("is", "on", "är", ":",
-# optional hedge) unless it is a function/prose word; without a copula only a credential-shaped token counts.
-_HEDGE = (r"(?:varmaan|kai|luultavasti|ehkä|probably|maybe|still|edelleen|nog|kanske|typ|fortfarande|nyt|now|nu)")
-_COPULA_VALUE = (
-    r"(?P<sep>[^\w\[]{0,4}(?:(?:on|oli|is|was|är|var)\b|[:=]))?[^\w\[]{0,4}"
-    r"(?:" + _HEDGE + r"\b[^\w\[]{1,3})?"
-    r"(?P<val>[^\s\[\]\"',;]{3,64})")
-_PROSE = frozenset("""
-varmaan kai luultavasti ehkä probably maybe nog kanske typ fortfarande nyt now nu
-the and for with that this those these your you our their his her its not none never wrong incorrect invalid
-expired changed correct right okay fine working broken locked blocked lost forgotten unknown new old same different
-too very still also just really should would could will can cannot must may might was were been being are has have
-had does did doesn didn isn aren wasn not reset link page screen details info information problem issue account
-service router modem network login logout user name username code number what which when where why how who from
-into onto over under about after before again because while until once only even such some any all each every both
-other another more most much many few less least own than then there here yes ok sure please thanks thank
-ei eikä oikea väärä vanha uusi sama eri liian tosi vielä myös vain hukassa lukossa voimassa vanhentunut vaihdettu
-unohtunut kadonnut estetty jotain mikä mitä tämä tuo sinun teidän minun hyvä huono ja tai mutta koska kun jos kaikille kaikki
-kaikissa kaikkiin palveluille palveluun tunnus tunnukset lukittu lukittuna toimi toimii sivu sivulla ongelma
-inte icke fel rätt gammal gamla ny nya samma annan fär mycket också bara glömt ändrat borta läst spärrat något vad
-detta det din ditt er bra dålig och eller men för
-""".split())
+# Scanned over up to _cues.WINDOW tokens after the cue, never past a sentence end (". ! ? ;"):
+# * a credential-shaped token (digit, inner symbol, mixed case, long) counts anywhere in the scan;
+# * a copula ("is", "on", "är", ":", "=", also a trailing ":" as in "router: x") arms; while armed, the first
+#   word that is not a hedge (_cues.HEDGES) is the value: it counts unless it is prose (a date counts too).
+#   Any copula later in the scan re-arms ("password for the router is kissakala");
+# * function words other than hedges ("is a pain", "is not working") and any other non-value word disarm;
+# * separator/punctuation runs ("-", "--", "/", "#", "·") are skipped;
+# * an exact redactor placeholder is the (already redacted) value: skipped, and it disarms, unless a
+#   value is glued to it ("[SECRET_1]hunterxyz");
+# * a plain word directly before a placeholder is not the value (the placeholder is); after a bare
+#   wifi/wlan cue a plain word counts only at the clause end;
+# * a cue inside a placeholder ("[USERNAME_1]") is no cue; a cue glued to a longer word ("pinta") is no cue.
+# Brackets are value characters ("[Hunter2!]"), not a placeholder.
+_CUE_TOKEN = re.compile(_cues.PLACEHOLDER_SRC + r"|(?:(?!" + _cues.PLACEHOLDER_SRC + r")\S)+")
+_WRAP = "\"'()[]<>,;"
+_SENTENCE_END = ".!?;"
+_DATE_OR_TIME = _cues.DATE_OR_TIME
 
 
 def _credential_shaped(v: str) -> bool:
     core = v.rstrip(".!?)")
-    if not core:
+    if len(core) < 3 or _DATE_OR_TIME.fullmatch(core):
         return False
     has_l = any(c.isalpha() for c in core)
     has_d = any(c.isdigit() for c in core)
@@ -213,28 +210,97 @@ def _credential_shaped(v: str) -> bool:
     return has_d or (inner_sym and has_l) or mixed or (len(core) >= 20 and core.isalnum())
 
 
-def _cued_value_counts(m, *, alpha_without_copula: bool) -> bool:
-    v = m.group("val")
-    if _credential_shaped(v):
-        return True
-    core = v.rstrip(".!?)")
-    if core.lower() in _PROSE or not core.isalpha() or len(core) < 3:
-        return False
-    return m.group("sep") is not None or alpha_without_copula
+# a bare network cue (no key/password suffix) is about the network; its plain-word "value" mid-clause is
+# prose ("wifi is terrible today"); credential-shaped tokens and a clause-final word still count
+_BARE_NETWORK_CUE = re.compile(r"(?i)wi-?fi|wlan")
+
+
+def _cued_values(cue, s: str, *, alpha_without_copula: bool) -> int:
+    """Cue matches in ``s`` followed by a value; a cue inside a placeholder ("[USERNAME_1]") is no cue."""
+    ph = [m.span() for m in _cues.PLACEHOLDER_RE.finditer(s)]
+    return sum(1 for m in cue.finditer(s)
+               if not any(a <= m.start() < b for a, b in ph)
+               and _cued_value_counts(s, m.end(), alpha_without_copula=alpha_without_copula,
+                                      plain_mid_clause_is_prose=bool(_BARE_NETWORK_CUE.fullmatch(m.group(0)))))
+
+
+def _cued_value_counts(s: str, pos: int, *, alpha_without_copula: bool,
+                       plain_mid_clause_is_prose: bool = False) -> bool:
+    """True when a value follows the cue ending at ``pos``. ``alpha_without_copula``: a plain word right
+    after the cue counts too (usernames: "username mattikoski")."""
+    armed = False  # a copula, followed by nothing but hedges, separators or a glued placeholder
+    words = 0
+    toks = []
+    for m in _CUE_TOKEN.finditer(s, pos):
+        toks.append(m)
+        if len(toks) > _cues.WINDOW:
+            break
+    for i, m in enumerate(toks[:_cues.WINDOW]):
+        nxt = toks[i + 1].group(0) if i + 1 < len(toks) else None
+        tok = m.group(0)
+        if i == 0 and m.start() == pos and tok[0].isalpha():
+            return False  # the cue is the start of another word ("pinta", "passwordless")
+        if _cues.is_placeholder(tok):
+            if not s[m.end():m.end() + 1].isalnum():
+                armed = False  # the redacted value took the copula; "[SECRET_1] ok" is prose
+            continue
+        if tok[:1] in ":=":
+            armed = True
+        core = tok.lstrip(":=")
+        last = core.rstrip("\"')]")[-1:]
+        ends = bool(last) and last in _SENTENCE_END
+        val = core.strip(_WRAP)
+        word = val.rstrip(".!?:=)")
+        low = word.lower()
+        arms_after = val.rstrip(".!?)")[-1:] in (":", "=") and not ends  # "router: x", "pwd= x"
+        if _cues.is_punct(word):
+            if ends:
+                break
+            armed = armed or arms_after
+            continue
+        first_word = words == 0
+        words += 1
+        if low in _cues.COPULAS:
+            armed = True
+            continue
+        if low in _cues.HEDGES:
+            if ends:
+                break
+            continue
+        if low in _cues.FUNCTION_WORDS:
+            armed = arms_after  # "is a pain", "is not working": a description, not a value
+            if ends:
+                break
+            continue
+        if _credential_shaped(val):
+            return True
+        plain_ok = (
+            # (b) a plain word directly before a placeholder is not the value: the placeholder is
+            not (nxt is not None and _cues.is_placeholder(nxt))
+            # (c) after a bare wifi/wlan cue a plain word counts only at the clause end ("wifi: x")
+            and not (plain_mid_clause_is_prose and not ends and nxt is not None
+                     and not _cues.is_punct(nxt)))
+        if plain_ok and (armed or (alpha_without_copula and first_word)) and low not in _cues.PROSE_WORDS and (
+                (len(word) >= 3 and any(c.isalpha() for c in word))
+                or (armed and _DATE_OR_TIME.fullmatch(word))):
+            return True
+        if ends:
+            break
+        armed = arms_after  # any other word is not the value; a later copula re-arms
+    return False
 
 
 # --- usernames (cue + handle, or @handle not part of an email) ---------------------------------
 _USER = re.compile(
     r"(?i)\b(?:käyttäjätunnu(?:s|ksella|ksen|kseni)|käyttäjänimi|tunnukse(?:ni|lla|en)|username|user\s?name|"
-    r"login|user\s?id|användarnamn|användar-?id)"
-    + _COPULA_VALUE)
+    r"login|user\s?id|användarnamn|användar-?id)")
 _HANDLE = re.compile(r"(?<![\w.@])@([A-Za-z0-9_]{3,30})(?![\w@.]*\.[A-Za-z]{2,})")
 
 
 def usernames(s):
     # the cue is required; after a copula/colon a purely alphabetic value counts, without one only a
     # credential-shaped or non-prose value does (the shape the redactor uses)
-    n = sum(1 for m in _USER.finditer(s) if _cued_value_counts(m, alpha_without_copula=True))
+    n = _cued_values(_USER, s, alpha_without_copula=True)
     n += len(_HANDLE.findall(s))
     return n, 0
 
@@ -261,15 +327,14 @@ _KEYSHAPES = re.compile(
     r"|-----BEGIN [A-Z ]*PRIVATE KEY-----|\beyJ[\w-]{8,}\.eyJ[\w-]{8,}\.[\w-]{8,}")
 _SECRET_CUE = re.compile(
     r"(?i)\b(?:salasana(?:ni|na)?|password|passwd|pwd|lösenord(?:et)?|pin(?:-?koodi|-?kod|\s?code)?|puk(?:-?koodi|-?kod)?|"
-    r"wi-?fi(?:-?avain|-?salasana|\s?key|\s?password)?|wlan(?:-?avain)?|wpa\d?)"
-    + _COPULA_VALUE)
+    r"wi-?fi(?:-?avain|-?salasana|\s?key|\s?password)?|wlan(?:-?avain)?|wpa\d?)")
 
 
 def secrets(s):
     n = len(_KEYSHAPES.findall(s))
     # cue + (copula|colon) + value, or cue + a credential-shaped token (digit, symbol, mixed case, long);
     # cued everyday words ("password for the router", "password reset") are not values
-    n += sum(1 for m in _SECRET_CUE.finditer(s) if _cued_value_counts(m, alpha_without_copula=False))
+    n += _cued_values(_SECRET_CUE, s, alpha_without_copula=False)
     return n, 0
 
 

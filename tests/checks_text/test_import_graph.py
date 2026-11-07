@@ -7,8 +7,11 @@ from pathlib import Path
 
 PKG = Path(__file__).resolve().parents[2] / "src" / "pets_release" / "checks" / "text"
 # Only the shared registry interface (ticket 04) may be imported from outside this package.
+# ``checks._cues`` is the gate's own cue vocabulary shared with the cell rescans (#53); it must
+# itself import only the stdlib (pinned below).
 ALLOWED_FIRST_PARTY = ("pets_release.checks.text", "pets_release.checks.registry",
-                       "pets_release.checks.records")
+                       "pets_release.checks.records", "pets_release.checks._cues")
+CUES = PKG.parent / "_cues.py"
 
 
 def offending_imports(pkg_dir: Path, pkg_name: str = "pets_release.checks.text"):
@@ -47,6 +50,17 @@ def offending_imports(pkg_dir: Path, pkg_name: str = "pets_release.checks.text")
 def test_text_checks_import_only_stdlib_and_themselves():
     assert PKG.is_dir()
     assert offending_imports(PKG) == []
+
+
+def test_shared_cue_module_imports_only_stdlib(tmp_path):
+    pkg = tmp_path / "cues"
+    pkg.mkdir()
+    (pkg / "__init__.py").write_text("", encoding="utf-8")
+    (pkg / "_cues.py").write_text(CUES.read_text(encoding="utf-8"), encoding="utf-8")
+    assert offending_imports(pkg, "cues") == []
+    (pkg / "_cues.py").write_text(CUES.read_text(encoding="utf-8") + "\nimport pets_release.redactor\n",
+                                  encoding="utf-8")
+    assert offending_imports(pkg, "cues") == [("_cues.py", "pets_release.redactor")]
 
 
 def test_planted_redactor_import_is_caught(tmp_path):

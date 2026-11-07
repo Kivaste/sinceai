@@ -103,7 +103,8 @@ def test_hedge_then_placeholder_is_not_a_hit(tmp_path):
     assert _hits(tmp_path, "salasana on nyt [SECRET_1]", "rescan.secrets") == 0
 
 
-def test_label_with_colon_after_cue_is_not_a_text_secret():
-    assert d.secrets("salasana vaihtoehto: kokeile") == []
-    assert d.secrets("password policy: strong") == []
+def test_label_with_colon_after_cue_is_a_text_secret():
+    # round 3 (review): a trailing ":" is a copula and re-arms a plain-word value (fail closed)
+    assert d.secrets("salasana vaihtoehto: kokeile") != []
+    assert d.secrets("password policy: strong") != []
     assert d.secrets("password: Kissa!") != []
