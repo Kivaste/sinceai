@@ -7,7 +7,6 @@ Frame: all customer_service train turns; gold-absent turns count as empty; exact
 from __future__ import annotations
 
 import json
-import os
 import sys
 from pathlib import Path
 
@@ -20,8 +19,7 @@ from pets_release.redactor import (
     redact_conversation,
 )
 
-KIT = os.environ.get("PETS_KIT")
-pytestmark = [pytest.mark.kit, pytest.mark.skipif(not KIT, reason="PETS_KIT not set: kit test NOT RUN")]
+pytestmark = [pytest.mark.kit]  # fails (never skips) when the kit is absent; see tests/conftest.py
 
 # REGRESSION GUARD, not the policy target. The CS-S1 privacy targets (recall 0.98 on NATIONAL_ID,
 # PAYMENT_CARD, IBAN, SECRET) are evaluated on the held-out split in ticket 23 and handled by policy.
@@ -51,10 +49,10 @@ def _margin(support: int) -> float:
     return 0.005 if support >= 100 else 0.04
 
 
-def _load():
+def _load(kit):
     import pandas as pd
 
-    root = Path(KIT)
+    root = Path(kit)
     sys.path.insert(0, str(root / "toolkit"))
     from pets_eval.text import span_scores
 
@@ -74,8 +72,8 @@ def _load():
     return tt, frame, gold, span_scores
 
 
-def test_structured_labels_exact_match_floor():
-    tt, frame, gold, span_scores = _load()
+def test_structured_labels_exact_match_floor(kit_root):
+    tt, frame, gold, span_scores = _load(kit_root)
     pred = {k: [] for k in frame}
     sp = StructuredPass()
     for cid, g in tt.groupby("conversation_id", sort=True):

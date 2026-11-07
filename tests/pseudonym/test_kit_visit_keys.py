@@ -30,8 +30,7 @@ TABLES = ("ed_visits", "lab_results")
 @pytest.mark.kit
 def test_visit_keys_tokenise_one_to_one_and_keep_the_join(record_property):
     files = {t: KIT / "data" / "health" / f"{t}.csv" for t in TABLES}
-    if not all(p.is_file() for p in files.values()):
-        pytest.skip("challenge kit not available")
+    assert all(p.is_file() for p in files.values()), "kit required but not found"
     digests = {t: hashlib.sha256(p.read_bytes()).hexdigest() for t, p in files.items()}
     rsid = release_scope_id(
         scenario="HEALTH-S1",
