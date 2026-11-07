@@ -72,6 +72,8 @@ def test_missing_canonical_list_fails_despite_planted_cwd_list(policy, monkeypat
 
 
 def test_production_hook_deselects_only_when_requested(tmp_path):
+    # The shared conftest now requires real Git identity, even for collection.
+    subprocess.run(["git", "-C", str(tmp_path), "init", "-q"], check=True, capture_output=True)
     tests = tmp_path / "tests"
     tests.mkdir()
     shutil.copyfile(ROOT / "tests" / "conftest.py", tests / "conftest.py")
