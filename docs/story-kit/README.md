@@ -29,10 +29,34 @@ Paths are dotted. Lists in the manifest are addressed by their id field.
 | `measured.baselines.<B0\|B2\|B2-k>.<metric>` | `measured.baselines.rows[baseline==X, metric==Y].value` |
 | `measured.search.candidates` | search candidate count |
 
-The metric ids are the measurer's (`pets_release.measure.ids`): privacy components `k_below_5_share` (row-weighted
-share of rows with k<5 over the tables scored for k: released tables reporting a k<5 rate, named in `measured.privacy.source`), `k_below_5_worst_table` (the worst single table, not a row share) and
-`linkage_reid` (worst table), baseline metrics `utility_mean` and `worst_reid`. `tests/measure/test_ids.py` checks that this CSV, the
-fixture manifest and the measurer agree.
+Ids are the measurer's real ones (not the fixture's): privacy components `person_k.{persons,min,below_k_share}`
+(ours, after only), `k_below_5_share` (scorecard, ROWS), `linkage_reid`,
+`summary.{privacy,utility}`; baseline metrics `utility_mean`, `privacy`, `worst_reid`, `task.<id>`. For
+`privacy` and `baselines` the metric (or component) is everything after the 3rd (or 2nd) segment, so it may contain dots.
+A null (e.g. B2-k cannot answer H-U6) is rendered `—`.
+
+## Part B: status (filled from the real run)
+
+Release: `C:\Users\kivas\AI\sinceai-out\22\health-s1\` (+ `.scoring`), dashboard `health-s1.dashboard.html/.csv`,
+filled kit `C:\Users\kivas\AI\sinceai-out\22\story-kit\` (`numbers.csv`, `pitch-beats.md`, dashboard copies).
+Made by `python -m pets_release.measure.wire <run args>` (two passes: scratch release, score it, final release with
+`measured.*`), then `docs/story-kit/fill_numbers.py <release> <out_dir>`. `numbers.csv` here is the committed filled
+copy; every value is read from a manifest key and agrees with the dashboard CSV. The release is bound to the tool
+revision it was built at (see its manifest); docs-only commits after it do not change it.
+
+- `measured.utility.after.*` is the scorecard of the SUPPRESSED release (what the recipient gets). H-U4 is the
+  visible loss and is a policy-enumerated sacrifice (`sacrifices.H-U4.floor`).
+- Rows vs persons: `k_below_5_share` is the scorecard's share of ROWS (row-weighted over the tables scored for k); `person_k.below_k_share` is OUR
+  share of PERSONS. Never mix them up. Per-person k is authoritative (D22: the scorecard is blind to the renamed `age_band`).
+- A baseline task the kit publishes as null (B2-k H-U6/H-U7/H-U8) renders `—`: that baseline cannot answer it.
+
+**#52:** the numbers above were produced with the #52 measurer (origin/ticket/fu52-measurer, round 3). If #52 changes
+again before it merges, re-fill every `measured.baselines.*` row, every `measured.privacy.before.*` value and the
+`person_k.*` rows. `k_below_5_share` is row-weighted over the tables scored for k.
+
+**Residual risks to say out loud:** the D22 scorecard defect (Beat 6); linkage-attackers and attribute-inference rates
+are `not_measured` in this release (no attacker run is wired), so no linkage rate is claimed; recipient-mode verify
+catches accidents only.
 
 ## How part B fills it
 
