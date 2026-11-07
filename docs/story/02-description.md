@@ -1,6 +1,6 @@
 ﻿# Submission description
 
-Character count: 4947 of 5,000, counting the body below including all conditional blocks and unrendered placeholders. Rendered numbers are shorter than placeholders.
+Character count: 4,731 of 5,000, counting the body below including all conditional blocks and remaining placeholders (4,554 after stripping comment markers). Real-run sources are recorded in 06.
 True for the current build when every conditional block is removed. A block is kept only once its enabling ticket has merged and the claim is verified (see the claims checklist in 06). Strip the HTML comment markers before submitting. The first two paragraphs work alone for voters.
 
 ---
@@ -12,7 +12,7 @@ Most "anonymised" data is a claim. Ours is a release plus a privacy manifest whe
 ## The problem
 
 A data controller must share data for a purpose: a hospital with a research group, a contact centre with an LLM vendor. Removing names is not enough, and an "anonymised" claim cannot be re-checked.
-<!-- IF #23 measured numbers -->Blanket k-anonymity (B2-k) scores {{measured.baselines.B2-k.utility}} utility on HEALTH-S1.<!-- END IF -->
+Blanket k-anonymity (B2-k) scores 0.3990 mean scenario utility on HEALTH-S1; its H-U6, H-U7 and H-U8 results are null (cannot answer), not zero.
 
 ## Purpose first
 
@@ -31,8 +31,8 @@ Verification has two tiers. `pets-release verify <release>` lets the recipient r
 
 ## Scenario HEALTH-S1 (lead)
 
-Emergency-department visits go to a university research group studying crowding and revisits. Patient names and clinical notes are withheld; age is released in 10-year bands, arrival time as hour of day, the visit id as a keyed pseudonym. {{inventory.count}} columns were classified: {{fieldJustifications.released.count}} released, {{fieldJustifications.withheld.count}} withheld. Per-person k is checked over every released quasi-identifier.
-<!-- IF #23 measured numbers -->Required analyses after release (1.0 = same answer as the original): H-U2 {{measured.utility.after.H-U2}}, H-U4 {{measured.utility.after.H-U4}}, H-U6 {{measured.utility.after.H-U6}}, H-U7 {{measured.utility.after.H-U7}}, H-U8 {{measured.utility.after.H-U8}}. Scorecard privacy score {{measured.privacy.before.summary.privacy}} before, {{measured.privacy.after.summary.privacy}} after; share of persons below k {{measured.privacy.after.person_k.below_k_share}}.<!-- END IF -->
+Emergency-department visits go to a university research group studying crowding and revisits. Patient names and clinical notes are withheld; age is released in 10-year bands, arrival time as hour of day, the visit id as a keyed pseudonym. 53 columns were classified: 16 released, 37 withheld. Per-person k is checked over every released quasi-identifier.
+Required analyses after suppression (1.0 = same answer as the original): H-U2 0.9908, H-U4 0.7952, H-U6 0.9462, H-U7 0.9933, H-U8 0.9505. H-U4 is a policy-enumerated sacrifice, not a full pass. Scorecard privacy score 0.1716 before, 1.0000 after; the scorecard is blind to age_band, not proof of zero risk. Our per-person k minimum is 5 across 24,204 persons, with 0.0000 share below 5.
 
 <!-- IF #24 CS-S1 release -->## Scenario CS-S1 (free text)
 
@@ -40,7 +40,7 @@ Contact-centre transcripts go to an external LLM vendor. Spoken ID numbers, card
 
 ## Honest limitations
 
-Pseudonymised data is still personal data, and whoever holds the key can re-link it. We do not claim anonymity. The data is synthetic and templated; real speech is messier. Recipient-mode digests catch accidents only; only `verify --full` checks the signature. The gate checks the form of the output; attack resistance is measured against the kit's attackers, not proven in general. A residual-risk entry reads "not measured" until a measurement exists.
+Pseudonymised data is still personal data, and whoever holds the key can re-link it. We do not claim anonymity. The data is synthetic and templated; real speech is messier. Recipient-mode digests catch accidents only; only `verify --full` checks the signature. The gate checks output form; linkage-attacker and attribute-inference rates are not measured in this release. A residual-risk entry reads "not measured" until a measurement exists.
 <!-- IF #24 CS-S1 release -->Names outside our gazetteers and indirect health remarks can survive in text; PERSON, ADDRESS and LOCATION are residual risks, not assertions.<!-- END IF -->
 
 ## What is next
