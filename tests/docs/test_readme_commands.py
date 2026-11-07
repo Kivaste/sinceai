@@ -32,7 +32,8 @@ ALLOWED_SKIP_REASONS = (
     "runs-the-whole-test-suite-recursively",
     # the CS-S1 release needs ticket 23 (turn_id check); guarded below
     "cs-s1-run-needs-ticket-23",
-    "needs-kit-and-release",
+    # the complete submission bundle needs a CS-S1 release; guarded below (run must support CS-S1)
+    "complete-bundle-needs-cs-s1-release",
 )
 SUBCOMMANDS = ("run", "verify", "detect", "dashboard", "submission")
 MARKER = re.compile(r"<!--\s*docs-test:\s*(run|skip|pending)\b([^>]*?)-->")
@@ -183,6 +184,30 @@ def test_every_block_has_a_marker_with_named_reason():
             assert re.fullmatch(r"ticket=\d+", b["arg"]), f"{where}: pending needs ticket=NN"
 
 
+def _add_submission_inputs(kit: Path) -> None:
+    """Synthetic customer_service tables and field catalog from the submission tests' fixture module."""
+    spec = importlib.util.spec_from_file_location("_sub_conftest", ROOT / "tests" / "submission" / "conftest.py")
+    sub = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(sub)
+    cs = kit / "data" / "customer_service"
+    cs.mkdir(parents=True, exist_ok=True)
+    (cs / "turns.csv").write_text(sub.CS_TURNS, encoding="utf-8", newline="")
+    (cs / "conversations.csv").write_text(sub.CS_CONVS, encoding="utf-8", newline="")
+    (kit / "metadata" / "field_catalog.csv").write_text(sub.CATALOG, encoding="utf-8", newline="")
+
+
+def _tables_without_record_key(release: Path) -> list[str]:
+    """Released tables whose record key (SCENARIO_SPEC) is not a released column, read from the manifest."""
+    import json
+
+    from pets_release.run.context import SCENARIO_SPEC
+
+    m = json.loads((release / "privacy_manifest.json").read_text(encoding="utf-8"))
+    keys = SCENARIO_SPEC[m["release"]["scenario"]]["record_keys"]
+    return sorted(f[:-4] for f, spec in m["contract"]["files"].items()
+                  if f[:-4] in keys and keys[f[:-4]] not in spec["columns"])
+
+
 @pytest.mark.parametrize("block", BLOCKS, ids=lambda b: f"block{b['n']}-{b['kind']}")
 def test_block(block, tmp_path):
     conf = _load_conftest()
@@ -191,6 +216,12 @@ def test_block(block, tmp_path):
         if block["arg"] == "reason=cs-s1-run-needs-ticket-23":
             assert not (ROOT / "src" / "pets_release" / "checks" / "turn_id").exists(), (
                 "ticket 23 has landed (checks/turn_id): promote the CS-S1 run block to run"
+            )
+        if block["arg"] == "reason=complete-bundle-needs-cs-s1-release":
+            from pets_release.run.context import SCENARIO_SPEC
+
+            assert "CS-S1" not in SCENARIO_SPEC, (
+                "pets-release run supports CS-S1 now: promote the complete submission block to run"
             )
         _transcript(f"SKIP block {block['n']} ({block['arg']}): {first}")
         pytest.skip(f"named reason: {block['arg']}")
@@ -229,6 +260,11 @@ def test_block(block, tmp_path):
         _, pre = execute(run_cmd)  # earlier README step: the release the later commands act on
         assert pre.returncode == 0, f"prerequisite run failed: {pre.stdout[-300:]}{pre.stderr[-300:]}"
 
+    unkeyed = []  # #128 precondition: released tables without their record key get no recomputable row map
+    if "pets-release submission" in block["body"]:
+        _add_submission_inputs(kit)  # after the release run, as in tests/submission (CS tables, catalog)
+        unkeyed = _tables_without_record_key(out_root / "health-s1")
+
     executed = 0
     for stmt in _statements(block["body"]):
         m = re.fullmatch(r'\$env:(\w+)\s*=\s*"(.*)"', stmt)
@@ -246,8 +282,44 @@ def test_block(block, tmp_path):
         if args and args[0] == "verify" and "--full" not in args:
             assert "VERIFIED (limited)" in proc.stdout, f"{stmt!r}: no limited-verification line"
             assert "VERIFIED (full)" not in proc.stdout
+        if args and args[0] == "submission" and unkeyed:
+            # The packager fails closed on a row map it cannot recompute (#128). The command ran; while the
+            # precondition holds it must refuse with exactly that code, and this test xfails, naming the issue.
+            assert (proc.returncode, proc.stdout.strip()) == (1, "REFUSED: rowmap_unverifiable"), proc.stdout[-300:]
+            pytest.xfail(f"#128: the default HEALTH-S1 release drops the record key of {', '.join(unkeyed)}")
+        if args and args[0] == "submission":
+            built = "SUBMISSION BUILT (PARTIAL)" if "--partial" in args else "SUBMISSION BUILT (COMPLETE)"
+            assert built in proc.stdout, f"{stmt!r}: no {built!r} line: {proc.stdout[-300:]}"
         assert proc.returncode == 0, f"{stmt!r} exited {proc.returncode}: {proc.stdout[-300:]}{proc.stderr[:300]}"
     assert executed, f"block {block['n']} is marked run but executed no command"
+
+
+def test_readme_partial_submission_builds_on_a_keyed_release(tmp_path):
+    """The documented --partial submission statement, run as written on a hand-plan HEALTH-S1 release (record
+    keys kept), builds a PARTIAL bundle whose index lists customer_service as missing."""
+    import json
+
+    stmts = [s for b in BLOCKS if b["kind"] == "run" for s in _statements(b["body"])
+             if s.startswith("pets-release submission") and "--partial" in s]
+    assert len(stmts) == 1, "README must document exactly one runnable --partial submission example"
+    rh = _load_run_helpers()
+    kit = rh.build_kit(tmp_path / "kit", rh.coarse_qis)
+    (kit / "data" / "unseen").mkdir()
+    shutil.copy(ROOT / "tests" / "fixtures" / "minikit" / "health" / "ed_visits.csv", kit / "data" / "unseen")
+    out_root = tmp_path / "out"
+    env = rh.env({"PETS_KIT": str(kit)})
+    pre = subprocess.run([sys.executable, "-m", "pets_release", *rh.run_args(kit, out_root / "health-s1")], cwd=ROOT,
+                         env=env, capture_output=True, text=True, encoding="utf-8", check=False)
+    assert pre.returncode == 0, pre.stdout[-300:] + pre.stderr[-300:]
+    _add_submission_inputs(kit)
+    stmt = _expand(stmts[0], env).replace("..\\sinceai-out\\", str(out_root) + os.sep)
+    args = [a.strip('"') for a in shlex.split(stmt, posix=False)][1:]
+    proc = subprocess.run([sys.executable, "-m", "pets_release", *args], cwd=ROOT, env=env,
+                          capture_output=True, text=True, encoding="utf-8", check=False)
+    assert proc.returncode == 0, proc.stdout[-300:] + proc.stderr[-300:]
+    assert "SUBMISSION BUILT (PARTIAL)" in proc.stdout
+    idx = json.loads((out_root / "pets_submission_partial" / "submission_index.json").read_text(encoding="utf-8"))
+    assert idx["complete"] is False and idx["datasetsMissing"] == ["customer_service"]
 
 
 @pytest.mark.parametrize(
