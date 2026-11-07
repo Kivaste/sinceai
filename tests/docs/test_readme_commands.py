@@ -32,8 +32,6 @@ ALLOWED_SKIP_REASONS = (
     "runs-the-whole-test-suite-recursively",
     # the CS-S1 release needs ticket 23 (turn_id check); guarded below
     "cs-s1-run-needs-ticket-23",
-    # the complete submission bundle needs a CS-S1 release; guarded below (run must support CS-S1)
-    "complete-bundle-needs-cs-s1-release",
 )
 SUBCOMMANDS = ("run", "verify", "detect", "dashboard", "submission")
 MARKER = re.compile(r"<!--\s*docs-test:\s*(run|skip|pending)\b([^>]*?)-->")
@@ -217,12 +215,6 @@ def test_block(block, tmp_path):
             assert not (ROOT / "src" / "pets_release" / "checks" / "turn_id").exists(), (
                 "ticket 23 has landed (checks/turn_id): promote the CS-S1 run block to run"
             )
-        if block["arg"] == "reason=complete-bundle-needs-cs-s1-release":
-            from pets_release.run.context import SCENARIO_SPEC
-
-            assert "CS-S1" not in SCENARIO_SPEC, (
-                "pets-release run supports CS-S1 now: promote the complete submission block to run"
-            )
         _transcript(f"SKIP block {block['n']} ({block['arg']}): {first}")
         pytest.skip(f"named reason: {block['arg']}")
     if block["kind"] == "pending":
@@ -260,11 +252,6 @@ def test_block(block, tmp_path):
         _, pre = execute(run_cmd)  # earlier README step: the release the later commands act on
         assert pre.returncode == 0, f"prerequisite run failed: {pre.stdout[-300:]}{pre.stderr[-300:]}"
 
-    unkeyed = []  # #128 precondition: released tables without their record key get no recomputable row map
-    if "pets-release submission" in block["body"]:
-        _add_submission_inputs(kit)  # after the release run, as in tests/submission (CS tables, catalog)
-        unkeyed = _tables_without_record_key(out_root / "health-s1")
-
     executed = 0
     for stmt in _statements(block["body"]):
         m = re.fullmatch(r'\$env:(\w+)\s*=\s*"(.*)"', stmt)
@@ -274,6 +261,13 @@ def test_block(block, tmp_path):
         assert stmt.startswith(("pets-release ", r".\.venv\Scripts\pets-release.exe ")), (
             f"block {block['n']}: unrunnable statement {stmt!r}"
         )
+        unkeyed = []  # #128 precondition: released tables without their record key get no recomputable row map
+        if re.match(r"pets-release submission\b", stmt):
+            _add_submission_inputs(kit)  # after the release run, as in tests/submission (CS tables, catalog)
+            rel = re.search(r"--release\s+\.\.\\sinceai-out\\(\S+)", stmt)
+            assert rel, f"{stmt!r}: no --release under ..\\sinceai-out"
+            unkeyed = _tables_without_record_key(out_root / rel.group(1))
+            assert not (unkeyed and "--plan hand" in block["body"]), f"the --plan hand release dropped {unkeyed}"
         args, proc = execute(stmt)
         executed += 1
         _transcript(f"$ {stmt}\nexit={proc.returncode}\n{proc.stdout[:800]}{proc.stderr[:300]}")
@@ -294,32 +288,64 @@ def test_block(block, tmp_path):
     assert executed, f"block {block['n']} is marked run but executed no command"
 
 
-def test_readme_partial_submission_builds_on_a_keyed_release(tmp_path):
-    """The documented --partial submission statement, run as written on a hand-plan HEALTH-S1 release (record
-    keys kept), builds a PARTIAL bundle whose index lists customer_service as missing."""
+def _readme_complete_submission() -> str:
+    stmts = [s for b in BLOCKS if b["kind"] == "run" for s in _statements(b["body"])
+             if s.startswith("pets-release submission")]
+    assert len(stmts) == 1, "README must document exactly one runnable submission example"
+    assert "--partial" not in stmts[0]
+    return stmts[0]
+
+
+def _run_readme_submission(tmp_path, release_args: list[str]):
     import json
 
-    stmts = [s for b in BLOCKS if b["kind"] == "run" for s in _statements(b["body"])
-             if s.startswith("pets-release submission") and "--partial" in s]
-    assert len(stmts) == 1, "README must document exactly one runnable --partial submission example"
     rh = _load_run_helpers()
-    kit = rh.build_kit(tmp_path / "kit", rh.coarse_qis)
+    kit = rh.build_kit(tmp_path / "kit", rh.grouped_qis)
     (kit / "data" / "unseen").mkdir()
     shutil.copy(ROOT / "tests" / "fixtures" / "minikit" / "health" / "ed_visits.csv", kit / "data" / "unseen")
     out_root = tmp_path / "out"
     env = rh.env({"PETS_KIT": str(kit)})
-    pre = subprocess.run([sys.executable, "-m", "pets_release", *rh.run_args(kit, out_root / "health-s1")], cwd=ROOT,
-                         env=env, capture_output=True, text=True, encoding="utf-8", check=False)
+    stmt = _expand(_readme_complete_submission(), env).replace("..\\sinceai-out\\", str(out_root) + os.sep)
+    args = [a.strip('"') for a in shlex.split(stmt, posix=False)][1:]
+    release = Path(args[args.index("--release") + 1])
+    pre = subprocess.run([sys.executable, "-m", "pets_release", *release_args, "--kit", str(kit), "--out",
+                          str(release), "--created", "2026-11-07T08:00:00Z"], cwd=ROOT, env=env,
+                         capture_output=True, text=True, encoding="utf-8", check=False)
     assert pre.returncode == 0, pre.stdout[-300:] + pre.stderr[-300:]
     _add_submission_inputs(kit)
-    stmt = _expand(stmts[0], env).replace("..\\sinceai-out\\", str(out_root) + os.sep)
-    args = [a.strip('"') for a in shlex.split(stmt, posix=False)][1:]
+    unkeyed = _tables_without_record_key(release)
     proc = subprocess.run([sys.executable, "-m", "pets_release", *args], cwd=ROOT, env=env,
                           capture_output=True, text=True, encoding="utf-8", check=False)
+    idx_path = out_root / "pets_submission" / "submission_index.json"
+    idx = json.loads(idx_path.read_text(encoding="utf-8")) if idx_path.is_file() else None
+    return unkeyed, proc, idx
+
+
+def _assert_complete_d46(proc, idx) -> None:
     assert proc.returncode == 0, proc.stdout[-300:] + proc.stderr[-300:]
-    assert "SUBMISSION BUILT (PARTIAL)" in proc.stdout
-    idx = json.loads((out_root / "pets_submission_partial" / "submission_index.json").read_text(encoding="utf-8"))
-    assert idx["complete"] is False and idx["datasetsMissing"] == ["customer_service"]
+    assert "SUBMISSION BUILT (COMPLETE)" in proc.stdout
+    assert idx["complete"] is True and idx["targetDatasets"] == ["health"] and idx["datasetsMissing"] == []
+    assert [o["scenario"] for o in idx["outOfScope"]] == ["CS-S1"]
+
+
+def test_readme_complete_submission_builds_on_a_hand_plan_release(tmp_path):
+    """The documented complete submission statement, run as written on a --plan hand HEALTH-S1 release (record
+    keys kept), builds a COMPLETE D46 bundle: health present, nothing missing, CS-S1 out of scope."""
+    unkeyed, proc, idx = _run_readme_submission(
+        tmp_path, ["run", "--scenario", "HEALTH-S1", "--plan", "hand"])
+    assert not unkeyed, f"the --plan hand release dropped the record key of {unkeyed}"
+    _assert_complete_d46(proc, idx)
+
+
+def test_readme_complete_submission_on_a_default_plan_release(tmp_path):
+    """The same statement on a default-plan release: while #128 drops a record key it must refuse with exactly
+    rowmap_unverifiable and nothing built (strict xfail naming #128); once the key is kept it must build COMPLETE."""
+    unkeyed, proc, idx = _run_readme_submission(tmp_path, ["run", "--scenario", "HEALTH-S1"])
+    if unkeyed:
+        assert (proc.returncode, proc.stdout.strip()) == (1, "REFUSED: rowmap_unverifiable"), proc.stdout[-300:]
+        assert idx is None
+        pytest.xfail(f"#128: the default HEALTH-S1 release drops the record key of {', '.join(unkeyed)}")
+    _assert_complete_d46(proc, idx)
 
 
 @pytest.mark.parametrize(

@@ -1,7 +1,8 @@
 ﻿"""``pets-release submission --out <dir> --release <dir> [--release <dir> ...] [--kit PATH] [--partial]``.
 
-Exit 0 built, 1 refused (content-free reason code), 2 usage error or unknown state (no key, kit or release).
-A complete bundle (every target scenario) is the default; a missing dataset refuses unless ``--partial``, and a
+Exit 0 built, 1 refused (content-free reason code), 2 usage error or unknown state (no key or kit).
+A complete bundle (every target scenario; D46: HEALTH-S1, with CS-S1 out of scope) is the default; a missing
+dataset (including no --release at all) refuses as ``incomplete`` unless ``--partial``, and a
 partial build says PARTIAL on the built line and names the missing datasets.
 Prints the file list with SHA-256 digests and aggregate scorecard numbers only.
 """
@@ -35,9 +36,6 @@ def main(argv: list[str]) -> int:
     kit_path = a.kit or os.environ.get("PETS_KIT")
     if not kit_path:
         print("pets-release submission: no kit path: pass --kit or set PETS_KIT", file=sys.stderr)
-        return 2
-    if not a.release:
-        print("pets-release submission: pass at least one --release", file=sys.stderr)
         return 2
     try:
         master = MasterKey.from_env()

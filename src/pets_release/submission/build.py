@@ -34,7 +34,10 @@ CS_SPANS_FILE = "customer_service_eval_spans.jsonl"
 INDEX_FILE = "scoring_index.json"  # in <out>.scoring/: every file digest and the scorecard summaries
 # The one root index of the bundle (the wizard's stage 5 reads it): complete or partial, present and missing parts.
 BUNDLE_INDEX_FILE = "submission_index.json"
-TARGET_SCENARIOS = ("CS-S1", "HEALTH-S1")  # a complete bundle holds a verified release of each (spec #1)
+# D46: CS-S1 is dropped; a complete bundle holds a verified HEALTH-S1 release plus the root files (the CS eval
+# exports still ship, gated under D37). The out-of-scope part is an index field, not prose only.
+TARGET_SCENARIOS = ("HEALTH-S1",)
+OUT_OF_SCOPE = ({"scenario": "CS-S1", "dataset": "customer_service", "status": "deferred", "decision": "D46"},)
 ROOT_FILES = (CS_REDACTED_FILE, CS_SPANS_FILE, UNSEEN_FILE)
 
 
@@ -146,16 +149,18 @@ def build_submission(*, kit: Kit, releases: Sequence, out, master: MasterKey, pa
     """Build the submission at ``out`` (and ``<out>.scoring/`` with scorecard output and the index) or raise
     SubmissionRefused. ``scorecard`` replaces the out-of-process evaluator (tests only; the CLI never passes it).
 
-    Complete is the default: every target scenario's dataset must be supplied, else ``incomplete`` (with
-    ``missing``) and nothing is written. ``partial=True`` builds without the missing datasets; the bundle-root
-    index then says ``complete: false`` and lists them."""
+    Complete is the default: every target scenario's dataset (D46: HEALTH-S1 only) must be supplied, else
+    ``incomplete`` (with ``missing``) and nothing is written. ``partial=True`` builds without the missing datasets;
+    the bundle-root index then says ``complete: false`` and lists them. CS-S1 is recorded in ``outOfScope``."""
     out = Path(out).absolute()
     scoring = scoring_dir(out)
     guards.refuse_inside_public_repo(out)
     if out.exists() or scoring.exists():
         raise SubmissionRefused("out_exists")
     if not releases:
-        raise SubmissionRefused("no_release")
+        if partial:
+            raise SubmissionRefused("no_release")
+        raise SubmissionRefused("incomplete", missing=target_datasets())
     scorecard = scorecard or _default_scorecard()
     parsed = [_read_release(kit, master, Path(r)) for r in releases]
     if len({r.dataset for r in parsed}) != len(parsed):
@@ -176,7 +181,8 @@ def build_submission(*, kit: Kit, releases: Sequence, out, master: MasterKey, pa
     sbuild = Path(tempfile.mkdtemp(prefix=f".{out.name}.scoring-build-", dir=out.parent))
     try:
         bundle_index = {"complete": not missing, "targetDatasets": list(targets), "datasetsPresent": present,
-                        "datasetsMissing": missing, "rootFiles": sorted(ROOT_FILES),
+                        "datasetsMissing": missing, "outOfScope": [dict(o) for o in OUT_OF_SCOPE],
+                        "rootFiles": sorted(ROOT_FILES),
                         "customerServiceEval": cs_counts}
         files: dict[str, bytes] = {UNSEEN_FILE: labels, CS_REDACTED_FILE: redacted, CS_SPANS_FILE: spans,
                                    BUNDLE_INDEX_FILE: canonical_bytes(bundle_index)}

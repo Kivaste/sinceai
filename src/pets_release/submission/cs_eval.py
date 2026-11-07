@@ -153,6 +153,8 @@ def masking_effect(kit: Kit, turns, convs, passes) -> dict:
         return _not_measured(f"masking could not be replayed on the held-out frame ({e.code})")
     except ModuleNotFoundError:
         return _not_measured("the pinned scorer (pets_eval) is not importable")
+    if any(not isinstance(m[k], float) for m in (before, after) for k in m):  # `measured` means every number is real
+        return _not_measured("a held-out metric is undefined (the scorer returned no number)")
     return {"status": "measured", "frame": EFFECT_FRAME, "metric": "exact-match micro, all labels",
             "conversations": len({frame.conversation_of[t] for t in held}), "turns": len(held),
             "maskedTurns": gate["maskedTurns"], "before": before, "after": after}

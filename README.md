@@ -121,19 +121,17 @@ pets-release dashboard ..\sinceai-out\health-s1 --out ..\sinceai-out\health-s1-d
 
 ### 5. Submission bundle
 
-The bundle goes to `..\sinceai-out\pets_submission`, outside every repo. A complete bundle (both target scenarios) is the default:
+The bundle goes to `..\sinceai-out\pets_submission`, outside every repo. A complete bundle is the default. Under D46 it holds a verified HEALTH-S1 release (tables, validated row maps, manifest), the unseen labels and the gated CS eval redactions and spans (D37). CS-S1 is out of scope (deferred, D46). `submission_index.json` records that in `outOfScope`, and the packager neither needs nor accepts a CS-S1 release.
 
-<!-- docs-test: skip reason=complete-bundle-needs-cs-s1-release -->
-```powershell
-pets-release submission --out ..\sinceai-out\pets_submission --release ..\sinceai-out\health-s1 --release ..\sinceai-out\cs-s1 --kit "$env:PETS_KIT"
-```
-
-Without a CS-S1 release it refuses (`REFUSED: incomplete`). A partial bundle needs `--partial`; it prints `SUBMISSION BUILT (PARTIAL)` and lists the missing datasets in `submission_index.json`:
+Until #128 lands, the default search plan can drop a table's record key, and the packager then refuses (`REFUSED: rowmap_unverifiable`). Build the release you feed to the packager with `--plan hand`:
 
 <!-- docs-test: run -->
 ```powershell
-pets-release submission --partial --out ..\sinceai-out\pets_submission_partial --release ..\sinceai-out\health-s1 --kit "$env:PETS_KIT"
+pets-release run --scenario HEALTH-S1 --plan hand --out ..\sinceai-out\health-s1-hand --created 2026-11-07T08:00:00Z --kit "$env:PETS_KIT"
+pets-release submission --out ..\sinceai-out\pets_submission --release ..\sinceai-out\health-s1-hand --kit "$env:PETS_KIT"
 ```
+
+It prints `SUBMISSION BUILT (COMPLETE)`. Without a HEALTH-S1 release (`REFUSED: incomplete`), or without the kit's unseen or CS eval exports, it refuses and writes nothing. `--partial` must be passed explicitly to build without a missing target dataset; such a build prints `SUBMISSION BUILT (PARTIAL)` and lists the missing datasets in `submission_index.json`. With HEALTH-S1 as the only target, `--partial` with no release still refuses (`REFUSED: no_release`).
 
 ## Where row maps go
 

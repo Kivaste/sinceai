@@ -52,7 +52,8 @@ class FakeScorecard:
 
 
 def build(pair, out, *, scorecard=None, releases=None, **kw):
-    """The synthetic world has no CS-S1 release, so these builds are partial (completeness: test_completeness_cli)."""
+    """``partial`` defaults to True here so the no-release refusal stays ``no_release`` (completeness:
+    test_completeness_cli)."""
     kit, rel = pair
     kw.setdefault("partial", True)
     return build_submission(kit=Kit(kit), releases=releases if releases is not None else [rel], out=out,

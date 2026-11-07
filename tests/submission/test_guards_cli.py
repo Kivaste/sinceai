@@ -96,7 +96,7 @@ def test_cli_usage_errors_exit_2(world, tmp_path):
     assert submission("--out", out, "--release", str(rel), "--kit", str(kit),
                       extra={"PETS_HMAC_KEY": ""}).returncode == 2                      # no key
     assert submission("--out", out, "--release", str(rel)).returncode == 2              # no kit
-    assert submission("--out", out, "--kit", str(kit)).returncode == 2                  # no release
+    # no --release is not a usage error: it refuses as incomplete (D46; test_completeness_cli)
     assert not Path(out).exists()
 
 
