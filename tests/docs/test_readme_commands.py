@@ -33,6 +33,7 @@ ALLOWED_SKIP_REASONS = (
     "measure-wire-needs-full-kit-scorecards",
     "starts-a-long-running-server",
     "pipeline-needs-real-kit-and-secret-store",
+    "evidence-pack-needs-signed-measured-release-and-controller-key",
     # D46: CS-S1 releases are future work, not an implicit passing demo step.
     "cs-s1-deferred-d46",
 )
@@ -123,6 +124,16 @@ def test_pipeline_example_has_named_skip_and_fail_closed_commands():
     assert "actions/upload-artifact@v4" in example and "/privacy_manifest.json" in example
     assert "continue-on-error" not in example and "always()" not in example
     assert "verified locally with the same commands" in section
+
+
+def test_evidence_pack_example_names_its_signed_release_dependency():
+    """CLI ledger seam: the measured-release example cannot count a named skip as a passing run."""
+    examples = [b for b in BLOCKS if "evidence-pack " in b["body"]]
+    assert len(examples) == 1
+    assert (examples[0]["kind"], examples[0]["arg"]) == (
+        "skip", "reason=evidence-pack-needs-signed-measured-release-and-controller-key")
+    assert r".\.venv\Scripts\pets-release.exe evidence-pack ..\sinceai-out\health-s1-measured" in examples[0]["body"]
+    assert "--out" in examples[0]["body"]
 
 
 def test_health_examples_cover_default_search_recipient_and_hand_plan():
