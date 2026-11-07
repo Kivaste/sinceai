@@ -12,8 +12,8 @@ if os.environ.get("PETS_OFFLINE") == "1":
         def __init__(self, *a, **k):
             _deny()
 
-    _s.socket = _Blocked
-    _socket.socket = _Blocked
+    _s.socket = _s.SocketType = _Blocked
+    _socket.socket = _socket.SocketType = _Blocked
     for _n in ("create_connection", "create_server", "getaddrinfo", "gethostbyname", "gethostbyname_ex",
                "socketpair", "fromfd", "gethostbyaddr", "getnameinfo"):
         setattr(_s, _n, _deny)

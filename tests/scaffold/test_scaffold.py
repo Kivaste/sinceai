@@ -31,6 +31,37 @@ def run_args(kit, **over):
     return ["run"] + [x for kv in a.items() for x in kv if x is not None]
 
 
+DISPATCH = (
+    "import sys, json\n"
+    "from pets_release import cli\n"
+    "cli.COMMAND_PACKAGES.update(json.loads(sys.argv[1]))\n"
+    "raise SystemExit(cli.main(json.loads(sys.argv[2])))\n"
+)
+
+
+def dispatch(argv, overrides, env=None, extra_path=None):
+    """Run cli.main in a child with the dispatch table overridden (never relies on real subcommands)."""
+    import json
+
+    e = dict(env or {})
+    if extra_path:
+        e["PYTHONPATH"] = f"{ROOT / 'src'};{extra_path}"
+    return subprocess.run(
+        [PYTHON, "-c", DISPATCH, json.dumps(overrides), json.dumps(argv)],
+        cwd=ROOT, env=cli_env(e), capture_output=True, text=True, check=False,
+    )
+
+
+def make_plug(tmp_path, body="def main(argv):\n    print('PLUGGED')\n    return 0\n", name="pets_release_plug"):
+    pkg = tmp_path / "plug" / name
+    pkg.mkdir(parents=True)
+    (pkg / "__init__.py").write_text("")
+    (pkg / "cli.py").write_text(body)
+    return name, str(tmp_path / "plug")
+
+
+MISSING = {c: "pets_release_nonexistent_pkg" for c in ("run", "verify", "detect", "dashboard", "submission")}
+
 def test_help_lists_commands(cli):
     r = cli("--help")
     assert r.returncode == 0
@@ -38,10 +69,29 @@ def test_help_lists_commands(cli):
         assert name in r.stdout
 
 
-@pytest.mark.parametrize("name", ["verify", "detect", "dashboard", "submission"])
-def test_unimplemented_exits_2(cli, name):
-    assert cli(name).returncode == 2
+@pytest.mark.parametrize("name", ["run", "verify", "detect", "dashboard", "submission"])
+def test_unimplemented_exits_2(make_kit, name):
+    argv = run_args(make_kit()) if name == "run" else [name]
+    r = dispatch(argv, MISSING, {"PETS_HMAC_KEY": KEY})
+    assert r.returncode == 2 and "not implemented" in r.stderr.lower()
 
+
+@pytest.mark.parametrize("ret", ["None", "'0'", "True", "1.0"])
+def test_non_int_return_fails_closed(tmp_path, ret):
+    name, path = make_plug(tmp_path, f"def main(argv):\n    return {ret}\n")
+    r = dispatch(["verify"], {"verify": name}, extra_path=path)
+    assert r.returncode == 2
+
+
+def test_int_return_passes_through(tmp_path):
+    name, path = make_plug(tmp_path, "def main(argv):\n    return 7\n")
+    assert dispatch(["verify"], {"verify": name}, extra_path=path).returncode == 7
+
+
+def test_import_error_inside_plugin_is_not_swallowed(tmp_path):
+    name, path = make_plug(tmp_path, "import not_a_real_dependency_xyz\ndef main(argv):\n    return 0\n")
+    r = dispatch(["verify"], {"verify": name}, extra_path=path)
+    assert r.returncode != 0 and "not implemented" not in r.stderr.lower()
 
 def test_no_command_exits_2(cli):
     assert cli().returncode == 2
@@ -57,15 +107,13 @@ def test_run_without_created_exits_2(cli, make_kit):
     assert "created" in r.stderr.lower()
 
 
-def test_run_source_date_epoch_accepted_past_preflight(cli, make_kit):
-    kit = make_kit()
-    args = run_args(kit)
+def test_run_source_date_epoch_accepted_past_preflight(tmp_path, make_kit):
+    name, path = make_plug(tmp_path)
+    args = run_args(make_kit())
     i = args.index("--created")
     del args[i : i + 2]
-    r = cli(*args, env={"PETS_HMAC_KEY": KEY, "SOURCE_DATE_EPOCH": "0"})
-    assert "created" not in r.stderr.lower()
-    assert "not implemented" in r.stderr.lower()
-
+    r = dispatch(args, {"run": name}, {"PETS_HMAC_KEY": KEY, "SOURCE_DATE_EPOCH": "0"}, path)
+    assert r.returncode == 0 and "PLUGGED" in r.stdout
 
 def test_short_key_exits_2(cli, make_kit):
     r = cli(*run_args(make_kit()), env={"PETS_HMAC_KEY": "k" * 31})
@@ -86,19 +134,20 @@ def test_missing_kit_exits_2(cli, tmp_path):
     assert r.returncode == 2
 
 
-def test_kit_from_env(cli, make_kit):
+def test_kit_from_env(tmp_path, make_kit):
+    name, path = make_plug(tmp_path)
     kit = make_kit()
     args = run_args(kit)
     i = args.index("--kit")
     del args[i : i + 2]
-    r = cli(*args, env={"PETS_HMAC_KEY": KEY, "PETS_KIT": str(kit)})
-    assert "not implemented" in r.stderr.lower()
+    r = dispatch(args, {"run": name}, {"PETS_HMAC_KEY": KEY, "PETS_KIT": str(kit)}, path)
+    assert r.returncode == 0 and "PLUGGED" in r.stdout
 
 
-def test_valid_run_reaches_missing_module(cli, make_kit):
-    r = cli(*run_args(make_kit()), env={"PETS_HMAC_KEY": KEY})
-    assert r.returncode == 2 and "not implemented" in r.stderr.lower()
-
+def test_valid_run_reaches_plugin(tmp_path, make_kit):
+    name, path = make_plug(tmp_path)
+    r = dispatch(run_args(make_kit()), {"run": name}, {"PETS_HMAC_KEY": KEY}, path)
+    assert r.returncode == 0 and "PLUGGED" in r.stdout
 
 def test_python_dash_m_and_entry(cli):
     assert cli("--help", module="pets_release").returncode == 0
@@ -173,6 +222,7 @@ def test_never_opens_truth_or_field_catalog(tmp_path, monkeypatch):
     (root / "truth").mkdir()
     (root / "truth" / "health.csv").write_text("x\n1\n")
     (root / "metadata" / "field_catalog.csv").write_text("x\n1\n")
+    (root / "data" / "health" / "field_catalog.csv").write_text("x\n1\n")
     (root / "data" / "truth").mkdir()
     (root / "data" / "truth" / "t.csv").write_text("x\n1\n")
     opened = []
@@ -290,3 +340,93 @@ def test_cli_main_guards_plugged_module(tmp_path):
     r = _run(code, {"PYTHONPATH": f"{ROOT / 'src'};{plug.parent}"})
     assert r.stdout.split() == ["BLOCKED", "BLOCKED"], r.stderr
     assert r.returncode == 0
+
+
+def test_guard_blocks_sockettype_and_helpers():
+    code = (
+        "from pets_release.offline import install\n"
+        "install()\n"
+        "import socket, _socket\n"
+        "fs = [lambda: socket.SocketType(), lambda: _socket.SocketType(), lambda: socket.socketpair(),\n"
+        "      lambda: socket.fromfd(0, 2, 1), lambda: _socket.socket(), lambda: socket.create_server(('127.0.0.1', 0))]\n"
+        "for f in fs:\n"
+        "    try: f()\n"
+        "    except Exception: continue\n"
+        "    raise SystemExit(1)\n"
+    )
+    assert _run(code).returncode == 0
+
+
+def test_plain_python_child_blocked_documented_guarantee():
+    """Documented guarantee: plain `python` children are blocked; `python -I` is a documented residual."""
+    from pets_release import offline
+
+    assert "-I" in offline.__doc__
+    code = (
+        "from pets_release.offline import install\ninstall()\n"
+        "import subprocess, sys\n"
+        f"p = subprocess.run([sys.executable, '-c', {PROBE!r}], capture_output=True, text=True)\n"
+        "sys.exit(0 if p.stdout.strip() == 'BLOCKED' else 1)\n"
+    )
+    assert _run(code).returncode == 0
+
+
+def _link(link: Path, target: Path) -> None:
+    import os
+
+    try:
+        os.symlink(target, link, target_is_directory=True)
+        return
+    except (OSError, NotImplementedError):
+        pass
+    if sys.platform == "win32":
+        r = subprocess.run(["cmd", "/c", "mklink", "/J", str(link), str(target)], capture_output=True)
+        if r.returncode == 0:
+            return
+    pytest.skip("cannot create symlink or junction here")
+
+
+def test_junction_into_truth_is_refused(tmp_path):
+    import shutil
+
+    from pets_release.kit import Kit, KitError
+
+    root = write_minikit(tmp_path / "kit")
+    (root / "truth" / "health").mkdir(parents=True)
+    (root / "truth" / "health" / "secret.csv").write_text("x\n1\n")
+    shutil.rmtree(root / "data" / "health")
+    _link(root / "data" / "health", root / "truth" / "health")
+    kit = Kit(root)
+    for f in (lambda: kit.load_table("health", "secret"), lambda: kit.load_dataset("health"),
+              lambda: kit.input_digests("health"), lambda: kit.table_names("health")):
+        with pytest.raises(KitError):
+            f()
+
+
+def test_junction_outside_data_tree_is_refused(tmp_path):
+    import shutil
+
+    from pets_release.kit import Kit, KitError
+
+    root = write_minikit(tmp_path / "kit")
+    outside = tmp_path / "elsewhere"
+    outside.mkdir()
+    (outside / "t.csv").write_text("x\n1\n")
+    shutil.rmtree(root / "data" / "health")
+    _link(root / "data" / "health", outside)
+    with pytest.raises(KitError):
+        Kit(root).load_table("health", "t")
+
+
+def test_data_dir_junction_to_truth_is_refused(tmp_path):
+    import shutil
+
+    from pets_release.kit import Kit, KitError
+
+    root = write_minikit(tmp_path / "kit")
+    (root / "truth").mkdir()
+    shutil.copytree(root / "data" / "health", root / "truth" / "health")
+    shutil.rmtree(root / "data")
+    _link(root / "data", root / "truth")
+    with pytest.raises(KitError):
+        Kit(root).load_table("health", "ed_visits")

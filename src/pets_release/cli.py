@@ -159,7 +159,11 @@ def main(argv: list[str] | None = None) -> int:
                 raise
             print(f"pets-release {command}: not implemented", file=sys.stderr)
             return 2
-        return int(module.main(rest) or 0)
+        code = module.main(rest)
+        if type(code) is not int:
+            print(f"pets-release {command}: handler returned {type(code).__name__}, not an int", file=sys.stderr)
+            return 2
+        return code
     except UsageError as e:
         print(f"pets-release {command}: {e}", file=sys.stderr)
         return 2

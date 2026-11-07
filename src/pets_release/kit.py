@@ -34,12 +34,31 @@ class Kit:
         self.root = Path(root)
         if not self.root.is_dir():
             raise KitError(f"kit path is not a directory: {self.root}")
+        self._real_root = self.root.resolve(strict=True)
+
+    def _resolve(self, path: Path, base: Path | None = None) -> Path:
+        """Resolve links/junctions, then require the destination to sit under `base` (default: the kit)
+        and to pass through no `truth/` directory and no field catalog."""
+        try:
+            real = path.resolve(strict=True)
+        except (OSError, RuntimeError) as e:
+            raise KitError(f"cannot resolve {path.name!r}") from e
+        base = base if base is not None else self._real_root
+        try:
+            real.relative_to(base)
+            parts = [x.lower() for x in real.relative_to(self._real_root).parts]
+        except ValueError as e:
+            raise KitError(f"{path.name!r} resolves outside {base.name!r}") from e
+        if any(x in FORBIDDEN_DATASETS or Path(x).stem in FORBIDDEN_TABLES for x in parts):
+            raise KitError(f"{path.name!r} resolves into a forbidden location")
+        return real
 
     # scenarios
     def scenarios(self) -> list[dict]:
         path = self.root / "metadata" / "scenarios.json"
         if not path.is_file():
             raise KitError("kit has no metadata/scenarios.json")
+        path = self._resolve(path)
         data = json.loads(path.read_text(encoding="utf-8"))
         if not isinstance(data, list):
             raise KitError("scenarios.json is not a list")
@@ -55,20 +74,28 @@ class Kit:
     # tables
     def _dataset_dir(self, dataset: str) -> Path:
         _check_name("dataset", dataset, FORBIDDEN_DATASETS)
-        d = self.root / "data" / dataset
+        data = self._resolve(self.root / "data")
+        if data != self._real_root / "data":
+            raise KitError("data/ must be a real directory inside the kit")
+        d = data / dataset
         if not d.is_dir():
             raise KitError(f"unknown dataset: {dataset!r}")
+        if self._resolve(d, data) != d:
+            raise KitError(f"dataset {dataset!r} must be a real directory under data/")
         return d
 
     def table_names(self, dataset: str) -> list[str]:
-        return sorted(p.stem for p in self._dataset_dir(dataset).glob("*.csv"))
+        return sorted(
+            p.stem for p in self._dataset_dir(dataset).glob("*.csv") if p.stem.lower() not in FORBIDDEN_TABLES
+        )
 
     def _table_path(self, dataset: str, table: str) -> Path:
         _check_name("table", table, FORBIDDEN_TABLES)
-        path = self._dataset_dir(dataset) / f"{table}.csv"
+        d = self._dataset_dir(dataset)
+        path = d / f"{table}.csv"
         if not path.is_file():
             raise KitError(f"unknown table: {dataset}/{table}")
-        return path
+        return self._resolve(path, d)
 
     def load_table(self, dataset: str, table: str) -> pd.DataFrame:
         """All columns are strings; empty cells stay '' (no NaN, no type inference)."""
@@ -89,4 +116,4 @@ class Kit:
         path = self.root / "docs" / "DATA_DICTIONARY.md"
         if not path.is_file():
             raise KitError("kit has no docs/DATA_DICTIONARY.md")
-        return path.read_text(encoding="utf-8")
+        return self._resolve(path).read_text(encoding="utf-8")

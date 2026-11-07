@@ -1,4 +1,10 @@
-"""Offline guard: block network sockets in this process and every subprocess it starts."""
+"""Offline guard: block network sockets in this process and every subprocess it starts.
+
+Guarantee: this process, and any plain `python ...` child (which honours PYTHONPATH and so loads the
+`sitecustomize` hook), cannot create sockets. Residual risk: a child started with `python -I` or `-S`
+ignores PYTHONPATH/site hooks and is NOT blocked. Our own launches (e.g. the scorecard subprocess)
+must therefore never use -I or -S. Non-Python children are out of scope for this guard.
+"""
 
 from __future__ import annotations
 
