@@ -36,6 +36,7 @@ from pets_release.ladders import (
 )
 from pets_release.ladders.rungs import at_least_as_coarse
 from pets_release.manifest import canonical_digest
+from pets_release.policy import k_target
 
 _NAME = re.compile(r"^[A-Za-z0-9_]{1,64}$")
 _FILE = re.compile(r"^[A-Za-z0-9_]{1,64}\.csv$")
@@ -130,21 +131,14 @@ def generate(policy: Any, plan: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
         "qi": sorted(qi, key=lambda r: (r["table"], r["column"])),
         "tokens": sorted(tokens, key=lambda r: (r["table"], r["column"])),
     }
-    k = _k_target(policy)
+    try:
+        k = k_target(policy)
+    except ValueError:
+        raise ContractError("policy: k target invalid") from None
     if k is not None:
         contract["k"] = k
     _validate_contract(contract)
     return contract
-
-
-def _k_target(policy: Any) -> int | None:
-    """The scenario's k-anonymity target (int >= 2), or None when the policy has none."""
-    targets = [t for t in policy.privacy_targets if t.get("kind") == "k_anonymity"]
-    if not targets:
-        return None
-    if len(targets) > 1 or not _valid_k(targets[0].get("k")):
-        raise ContractError("policy: k target invalid")
-    return targets[0]["k"]
 
 
 def _valid_k(value: Any) -> bool:
