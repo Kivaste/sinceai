@@ -11,8 +11,10 @@ import re
 
 from jsonschema import Draft202012Validator
 
+from pets_release.llm.alignment import PACKAGED
 from pets_release.llm.dictionary import DataDictionary
 from pets_release.llm.vocabulary import DETAIL_LEVELS, TRUST_LEVELS, vocabulary_for
+from pets_release.policy import get_policy
 
 SCHEMA_VERSION = "1"
 _TEXT = {"type": "string", "minLength": 1, "maxLength": 300}
@@ -37,6 +39,7 @@ MODEL_OUTPUT_SCHEMA = {
         },
         "fieldsNeeded": {
             "type": "array",
+            "minItems": 1,
             "maxItems": 400,
             "items": {
                 "type": "object",
@@ -125,7 +128,11 @@ def build_draft(output: dict, dictionary: DataDictionary, *, request: str, model
         if pc["id"] in seen_checks:
             raise DraftRejected(f"purposeChecks[{i}] repeats an analysis type")
         seen_checks.add(pc["id"])
-    known = dictionary.columns()
+    known = {(t.name, c.name): c for t in dictionary.tables for c in t.columns}
+    # Reuse the production classification as well as the dictionary role: weaker metadata must not
+    # permit raw identifiers that the packaged policy already protects. Do not maintain a column list here.
+    direct = {key for sid in PACKAGED if get_policy(sid).dataset == dictionary.dataset
+              for key in get_policy(sid).direct_identifiers}
     seen_fields: set[tuple[str, str]] = set()
     for i, f in enumerate(output["fieldsNeeded"]):
         key = (f["table"], f["column"])
@@ -133,6 +140,10 @@ def build_draft(output: dict, dictionary: DataDictionary, *, request: str, model
             raise DraftRejected(f"fieldsNeeded[{i}] names a table or column that is not in the data dictionary")
         if key in seen_fields:
             raise DraftRejected(f"fieldsNeeded[{i}] repeats a field")
+        if (known[key].role == "direct_identifier" or key in direct) and f["detail"] != "pseudonymised":
+            raise DraftRejected(f"fieldsNeeded[{i}] requests an unsafe detail for a direct identifier")
+        if known[key].role == "free_text" and f["detail"] != "redacted":
+            raise DraftRejected(f"fieldsNeeded[{i}] requests an unsafe detail for free text")
         seen_fields.add(key)
     draft = {
         **output,
