@@ -70,7 +70,7 @@ with response:
 
 @contextmanager
 def running(tmp_path, *, extra_env=None, edit=coarse_qis, probe=False, verifier_unavailable=False,
-            remove_refusal_report=False, record_commands=False, launch_extra=()):
+            remove_refusal_report=False, record_commands=False, launch_extra=(), swap_during_verify=False):
     kit = build_kit(tmp_path / "kit", edit)
     env = server_env()
     env.update(extra_env or {})
@@ -98,19 +98,35 @@ sys.argv = {command[2:]!r}
 runpy.run_module("pets_release.ui", run_name="__main__")
 '''
         command = [sys.executable, "-c", code]
-    if verifier_unavailable or remove_refusal_report or record_commands:
+    if verifier_unavailable or remove_refusal_report or record_commands or swap_during_verify:
         # Fault only at the external-process boundary, after a real successful run.
         # Never replace a production check with a passing stub.
         code = f'''
 import json, pathlib, runpy, subprocess, sys
 original = subprocess.run
+manifest_path = pathlib.Path({str(tmp_path / 'out' / 'run-1' / 'privacy_manifest.json')!r})
+swap = {{}}
 def external_process(command, *args, **kwargs):
     if {record_commands!r}:
         with pathlib.Path({str(tmp_path / 'commands.jsonl')!r}).open("a") as handle:
             handle.write(json.dumps(command) + "\\n")
     if {verifier_unavailable!r} and len(command) > 3 and command[3] == "verify" and pathlib.Path({str(tmp_path / 'verifier-unavailable')!r}).exists():
         raise FileNotFoundError("synthetic unavailable executable")
+    if swap and len(command) > 3 and command[3] == "verify":
+        # A concurrent writer restores the signed manifest A only while a verifier runs.
+        manifest_path.write_bytes(swap["A"])
+        try:
+            return original(command, *args, **kwargs)
+        finally:
+            manifest_path.write_bytes(swap["B"])
     result = original(command, *args, **kwargs)
+    if {swap_during_verify!r} and len(command) > 3 and command[3] == "run" and result.returncode == 0:
+        from pets_release.manifest import canonical_bytes
+        swap["A"] = manifest_path.read_bytes()
+        planted = json.loads(swap["A"])
+        planted["residualRisks"][0]["description"] = "Synthetic planted claim"
+        swap["B"] = canonical_bytes(planted)
+        manifest_path.write_bytes(swap["B"])
     if {remove_refusal_report!r} and len(command) > 3 and command[3] == "run" and result.returncode == 1:
         pathlib.Path({str(tmp_path / 'out' / 'run-1.scoring' / 'refusal_report.json')!r}).unlink()
     return result
@@ -676,6 +692,23 @@ def test_planted_schema_valid_manifest_claim_is_not_rendered_as_dashboard(tmp_pa
         status, body = request(url, "/dashboard")
         assert status == 422
         assert "Synthetic planted claim" not in body
+
+
+def test_manifest_swapped_back_only_while_verifiers_run_publishes_no_proof(tmp_path):
+    """HTTP + real CLI seam: A->B->A writer. The live folder holds an unsigned manifest B except
+    while a verifier subprocess runs (then the signed A). Proof must come only from the bytes
+    that both tiers verified, so B's claims are never published as RELEASED."""
+    with running(tmp_path, swap_during_verify=True) as (_, url, _, out):
+        assert request(url, "/api/run", data={"scenario": "HEALTH-S1"})[0] == 202
+        report = result(url)
+        live = (out / "run-1" / "privacy_manifest.json").read_bytes()
+        assert b"Synthetic planted claim" in live, "fixture must leave B in the live folder"
+        from pets_release.manifest import validate_manifest_file
+        assert validate_manifest_file(out / "run-1") == [], "B must be schema-valid: only the signature differs"
+        assert report["status"] != "RELEASED"
+        assert "gate" not in report and "residualRisks" not in report
+        assert "Synthetic planted claim" not in request(url, "/api/result")[1]
+        assert "Synthetic planted claim" not in request(url, "/demo/limitations")[1]
 
 
 def test_gate_fraction_counts_only_pass_and_shows_not_applicable_separately(tmp_path):
