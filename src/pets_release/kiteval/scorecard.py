@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 
 import pandas as pd
+from pets_eval import attacks as kit_attacks
 from pets_eval import io as kit_io
 from pets_eval import scorecard as kit_scorecard
 
@@ -65,7 +66,12 @@ def _expected_sections(root: Path, dataset: str, scen: dict, catalog, tables: di
                 attacks = sorted({s["adversary"] for s in chosen})
             else:
                 attacks = sorted(adversaries)
-            linkage = {"attacks": attacks}
+            # adversaries whose every selected spec needs only columns this release no longer has
+            # (the kit's own qis_from_spec decides); only these may report "no targets, no QIs used"
+            no_cols = sorted(a for a in attacks if all(
+                not kit_attacks.qis_from_spec(s["qis"], release.get(name, ())) for s in specs if s["adversary"] == a)
+                and any(s["adversary"] == a for s in specs))
+            linkage = {"attacks": attacks, "no_attack_columns": no_cols}
         out[name] = {
             "free_text": sorted(c for c in text if c in cols and kit_io.spans_path(root, dataset, name, c).exists()),
             "linkage": linkage,
