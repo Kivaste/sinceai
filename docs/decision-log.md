@@ -373,3 +373,48 @@ CS-S1 chain (23 + #53/#54/#56/#92, then #63) -> 29 packager (#30) -> pets_submis
 - A real-kit run of both releases on the integration tip: needed for the 14:00 go and for section 4.
 
 - **Note:** this status entry is appended at the bottom. The brief asks for status at the top, but the log header and AGENTS.md › Orchestration say append-only, add at the bottom. AGENTS.md wins.
+
+### Sat 12:55 - orchestrator hand-over; CS-S1 passes the gate without the D29 fallback; merges #98, #105; tier-1 pass-2 wave dispatched
+
+- **When:** Sat 12:00-12:55 EET
+- **Decision:**
+  1. New orchestrator session (ses_e4a8c046...) claimed the heartbeat at 12:00. The previous one (ses_e4aaa374...) was interrupted and sent a queued retirement notice; it replied "retired" and listed its open items, all picked up below.
+  2. CS-S1: the chain owner (ses_e4aac068, Opus) reports the real-kit CS-S1 release passes the strict gate at d796170 (39 pass, 2 not applicable, 0 hits), with both verify tiers and the scorecard run. The D29 turn-withholding fallback was not needed (0 turns withheld). The two #53 fail-opens are fixed at d796170; #56's applicability blocker was fixed red-to-green afterwards, and the owner is re-merging integration. Its done-report and the four round-1 reviews are still to come.
+  3. Merges: train 8 merged #98 at 10c2ba7 (fast tier exit 0, 2388 passed, 5 skipped; slow tier exit 0, 123 passed). Train 10 merged #105 at 9d139b3 (fast tier exit 0, 2405 passed, 5 skipped; slow tier exit 0, 123 passed). Closed on check-done-report exit 0: #102, #98, #105, and #62, #71, #84 (Sol evidence session produced head-bound mutation reds at 40f7a86; reviews Grok r3 + Sol r3 APPROVE there). #102's posted report uses Unicode arrows, so its close exercised the real gh path.
+  4. Train 9 (#81/#83/#94 at fe2feed) was red: 1 fast-tier failure, the branch's own CSV-read guard flagging 3 reads in tests merged after it branched. Reset, nothing pushed. This is the third hit of the stale-branch class for that guard; the guard itself is the deterministic check and the merger caught it, so no new guard. Round 3 (9bbad25) fixed the reads and added a risks-order regression test (a mutation probe showed the sort was untested). Grok r3 APPROVE; Sol r3 CHANGES REQUIRED on evidence binding only (head-bound affected-tests log and real run); an evidence session is producing both.
+  5. Planning-session steer (12:38): dispatched the rolling-review pass-2 must-fix wave, all claude-agent/opus, four fixers grouped by owned files: #111+#112 (ticket/fu111-suppression), #110+#113 (ticket/fu110-scorecard-k, branched from fu81's head because both edit kiteval/report.py and measure/wire.py; Merge after #81 and #26), #114 (ticket/fu114-manifest-json), #109 (ticket/fu109-rung-sacrifice; the same owner takes #106 after #26 merges). #111 and #109 touch run/pipeline.py and verify/core.py, which ticket 23 also edits, so both merge after #24. #108 dispatched on Sol, branched from fu81 (same test file), Merge after #81. #115 not dispatched: blocked by #112 (minimiser/risk.py) and #81 (tests/verify/test_full_real.py), native edges added.
+  6. D33 accepted (main 65b8c6d); #106 blocked by #26 and #109 (native edges).
+  7. Spec question from the steer: the 83 `text.health` hits on HEALTH-S1 at 8e93dcf all come from `lab_results.test_name` (purpose-permitted per spec #1's per-column table; no free-text column released) and are disclosed in residualRisks with count and denominator. Not a must-fix.
+  8. #30 gained two acceptance criteria: output exactly to C:\Users\kivas\AI\sinceai-out\pets_submission, built after the tier-1 wave merges, build revision logged.
+  9. Process defect: `demo-8e93dcf\commands.txt` holds result lines only, so it is not a runnable recipe. Added `C:\Users\kivas\AI\sinceai-out\health-s1-evidence.ps1` (outside the repo; pinned clean head, kit path, throwaway local key never printed, logs every exit code and the toolRevision match) and sent the correction to the four fixers.
+- **Why:** Single orchestrator; tier-1 fail-closed fixes first (brief v3 section 2.1); close only on evidence (D31); each ticket owns its files.
+- **Evidence:** merger sessions ses_e4a8bbed, ses_e4a8542c (red), ses_e4a71498; reviews ses_e4a782e2, ses_e4a780de, ses_e4a7121e, ses_e4a71026; evidence sessions ses_e4a8b4c8, ses_e4a83ce5; close comments on #62, #71, #84, #98, #102, #105.
+
+### Sat 12:55 - STATUS
+
+#### Effective policies (changes only)
+- Brief v3 section 5 (main b775c57): never block the orchestrator turn on long waits while ready work exists; waits are at most 2 minutes.
+- send-to-orchestrator.ps1 defaults to delivery=steer (main 44af20e).
+- D33 (#106): lab_results.test_name is a QI with a "CRP vs other" rung; justified non-QI fallback if the cap is still exceeded.
+
+#### Critical path
+CS-S1 chain done-report + 4 reviews (23 + #53/#54/#56/#92) -> merge -> #63 -> 25 search (#26) merge -> 29 packager (#30) on the post-tier-1 revision -> pets_submission at 16:00 -> 14:00 LLM go (both releases gate + verify on the current revision) -> final review per D32 -> fresh proof -> #103 -> PR #95 merge.
+
+#### Blocker owners
+- #24, #53, #54, #56, #92 -> ses_e4aac068 (claude-agent/opus, D29 owner).
+- #26 (25 search) -> ses_e4a8b8d8 (claude-agent/opus), merging the integration tip.
+- #81/#83/#94 -> evidence session ses_e4a61c11 (Sol) at 9bbad25, then Sol Spec delta.
+- #109 -> ses_e4a61e44; #111+#112 -> ses_e4a62268; #110+#113 -> ses_e4a620ac; #114 -> ses_e4a61f43 (all claude-agent/opus).
+- #108 -> ses_e4a61938 (Sol). #97 -> ses_e4aae03f (Sol, inherited).
+- #106 -> #109's owner after #26. #115 -> after #112 and #81. #30, #63, #65, #66, #69, #80, #93, #96 -> wait on #24/#26 (native edges).
+
+#### Latest verified revision
+- 9d139b3 (integration tip, #105): fast tier exit 0, 2405 passed, 5 skipped; slow tier exit 0, 123 passed.
+- Release evidence: 8e93dcf side lane (planning session, 12:01): HEALTH-S1 real-kit run RELEASED, gate 41/41, verify (limited) 37 release-checked + 4 producer-attested, verify --full pass; dashboard C:\Users\kivas\AI\sinceai-out\demo-8e93dcf\health-s1-dashboard.html.
+- CS-S1 real-kit at d796170 (ticket/23-cs-s1, not yet on integration): gate 39 pass + 2 not applicable, both verify tiers run (owner's report).
+
+#### Missing evidence
+- HEALTH-S1 k claims (min k 5, 0 below k) stay unverified until #106 and #109 merge.
+- The CS-S1 done-report and its four round-1 reviews; CS-S1 verify exit codes at the final chain head.
+- No real-kit run of either release on the integration tip 9d139b3.
+- #81/#83/#94: head-bound real run at 9bbad25 (running).

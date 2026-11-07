@@ -352,10 +352,10 @@ def validate_report(report: dict, *, scenario: str, required_tasks: Iterable[str
         "privacy": float(summary["privacy"]),
         "utility": float(summary["utility"]),
         "composite": float(summary["composite"]),
-        "tasks": tasks,
-        "risks": {k: float(v) for k, v in risks.items()},
-        "tables": exported_tables,
-        "not_applicable": found,
+        "tasks": sorted(tasks, key=lambda t: t["id"]),
+        "risks": {k: float(v) for k, v in sorted(risks.items())},
+        "tables": sorted(exported_tables, key=lambda t: t["table"]),
+        "not_applicable": sorted(found, key=lambda i: (i["table"], i["section"], i["key"], i["code"])),
     }
 
 

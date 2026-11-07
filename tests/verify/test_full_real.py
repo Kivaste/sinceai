@@ -36,7 +36,7 @@ def _full(real_bed):
 
 
 def _source_person(real_bed) -> str:
-    df = pd.read_csv(real_bed.kit / "data" / "health" / "ed_visits.csv", dtype=str, keep_default_na=False)
+    df = pd.read_csv(real_bed.kit / "data" / "health" / "ed_visits.csv", dtype=str, keep_default_na=False, na_filter=False)
     return sorted(v for v in df["patient_hetu"] if v)[0]
 
 
@@ -92,7 +92,7 @@ def test_key_material_plant_fails_key_material(real_bed, tb):
 def test_unique_qi_fails_person_k(real_bed, tb):
     m = tb.load(real_bed.release)
     col = sorted(q["column"] for q in m["contract"]["qi"] if q["table"] == "ed_visits")[0]
-    df = pd.read_csv(real_bed.release / "ed_visits.csv", dtype=str, keep_default_na=False)
+    df = pd.read_csv(real_bed.release / "ed_visits.csv", dtype=str, keep_default_na=False, na_filter=False)
     assert df[col].value_counts()[df[col].iat[0]] >= 5  # row 0 starts in a class of >= k
 
     def unique(header, rows):  # row 0 gets a QI value no other row has: its person is alone in its class
