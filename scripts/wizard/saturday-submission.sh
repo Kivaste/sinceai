@@ -198,6 +198,91 @@ finish() {
 # the whole file before the first prompt, so an edit mid-run can't break it.
 # ──────────────────────────────────────────────────────────────────────────
 
+# Presence/count checks only: never read table values or call git/gh/network.
+# Both the CLI and interactive stage 5 use this one implementation.
+check_bundle() {
+  local input public entry base name dataset file table_count map_count file_count
+  local symlink forbidden_count required_count=0
+  local missing=()
+  included_datasets=()
+  input=$(cygpath -u "$1") || return 1
+  [[ ! -L "${input%/}" ]] || { warn 'Submission directory is a symlink; refusing.'; return 1; }
+  bundle=$(realpath -e -- "$input") || return 1
+  [[ -d "$bundle" ]] || { warn 'Submission directory does not exist.'; return 1; }
+  public=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P) || return 1
+  # Windows paths are case-insensitive; realpath resolves symlinks before comparison.
+  case "${bundle,,}/" in
+    "${public,,}/"*) warn 'Refusing a submission directory inside the public repository.'; return 1 ;;
+  esac
+  case "${public,,}/" in
+    "${bundle,,}/"*) warn 'Refusing a submission directory containing the public repository.'; return 1 ;;
+  esac
+  symlink=$(find "$bundle" -type l -print -quit) || return 1
+  [[ -z "$symlink" ]] || { warn 'Submission contains symlinks; refusing.'; return 1; }
+  forbidden_count=$(find "$bundle" -path "$bundle/.git" -prune -o \( -iname '.env' -o -iname '.env.*' -o -iname '*.key' -o -iname 'truth' -o -iname 'Briefs' \) -print | wc -l) || return 1
+  (( forbidden_count == 0 )) || { warn "Submission contains $forbidden_count forbidden secret/kit/truth paths; refusing."; return 1; }
+  # Include hidden entries without changing the caller's glob options.
+  for entry in "$bundle"/* "$bundle"/.[!.]* "$bundle"/..?*; do
+    [[ -e "$entry" ]] || continue
+    base=${entry##*/}
+    case "$base" in
+      unseen_field_labels.csv|customer_service_eval_redacted.csv|customer_service_eval_spans.jsonl)
+        [[ -f "$entry" ]] || { warn "Required root file is not a file: $base"; return 1; }
+        required_count=$((required_count + 1)) ;;
+      health|customer_service)
+        [[ -d "$entry" ]] || { warn "Required dataset is not a directory: $base/"; return 1; }
+        required_count=$((required_count + 1)) ;;
+      .git)
+        [[ -d "$entry" ]] || { warn 'Linked/external gitdir is not allowed.'; return 1; } ;;
+      submission_index.json)
+        # This index name must match #30 round 2 once its name is final.
+        [[ -f "$entry" ]] || { warn 'Submission index is not a file.'; return 1; } ;;
+      *) warn "Unexpected top-level entry: $base"; return 1 ;;
+    esac
+  done
+  (( required_count > 0 )) || { warn 'Bundle contains none of the required items.'; return 1; }
+  for name in unseen_field_labels.csv customer_service_eval_redacted.csv customer_service_eval_spans.jsonl; do
+    [[ -f "$bundle/$name" ]] || missing+=("$name")
+  done
+  for name in health customer_service; do
+    dataset="$bundle/$name/"
+    if [[ ! -d "$dataset" ]]; then
+      missing+=("$name/")
+      continue
+    fi
+    [[ -f "${dataset}privacy_manifest.json" ]] || { warn "Dataset is missing $name/privacy_manifest.json"; return 1; }
+    table_count=0
+    map_count=0
+    file_count=0
+    for file in "$dataset"* "$dataset".[!.]* "$dataset"..?*; do
+      [[ -f "$file" ]] || continue
+      file_count=$((file_count + 1))
+      base=${file##*/}
+      case "$base" in
+        rowmap_*.csv) map_count=$((map_count + 1)) ;;
+        *.csv)
+          table_count=$((table_count + 1))
+          [[ -f "${dataset}rowmap_$base" ]] || { warn "Protected table is missing $name/rowmap_$base"; return 1; }
+          ;;
+      esac
+    done
+    printf '  Dataset subfolder %s: %s files, %s protected tables, %s row maps\n' "$name" "$file_count" "$table_count" "$map_count"
+    if (( table_count > 0 )); then
+      included_datasets+=("$name")
+    else
+      missing+=("$name/*.csv (protected table)")
+    fi
+  done
+  say 'These counts do NOT replace packager validation or the pets-eval scorecards.'
+  if (( ${#missing[@]} )); then
+    say 'Partial bundle; missing required items:'
+    printf '  - %s\n' "${missing[@]}"
+    return 3
+  fi
+  say 'Complete bundle.'
+  return 0
+}
+
 run_wizard() {
 
 TOTAL_STAGES=6
@@ -279,49 +364,18 @@ say 'Build the submission with ticket #30 first. Only file presence and counts a
 ask PETS_SUBMISSION_DIR 'pets_submission directory [default C:\Users\kivas\AI\sinceai-out\pets_submission]:'
 PETS_SUBMISSION_DIR=${PETS_SUBMISSION_DIR:-'C:\Users\kivas\AI\sinceai-out\pets_submission'}
 write_env PETS_SUBMISSION_DIR "$PETS_SUBMISSION_DIR"
-bundle=$(realpath -e -- "$(cygpath -u "$PETS_SUBMISSION_DIR")") || exit 1
-[[ -d "$bundle" ]] || { warn 'Submission directory does not exist.'; exit 1; }
-public=$(realpath -e -- "$REPO_ROOT")
-# Windows paths are case-insensitive; realpath resolves symlinks before comparison.
-case "${bundle,,}/" in
-  "${public,,}/"*) warn 'Refusing a submission directory inside the public repository.'; exit 1 ;;
+bundle_status=0
+check_bundle "$PETS_SUBMISSION_DIR" || bundle_status=$?
+case "$bundle_status" in
+  0) ;;
+  3)
+    warn 'This bundle is partial. Type exactly PARTIAL to continue; anything else stops without pushing.'
+    partial_ack=''
+    IFS= read -r partial_ack || true
+    [[ "$partial_ack" == PARTIAL ]] || { warn 'Partial bundle not acknowledged; refusing upload.'; exit 1; }
+    ;;
+  *) exit 1 ;;
 esac
-case "${public,,}/" in
-  "${bundle,,}/"*) warn 'Refusing a submission directory containing the public repository.'; exit 1 ;;
-esac
-[[ -f "$bundle/unseen_field_labels.csv" ]] || { warn 'Missing unseen labels file.'; exit 1; }
-[[ -f "$bundle/customer_service_eval_redacted.csv" || -f "$bundle/customer_service_eval_spans.jsonl" ]] || {
-  warn 'Missing customer-service eval redaction output.'; exit 1;
-}
-[[ -z "$(find "$bundle" -path "$bundle/.git" -prune -o -type l -print -quit)" ]] || {
-  warn 'Submission contains symlinks; refusing.'; exit 1;
-}
-dataset_count=0
-shopt -s nullglob
-for dataset in "$bundle"/*/; do
-  [[ "${dataset%/}" == "$bundle/.git" ]] && continue
-  table_count=0
-  map_count=0
-  file_count=0
-  for file in "$dataset"*; do
-    [[ -f "$file" ]] || continue
-    file_count=$((file_count + 1))
-    base=${file##*/}
-    case "$base" in
-      rowmap_*.csv) map_count=$((map_count + 1)) ;;
-      *.csv)
-        table_count=$((table_count + 1))
-        [[ -f "${dataset}rowmap_$base" ]] || { warn 'A protected table is missing its row map.'; exit 1; }
-        ;;
-    esac
-  done
-  printf '  Dataset subfolder %s: %s files, %s protected tables, %s row maps\n' "$(basename "$dataset")" "$file_count" "$table_count" "$map_count"
-  if (( table_count > 0 )); then dataset_count=$((dataset_count + 1)); fi
-done
-(( dataset_count > 0 )) || { warn 'No dataset subfolder with protected tables and row maps.'; exit 1; }
-say 'These counts do NOT replace packager validation or the pets-eval scorecards.'
-forbidden_count=$(find "$bundle" -path "$bundle/.git" -prune -o \( -iname '.env' -o -iname '.env.*' -o -iname '*.key' -o -iname 'truth' -o -iname 'Briefs' \) -print | wc -l)
-(( forbidden_count == 0 )) || { warn "Submission contains $forbidden_count forbidden secret/kit/truth paths; refusing."; exit 1; }
 uploaded=0
 if confirm 'Push this bundle? This sends row maps to a private repo shared with organisers'; then
   visibility=$(gh repo view "$SUBMISSION_REPO" --json visibility --jq .visibility) || exit 1
@@ -359,6 +413,9 @@ elif (( ${#invited[@]} )); then
 else
   message='Our pets_submission is in the private repo Suhtetark-Kool/trusted-since-ai; organiser invitations are still pending. Could you confirm the handles and run the hidden-attacker, unseen-label and eval-redaction checks once access is ready? Thanks!'
 fi
+if (( bundle_status == 3 )); then
+  message+=" This bundle is partial; included datasets: ${included_datasets[*]:-none}."
+fi
 printf '%s' "$message" | clip.exe
 open_url 'https://discord.com/app'
 step 'Review the message before pasting into the TrustED challenge channel on the Since AI server.'
@@ -368,4 +425,14 @@ pause 'Press Enter after posting, or to leave the message on the clipboard.'
 finish
 }
 
-run_wizard "$@"; exit
+main() {
+  if [[ "${1:-}" == --check-bundle ]]; then
+    [[ $# == 2 && -n "$2" ]] || { warn 'Usage: saturday-submission.sh --check-bundle <dir>'; return 1; }
+    check_bundle "$2"
+    return $?
+  fi
+  [[ $# == 0 ]] || { warn 'Unknown arguments; expected --check-bundle <dir>.'; return 1; }
+  run_wizard
+}
+
+main "$@"; exit
