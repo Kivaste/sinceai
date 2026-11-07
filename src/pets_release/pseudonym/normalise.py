@@ -13,8 +13,13 @@ Per label:
 - RECORD_KEY, SECRET: surrounding whitespace stripped only (exact).
 - NATIONAL_ID: spoken digits/dash (fi/sv/en) converted, whitespace and dots
   removed, upper-cased; the HETU century sign (-, +, letter) is kept.
-- PHONE: spoken digits converted; digits and a leading + kept;
-  00 -> +, +358 / +46 -> trunk 0 (a written trunk "(0)" or "0" is kept once).
+- PHONE: E.164-like "+<country><national>", so the same national digits in
+  different countries never merge. Spoken digits converted; 00 -> +; a
+  written "(0)" trunk is dropped, as is "+358 0..." / "+46 0...". A domestic
+  number (leading single 0) gets ``phone_country`` (default
+  DEFAULT_PHONE_COUNTRY = "358", FI; digits only, no "+"), so for FI
+  "040...", "+358 40..." and "+358 (0)40..." are equal. Digits with neither
+  + nor a trunk 0 are kept as-is.
 - IBAN, PAYMENT_CARD, ACCOUNT_NUMBER, LICENSE_PLATE: spoken digits
   converted, upper-cased, non-alphanumerics removed.
 - EMAIL, USERNAME, DEVICE_ID: case-folded, whitespace removed.
@@ -148,7 +153,15 @@ def _name_word(word: str) -> str:
     return word
 
 
-def _phone(text: str) -> str:
+DEFAULT_PHONE_COUNTRY = "358"  # FI; domestic numbers (leading 0) get this code
+_COUNTRY_CODE = re.compile(r"[1-9][0-9]{0,2}")
+# Countries whose written "+CC 0..." trunk zero is not part of E.164.
+_TRUNK_ZERO_CC = ("358", "46")
+
+
+def _phone(text: str, country: str) -> str:
+    """E.164-like: '+' + country code + national number without trunk 0."""
+    text = re.sub(r"\(\s*0\s*\)", "", text)  # "+358 (0)40" written trunk
     s = re.sub(r"[^0-9+]", "", text)
     plus = s.startswith("+")
     s = s.replace("+", "")
@@ -156,17 +169,23 @@ def _phone(text: str) -> str:
         s = "+" + s
     elif s.startswith("00"):
         s = "+" + s[2:]
-    for cc in ("+358", "+46"):
-        if s.startswith(cc):
-            rest = s[len(cc) :]
-            # "+358 (0)40 ..." / "+358 040 ...": one trunk 0 only
-            return rest if rest.startswith("0") else "0" + rest
+    elif s.startswith("0"):
+        return "+" + country + s[1:]
+    else:
+        return s  # no country and no trunk: digits only, kept as-is
+    for cc in _TRUNK_ZERO_CC:
+        if s.startswith("+" + cc + "0"):
+            return "+" + cc + s[len(cc) + 2 :]
     return s
 
 
-def normalise(value: str, label: str) -> str:
+def normalise(
+    value: str, label: str, *, phone_country: str = DEFAULT_PHONE_COUNTRY
+) -> str:
     if label not in LABELS:
         raise ValueError("unknown pseudonym label")
+    if not isinstance(phone_country, str) or not _COUNTRY_CODE.fullmatch(phone_country):
+        raise ValueError("phone_country must be 1-3 digits without '+'")
     if not isinstance(value, str):
         raise TypeError("value must be a string")
     if label in (RECORD_KEY, "SECRET"):
@@ -177,7 +196,7 @@ def normalise(value: str, label: str) -> str:
     if label == "NATIONAL_ID":
         return re.sub(r"[\s._]", "", text).upper()
     if label == "PHONE":
-        return _phone(text)
+        return _phone(text, phone_country)
     if label in _ALNUM_LABELS:
         return re.sub(r"[^0-9A-Z]", "", text.upper())
     if label in _NOSPACE_FOLD_LABELS:

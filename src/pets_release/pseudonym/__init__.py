@@ -11,7 +11,8 @@ Interface for transforms (07), redactor (12) and writer (16)::
                                            # else KeyConfigError (CLI: exit 2)
     rsid = release_scope_id(scenario=..., recipient=None | "id",
                             input_digests={table: sha256hex}, tool_revision=...)
-    p = pseudonymiser_for(master, recipient=None | "id")
+    p = pseudonymiser_for(master, recipient=None | "id",
+                          phone_country="358")   # default FI, see normalise
     p.token(value, label=RECORD_KEY, scope=Scope.release(rsid))     # 64-hex
     p.token(name, label="PERSON", scope=Scope.conversation(conv_id))
 

@@ -52,11 +52,7 @@ def tok(value, label, scope=REL, p=None):
         ),
         (
             "PHONE",
-            [
-                "+46 70 123 45 67",
-                "070-1234567",
-                "noll sju noll ett två tre fyra fem sex sju",
-            ],
+            ["+46 70 123 45 67", "0046701234567", "+46 (0)70 123 45 67"],
         ),
         (
             "PAYMENT_CARD",
@@ -182,9 +178,40 @@ def test_empty_identifier_values_are_refused(label, value):
 
 
 def test_normalise_is_public_and_label_aware():
-    assert normalise("040-123 4567", "PHONE") == "0401234567"
+    assert normalise("040-123 4567", "PHONE") == "+358401234567"
+    assert normalise("+46 70 123 45 67", "PHONE") == "+46701234567"
     assert normalise("Virtaselle", "PERSON") == normalise("Virtanen", "PERSON")
-    assert normalise("+358 (0)40 123 4567", "PHONE") == "0401234567"
+    assert normalise("+358 (0)40 123 4567", "PHONE") == "+358401234567"
+
+
+@pytest.mark.parametrize(
+    "a,b",
+    [
+        ("+358 70 123 4567", "+46 70 123 4567"),
+        ("00358701234567", "0046701234567"),
+        ("+46 70 123 4567", "070 123 4567"),  # domestic defaults to FI
+        ("+1 701 234 5670", "0701 234 5670"),
+    ],
+)
+def test_same_national_digits_in_different_countries_stay_distinct(a, b):
+    assert normalise(a, "PHONE") != normalise(b, "PHONE")
+    assert tok(a, "PHONE") != tok(b, "PHONE")
+
+
+def test_domestic_phone_country_is_a_parameter():
+    se = [
+        "+46 70 123 45 67",
+        "070-1234567",
+        "noll sju noll ett två tre fyra fem sex sju",
+    ]
+    assert {normalise(v, "PHONE", phone_country="46") for v in se} == {"+46701234567"}
+    p = pseudonymiser_for(MasterKey.from_text(TEST_KEY), phone_country="46")
+    assert len({p.token(v, label="PHONE", scope=REL) for v in se}) == 1
+    assert p.token("070-1234567", label="PHONE", scope=REL) != tok(
+        "070-1234567", "PHONE"
+    )
+    with pytest.raises(ValueError):
+        normalise("0401234567", "PHONE", phone_country="+358")
     with pytest.raises(ValueError):
         normalise("x", "NOT_A_LABEL")
 

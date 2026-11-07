@@ -5,7 +5,13 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from .keys import MasterKey, SecretKey, recipient_key
-from .normalise import CASE_ENDINGS, MIN_BASE_NAME, RECORD_KEY, normalise
+from .normalise import (
+    CASE_ENDINGS,
+    DEFAULT_PHONE_COUNTRY,
+    MIN_BASE_NAME,
+    RECORD_KEY,
+    normalise,
+)
 
 DOMAIN = "pets-release/pseudonym/v1"
 SCOPE_KINDS = ("conversation", "release", "recipient")
@@ -64,12 +70,16 @@ class _Conversation:
 
 
 class Pseudonymiser:
-    __slots__ = ("_convs", "_key")
+    __slots__ = ("_convs", "_key", "_phone_country")
 
-    def __init__(self, key: SecretKey) -> None:
+    def __init__(
+        self, key: SecretKey, *, phone_country: str = DEFAULT_PHONE_COUNTRY
+    ) -> None:
         if not isinstance(key, SecretKey):
             raise TypeError("Pseudonymiser requires a SecretKey")
+        normalise("0", "PHONE", phone_country=phone_country)  # validates
         self._key = key
+        self._phone_country = phone_country
         self._convs: dict[str, _Conversation] = {}
 
     def _link(self, normalised: str, scope: Scope) -> str:
@@ -122,7 +132,7 @@ class Pseudonymiser:
                 raise TypeError(f"{name} must be a string")
             if "\x00" in fval:
                 raise ValueError(f"{name} must not contain NUL")
-        norm = normalise(value, label)
+        norm = normalise(value, label, phone_country=self._phone_country)
         if label in _NON_EMPTY_LABELS and not norm:
             raise ValueError(f"empty {label} value cannot be pseudonymised")
         if label == "PERSON" and scope.kind == "conversation" and norm:
@@ -132,8 +142,16 @@ class Pseudonymiser:
         return self._key.hmac_sha256(msg).hex()
 
 
-def pseudonymiser_for(master: MasterKey, recipient: str | None = None) -> Pseudonymiser:
-    """Pseudonymiser keyed by the recipient key, else by the master key."""
-    if recipient is None:
-        return Pseudonymiser(master)
-    return Pseudonymiser(recipient_key(master, recipient))
+def pseudonymiser_for(
+    master: MasterKey,
+    recipient: str | None = None,
+    *,
+    phone_country: str = DEFAULT_PHONE_COUNTRY,
+) -> Pseudonymiser:
+    """Pseudonymiser keyed by the recipient key, else by the master key.
+
+    ``phone_country``: country code (digits, no '+') given to domestic phone
+    numbers; default "358" (FI).
+    """
+    key = master if recipient is None else recipient_key(master, recipient)
+    return Pseudonymiser(key, phone_country=phone_country)
