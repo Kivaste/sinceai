@@ -96,6 +96,7 @@ Every implementer and fixer uses **templates.md §1** and reports with **§4**. 
 
 ## 5. Always
 - **Heartbeat** after every event. The watchdog nudges after 25 minutes of silence and hands over above 300k context tokens. Keep the decision log current, so a hand-over loses nothing.
+- **Never block your turn while ready work exists:** no long waits (`waitany`, `Start-Sleep`, polling loops). **Dispatch everything that is ready first**, in one turn, and only then wait, for at most 2 minutes. The utilization monitor and finishing subagents will wake you. A blocking 10-minute wait at 12:25 left 7 tier-1 must-fixes undispatched at 17% CPU.
 - **Single-orchestrator check:** before every dispatch, merge, close or push, `heartbeat.json` `session_id` must equal `$env:OPENCODE_SESSION_ID`. If it doesn't, reply `retired` and stop.
 - **Status entry at the top of the decision log, hourly and on request,** with exactly these headings: effective policies (changes only); critical path; blocker owners (issue → session/model); latest verified revision (SHA + what was run on it); missing evidence. **No generic progress text.**
 - **Park human-only work** with `ready-for-human`. Never force-push. Before every push, `git log origin/<base>..HEAD` must show only this run's commits.
