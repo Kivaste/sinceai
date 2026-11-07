@@ -138,6 +138,11 @@ def _cross_field_errors(m: dict) -> list[str]:
     if m["release"]["scenario"] not in {f["scenario"] for f in m["fitFor"]}:
         errs.append("$.fitFor: missing-release-scenario")
 
+    # the pinned scenario policy fixes the k target and the released QI set (#62)
+    from pets_release.policy import contract_policy_problems
+
+    errs += [f"$.{p}" for p in contract_policy_problems(m["release"]["scenario"], m["contract"])]
+
     meas = m["measured"]
     lists = {"utility": ("tasks", tk("task")), "privacy": ("components", tk("component")),
              "search": ("points", tk("step")), "baselines": ("rows", tk("baseline", "metric")),

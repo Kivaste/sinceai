@@ -145,10 +145,18 @@ def test_invalid_k_is_invalid(m, value, code):
     assert f"$.contract.k: {code}" in validate_manifest(m)
 
 
-def test_k_2_is_the_smallest_valid_target(m):
+def test_health_k_below_policy_target_is_invalid(m):
+    """#62: HEALTH-S1's schema minimum is the pinned policy's k (5), not 2."""
     m["contract"]["k"] = 2
     _rebind_contract(m)
-    assert validate_manifest(m) == []
+    assert validate_manifest(m) == ["$.contract.k: minimum"]
+
+
+def test_health_k_above_policy_target_is_invalid(m):
+    """#62: a k other than the policy's is a mismatch (the policy, not the manifest, sets the target)."""
+    m["contract"]["k"] = 6
+    _rebind_contract(m)
+    assert validate_manifest(m) == ["$.contract.k: policy-mismatch"]
 
 
 def test_changed_k_without_rebinding_digest_is_invalid(m):

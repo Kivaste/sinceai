@@ -22,6 +22,7 @@ from pathlib import Path
 import pandas as pd
 
 from pets_release.ladders import PseudonymKeys
+from pets_release.policy import k_target
 from pets_release.pseudonym import RECORD_KEY, MasterKey, Scope, manifest_signing_key, normalise, pseudonymiser_for
 from pets_release.pseudonym.keys import recipient_key
 
@@ -100,8 +101,11 @@ def producer_context(*, scenario_id: str, policy, source: Mapping[str, pd.DataFr
         "keys": [master, manifest_signing_key(master),
                  *([recipient_key(master, recipient)] if recipient != DEFAULT_RECIPIENT else [])],
     }
-    if "k" in contract:
-        ctx["k"] = contract["k"]
+    # the k target is the pinned policy's, never copied from the (self-declared) contract (#62); person-k
+    # errors if the contract's k differs
+    k = k_target(policy)
+    if k is not None:
+        ctx["k"] = k
     if released is not None:
         keys = token_keys(master, scope_id, recipient)
         rowmaps = {}

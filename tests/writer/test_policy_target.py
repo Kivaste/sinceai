@@ -1,0 +1,105 @@
+"""#62: the scenario policy, not the candidate contract, fixes the k target and the released QI set.
+
+Rule: a HEALTH-S1 contract must carry exactly the policy's k target (5) and list every released policy QI
+(by its derived output name, or its source name if released as such); otherwise the writer refuses and the
+manifest is invalid (both verify tiers, dashboard). The producer context's ``k`` comes from the policy.
+
+Failure rows (trigger -> result):
+  contract k=2, matching context k=2, all classes >= 2 -> writer refused (policy:contract.k)
+  contract k=6 (differs from policy)                    -> refused
+  released policy QI (sex) omitted from contract.qi     -> refused (policy:contract.qi)
+  HEALTH-S1 manifest with contract k=2                  -> validate_manifest error (schema minimum + policy rule)
+  manifest omitting a released policy QI                -> validate_manifest error
+  producer_context with contract k=2                    -> context k is the policy's 5
+  unchanged fixture                                     -> released (no false refusal)
+Synthetic fixture rows only.
+"""
+from __future__ import annotations
+
+import copy
+
+import pandas as pd
+from writer_helpers import MASTER, make_candidate, make_kit, producer_context
+
+from pets_release.manifest import loads_strict, validate_manifest
+from pets_release.policy import get_policy
+from pets_release.pseudonym import MasterKey
+from pets_release.run.context import producer_context as run_producer_context
+from pets_release.writer import write_release
+
+
+def _write(tmp_path, contract, k_ctx=None):
+    cand = make_candidate(contract=contract)
+    kit = make_kit(tmp_path / "kit", cand)
+    ctx = producer_context(cand)
+    if k_ctx is not None:
+        ctx["k"] = k_ctx
+    return write_release(cand, tmp_path / "o" / "rel", MASTER, kit, context=ctx)
+
+
+def _contract(**edit):
+    c = copy.deepcopy(make_candidate().contract)
+    c.update(edit)
+    return c
+
+
+def test_unchanged_fixture_releases(tmp_path):
+    res = _write(tmp_path, _contract())
+    assert res.status == "released", res.reasons
+
+
+def test_weakened_k_with_matching_context_refuses(tmp_path):
+    res = _write(tmp_path, _contract(k=2), k_ctx=2)
+    assert res.status == "refused"
+    assert "policy:contract.k: policy-mismatch" in res.reasons, res.reasons
+
+
+def test_k_differing_from_policy_refuses(tmp_path):
+    res = _write(tmp_path, _contract(k=6), k_ctx=6)
+    assert res.status == "refused"
+    assert "policy:contract.k: policy-mismatch" in res.reasons, res.reasons
+
+
+def test_omitted_released_policy_qi_refuses(tmp_path):
+    c = _contract()
+    c["qi"] = [q for q in c["qi"] if q["column"] != "sex"]
+    res = _write(tmp_path, c)
+    assert res.status == "refused"
+    assert "policy:contract.qi: ed_visits.sex: missing-policy-qi" in res.reasons, res.reasons
+
+
+def _manifest(tmp_path):
+    res = _write(tmp_path, _contract())
+    assert res.status == "released", res.reasons
+    return loads_strict((res.out / "privacy_manifest.json").read_bytes())
+
+
+def _rebind(m):
+    from pets_release.manifest import canonical_digest
+
+    m["bindings"]["contractDigest"] = canonical_digest(m["contract"])
+    return m
+
+
+def test_manifest_with_weakened_k_is_invalid(tmp_path):
+    m = _manifest(tmp_path)
+    m["contract"]["k"] = 2
+    errs = validate_manifest(_rebind(m))
+    assert errs, "weakened k must not validate"
+    assert any("contract.k" in e for e in errs), errs
+
+
+def test_manifest_with_omitted_qi_is_invalid(tmp_path):
+    m = _manifest(tmp_path)
+    m["contract"]["qi"] = [q for q in m["contract"]["qi"] if q["column"] != "municipality"]
+    errs = validate_manifest(_rebind(m))
+    assert "$.contract.qi: ed_visits.municipality: missing-policy-qi" in errs, errs
+
+
+def test_context_k_comes_from_policy_not_contract():
+    src = {"ed_visits": pd.DataFrame({"visit_id": ["v1"], "patient_hetu": ["p1"]}, dtype=str)}
+    ctx = run_producer_context(scenario_id="HEALTH-S1", policy=get_policy("HEALTH-S1"), source=src,
+                               master=MasterKey.from_text("policy-target-test-only-key-not-a-secret-000"),
+                               scope_id="0" * 16, recipient="default",
+                               contract={"k": 2, "files": {}, "qi": [], "tokens": []}, released=None)
+    assert ctx["k"] == 5
