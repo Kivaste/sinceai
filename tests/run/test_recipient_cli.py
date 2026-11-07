@@ -123,3 +123,36 @@ def test_release_tokens_are_keyed_by_the_recipient_key(releases):
             keys = PseudonymKeys(pseudonymiser_for(master, recipient=recipient), Scope.release(rsid))
             got = {keys.token(v, "RECORD_KEY") for v in src}
             assert (released and released <= got) if expect_in else got.isdisjoint(released)
+
+
+def test_every_cli_token_column_uses_the_recorded_recipient_not_just_a_new_scope(releases):
+    """#90 L1: a distinct scope ID alone must not disguise master-keyed or wrong-recipient tokens."""
+    from run_helpers import TEST_KEY
+
+    from pets_release.ladders import PseudonymKeys
+    from pets_release.pseudonym import MasterKey, Scope, pseudonymiser_for
+
+    kit, outs, procs = releases
+    master = MasterKey.from_text(TEST_KEY)
+    for name, other in (("a", "recipient-b"), ("b", "recipient-a")):
+        assert procs[name].returncode == 0
+        manifest = json.loads((outs[name] / "privacy_manifest.json").read_text(encoding="utf-8"))
+        release = manifest["release"]
+        assert release["recipient"] == f"recipient-{name}"
+        scope = Scope.release(release["releaseScopeId"])
+        assert {(t["table"], t["column"]) for t in manifest["contract"]["tokens"]} == {
+            ("ed_visits", "visit_id"), ("lab_results", "visit_id"), ("lab_results", "lab_id")}
+        for token in manifest["contract"]["tokens"]:
+            table, column = token["table"], token["column"]
+            source = pd.read_csv(kit / "data" / "health" / f"{table}.csv", dtype=str,
+                                 keep_default_na=False)[column]
+            actual = set(pd.read_csv(outs[name] / f"{table}.csv", dtype=str,
+                                     keep_default_na=False)[column])
+            assert actual
+            for recipient in (release["recipient"], other, None):
+                keys = PseudonymKeys(pseudonymiser_for(master, recipient=recipient), scope)
+                expected = {keys.token(value, "RECORD_KEY") for value in source}
+                if recipient == release["recipient"]:
+                    assert actual <= expected
+                else:
+                    assert actual.isdisjoint(expected)

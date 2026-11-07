@@ -54,7 +54,10 @@ def baseline_rows(root, scenario: str, dataset: str) -> list[dict]:
         scenarios, list) else []
     if len(match) != 1 or match[0].get("dataset") != dataset:
         raise MeasureRejected("baseline_scenario")
-    required = list(match[0].get("utility_requirements") or [])
+    required = match[0].get("utility_requirements")
+    if (not isinstance(required, list) or not required
+            or not all(isinstance(t, str) and t for t in required)):
+        raise MeasureRejected("baseline_structure")  # missing is not "no tasks"
     bench = _load(root / "results" / "benchmark.json", "baseline_structure")
     published = bench.get("baselines") if isinstance(bench, dict) else None
     if not isinstance(published, dict):
