@@ -9,7 +9,8 @@ Do not type a number that has no placeholder. Each beat names the CLI command th
 
 - A hospital privacy officer must share ED visit data with a university research group studying crowding and revisits.
 - "Remove the names" is not anonymisation: under the B0 baseline, people can still be singled out. (Qualitative here; the HEALTH-S1 singling-out figure appears in Beat 6. Do not quote a kit percentage from any other scenario.)
-- Blanket k-anonymity (B2-k) keeps only `{{measured.baselines.B2-k.utility_mean}}` of the mean utility, and some required analyses drop to 0.
+- Blanket k-anonymity (B2-k) keeps a scenario utility of only `{{measured.baselines.B2-k.utility.HEALTH-S1}}`, and it cannot answer H-U6 (`{{measured.baselines.B2-k.task.H-U6}}`), H-U7 (`{{measured.baselines.B2-k.task.H-U7}}`) or H-U8 (`{{measured.baselines.B2-k.task.H-U8}}`) at all (the kit publishes those as null; `—` below means null).
+- The published B0 baseline (names removed only) has a worst-case re-identification figure of `{{measured.baselines.B0.worst_reid}}`.
 - Nobody can re-check an "anonymised" claim.
 - Live: `pets-release detect unseen --format unseen` (opener: it labels an unlabelled export without hints).
 
@@ -45,7 +46,7 @@ Do not type a number that has no placeholder. Each beat names the CLI command th
 
 ## Beat 6: Numbers against B0 / B2 / B2-k (45 s)
 
-Utility, per purpose check, before and after (1.0 = same answer as the original):
+Utility, per purpose check, before and after (a score of 1 = same answer as the original):
 
 | Check | Before | After |
 |---|---|---|
@@ -55,19 +56,22 @@ Utility, per purpose check, before and after (1.0 = same answer as the original)
 | H-U7 | `{{measured.utility.before.H-U7}}` | `{{measured.utility.after.H-U7}}` |
 | H-U8 | `{{measured.utility.before.H-U8}}` | `{{measured.utility.after.H-U8}}` |
 
-Risk, before and after:
+Risk, before and after. Mind the denominators: they differ.
 
-- Share of rows with k below 5: `{{measured.privacy.before.k_below_5_share}}` before, `{{measured.privacy.after.k_below_5_share}}` after.
-- Singling-out rate: `{{measured.privacy.before.singling_out}}` before, `{{measured.privacy.after.singling_out}}` after.
+- Our per-person k (authoritative, D22), over every released quasi-identifier: `{{measured.privacy.after.person_k.persons}}` persons counted, minimum k `{{measured.privacy.after.person_k.min}}`, share of PERSONS with k below 5: `{{measured.privacy.after.person_k.below_k_share}}`. There is no "before" for this: the original has no released form to take a k of.
+- Kit scorecard, share of ROWS in `ed_visits` with k below 5: `{{measured.privacy.before.risk.ed_visits:_records_with_k_5}}` before, `{{measured.privacy.after.risk.ed_visits:_records_with_k_5}}` after. Rows, not persons, and see the disclosure below.
+- Kit scorecard, linkage re-identification in `ed_visits`: `{{measured.privacy.before.risk.ed_visits:_linkage_re-identification}}` before, `{{measured.privacy.after.risk.ed_visits:_linkage_re-identification}}` after.
+- Kit scorecard privacy summary: `{{measured.privacy.before.summary.privacy}}` before, `{{measured.privacy.after.summary.privacy}}` after. Utility summary after: `{{measured.privacy.after.summary.utility}}`.
 
-Against the published baselines (same scenario, mean utility and singling-out):
+Against the published baselines (same scenario; scenario utility, privacy summary, worst-case re-identification):
 
-| Baseline | Mean utility | Singling-out |
-|---|---|---|
-| B0 | `{{measured.baselines.B0.utility_mean}}` | `{{measured.baselines.B0.singling_out}}` |
-| B2 | `{{measured.baselines.B2.utility_mean}}` | `{{measured.baselines.B2.singling_out}}` |
-| B2-k | `{{measured.baselines.B2-k.utility_mean}}` | `{{measured.baselines.B2-k.singling_out}}` |
+| Baseline | Scenario utility | Privacy | worst_reid |
+|---|---|---|---|
+| B0 | `{{measured.baselines.B0.utility.HEALTH-S1}}` | `{{measured.baselines.B0.privacy}}` | `{{measured.baselines.B0.worst_reid}}` |
+| B2 | `{{measured.baselines.B2.utility.HEALTH-S1}}` | `{{measured.baselines.B2.privacy}}` | `{{measured.baselines.B2.worst_reid}}` |
+| B2-k | `{{measured.baselines.B2-k.utility.HEALTH-S1}}` | `{{measured.baselines.B2-k.privacy}}` | `{{measured.baselines.B2-k.worst_reid}}` |
 
+- Disclosure (D22, residual risk `scorecard-renamed-qi`): we release age as `age_band`. The kit scorecard does not count a renamed column as a quasi-identifier, so its "rows with k below 5" figure is blind to `age_band`. Our per-person k over every released quasi-identifier is the authoritative figure; the scorecard figure is shown only for completeness. Do not present the scorecard figure as proof of k-anonymity.
 - Sacrifices the scenario policy allowed: `{{sacrifices.count}}`, each listed with the check it affects.
 - Close with the honest residual risks (linkage under two attacker personas, the tamper limitation) from `residualRisks`.
 - Live: open `<R>.dashboard.html` (sections 4-5 and the baseline comparison).

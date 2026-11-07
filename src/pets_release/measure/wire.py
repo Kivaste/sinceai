@@ -1,4 +1,4 @@
-"""Wire the measurer (19) into the HEALTH-S1 ``run`` (21) without editing ``run/``.
+﻿"""Wire the measurer (19) into the HEALTH-S1 ``run`` (21) without editing ``run/``.
 
     python -m pets_release.measure.wire <the same arguments as `pets-release run`>
 
@@ -100,7 +100,7 @@ def main(argv: list[str]) -> int:
     try:
         res = run_measured(kit=ctx.kit, scenario=ctx.scenario, created=ctx.created, key_text=ctx.key,
                            out=a.out, plan_name=a.plan or "hand", tool_revision=rev)
-    except Exception as e:  # content-free: class name and our own short messages only
+    except Exception as e:  # noqa: BLE001  content-free: class name and our own short messages only
         own = isinstance(e, (pipeline.RunError, MeasureRejected))  # only our own content-free messages
         print(f"measure.wire: {type(e).__name__}" + (f": {str(e)[:200]}" if own else ""), file=sys.stderr)
         return 2

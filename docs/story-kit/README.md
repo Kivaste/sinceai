@@ -29,9 +29,29 @@ Paths are dotted. Lists in the manifest are addressed by their id field.
 | `measured.baselines.<B0\|B2\|B2-k>.<metric>` | `measured.baselines.rows[baseline==X, metric==Y].value` |
 | `measured.search.candidates` | search candidate count |
 
-Assumption to confirm with ticket 19: privacy components and baseline metrics used here are
-`k_below_5_share`, `singling_out` and `utility_mean` (the ids in the fixture manifest). If 19 uses other ids,
-change the script, the CSV and nothing else; the test checks the rest.
+Ids are the measurer's real ones (not the fixture's): privacy components `person_k.{persons,min,below_k_share}`
+(ours, after only), `risk.ed_visits:_records_with_k_5` (scorecard, ROWS), `risk.ed_visits:_linkage_re-identification`,
+`summary.{privacy,utility}`; baseline metrics `utility.HEALTH-S1`, `privacy`, `worst_reid`, `task.<id>`. For
+`privacy` and `baselines` the metric (or component) is everything after the 3rd (or 2nd) segment, so it may contain dots.
+A null (e.g. B2-k cannot answer H-U6) is rendered `—`.
+
+## Part B: status (filled from the real run)
+
+Release: `C:\Users\kivas\AI\sinceai-out\22\health-s1\` (+ `.scoring`), dashboard `health-s1.dashboard.html/.csv`,
+filled kit `C:\Users\kivas\AI\sinceai-out\22\story-kit\`. Made by `python -m pets_release.measure.wire <run args>`
+(two passes: scratch release, score it, final release with `measured.*`), then `docs/story-kit/fill_numbers.py`.
+`numbers.csv` in this folder is the committed filled copy; it agrees with the dashboard CSV.
+
+**Pending #52 (measurer fixes; re-run both steps when it lands, numbers may change):**
+- all `measured.baselines.*` rows (baselines read dataset-wide utility rather than the scenario's; `utility.HEALTH-S1` is the scenario row, but treat the whole block as pending);
+- every `measured.privacy.before.*` value (the "before" scoring drops withheld tables);
+- `measured.privacy.after.risk.lab_results:*` (not used in the script) and the metric-id mapping above;
+- the per-person k rows are produced by the measurer's k summary; the unit (persons) is right, recheck after #52.
+Utility before/after (H-U2..H-U8) is not affected as far as known.
+
+**Residual risks to say out loud:** D22 scorecard defect (see Beat 6); linkage-attackers and attribute-inference
+rates are `not_measured` in this release (no attacker run wired yet), so no linkage rate is claimed; recipient-mode
+verify catches accidents only.
 
 ## How part B fills it
 

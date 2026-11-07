@@ -1,0 +1,46 @@
+beat,label,manifest_key_path,unit,value
+1,Baseline B2-k - scenario utility,measured.baselines.B2-k.utility.HEALTH-S1,score_0_1,0.3990
+1,Baseline B2-k - H-U6 (published null = cannot answer),measured.baselines.B2-k.task.H-U6,score_0_1,—
+1,Baseline B2-k - H-U7 (published null = cannot answer),measured.baselines.B2-k.task.H-U7,score_0_1,—
+1,Baseline B2-k - H-U8 (published null = cannot answer),measured.baselines.B2-k.task.H-U8,score_0_1,—
+1,Baseline B0 - worst_reid,measured.baselines.B0.worst_reid,score_0_1,0.0950
+2,release.scenario,release.scenario,text,HEALTH-S1
+2,release.recipient,release.recipient,text,default
+3,inventory.count,inventory.count,count,53
+3,fieldJustifications.released.count,fieldJustifications.released.count,count,16
+3,fieldJustifications.withheld.count,fieldJustifications.withheld.count,count,37
+4,Export assertion paymentCards,exportAssertions.paymentCards,bool,false
+4,Evidence paymentCards - cells scanned,assertionEvidence.paymentCards.denominator.n,count,1106994
+4,Evidence paymentCards - hits,assertionEvidence.paymentCards.hits,count,0
+4,Export assertion nationalIds,exportAssertions.nationalIds,bool,false
+4,Evidence nationalIds - cells scanned,assertionEvidence.nationalIds.denominator.n,count,1106994
+5,Release-scope checks (verify N),gate.checks.release.count,count,36
+5,Producer-scope checks (verify M),gate.checks.producer.count,count,4
+6,Utility before - H-U2,measured.utility.before.H-U2,score_0_1,1.0000
+6,Utility after - H-U2,measured.utility.after.H-U2,score_0_1,0.9908
+6,Utility before - H-U4,measured.utility.before.H-U4,score_0_1,1.0000
+6,Utility after - H-U4,measured.utility.after.H-U4,score_0_1,0.7952
+6,Utility before - H-U6,measured.utility.before.H-U6,score_0_1,1.0000
+6,Utility after - H-U6,measured.utility.after.H-U6,score_0_1,0.9462
+6,Utility before - H-U7,measured.utility.before.H-U7,score_0_1,1.0000
+6,Utility after - H-U7,measured.utility.after.H-U7,score_0_1,0.9933
+6,Utility before - H-U8,measured.utility.before.H-U8,score_0_1,1.0000
+6,Utility after - H-U8,measured.utility.after.H-U8,score_0_1,0.9505
+6,Our per-person k - persons counted,measured.privacy.after.person_k.persons,count,24204
+6,Our per-person k - minimum k,measured.privacy.after.person_k.min,count,5
+6,Our per-person k - share of PERSONS with k below 5,measured.privacy.after.person_k.below_k_share,share_of_persons,0.0000
+6,Scorecard - share of ROWS in ed_visits with k below 5 (before),measured.privacy.before.risk.ed_visits:_records_with_k_5,share_of_rows,1.0000
+6,Scorecard - share of ROWS in ed_visits with k below 5 (after; blind to age_band),measured.privacy.after.risk.ed_visits:_records_with_k_5,share_of_rows,0.0000
+6,Scorecard - linkage re-identification ed_visits (before),measured.privacy.before.risk.ed_visits:_linkage_re-identification,score_0_1,0.5697
+6,Scorecard - linkage re-identification ed_visits (after),measured.privacy.after.risk.ed_visits:_linkage_re-identification,score_0_1,0.0000
+6,Scorecard privacy summary (before),measured.privacy.before.summary.privacy,score_0_1,0.2026
+6,Scorecard privacy summary (after),measured.privacy.after.summary.privacy,score_0_1,1.0000
+6,Baseline B0 - scenario utility,measured.baselines.B0.utility.HEALTH-S1,score_0_1,1.0000
+6,Baseline B0 - privacy,measured.baselines.B0.privacy,score_0_1,0.2840
+6,Baseline B2 - scenario utility,measured.baselines.B2.utility.HEALTH-S1,score_0_1,0.7930
+6,Baseline B2 - privacy,measured.baselines.B2.privacy,score_0_1,0.3554
+6,Baseline B2 - worst_reid,measured.baselines.B2.worst_reid,score_0_1,0.0950
+6,Baseline B2-k - privacy,measured.baselines.B2-k.privacy,score_0_1,0.5188
+6,Baseline B2-k - worst_reid,measured.baselines.B2-k.worst_reid,score_0_1,0.0000
+6,Our release - scenario utility (scorecard summary.utility),measured.privacy.after.summary.utility,score_0_1,0.9352
+6,sacrifices.count,sacrifices.count,count,3
