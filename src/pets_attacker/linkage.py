@@ -85,6 +85,7 @@ _TIME_FORMS = {
     "ts.exact": r"\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}(?::\d{2})?",
     "ts.hour": r"\d{4}-\d{2}-\d{2}[T ]\d{2}:00",
     "ts.month_hour": r"\d{4}-\d{2}-01T\d{2}:00",
+    "ts.hour_of_day": r"(?:[01]\d|2[0-3]):00",
     "ts.day": r"\d{4}-\d{2}-\d{2}",
     "ts.week": r"\d{4}-W\d{2}",
     "ts.month": r"\d{4}-\d{2}",
@@ -127,7 +128,7 @@ def parse_interval(s: pd.Series, rung: str):
     form = _TIME_FORMS.get(rung)
     if form is None:
         raise RungError(f"unknown timestamp rung {rung!r}")
-    if rung == "ts.month_hour":  # month+hour-of-day only: no instant to place; matched by key
+    if rung in ("ts.month_hour", "ts.hour_of_day"):  # no instant to place; matched by key
         for raw in _cells(s):
             if raw and not re.fullmatch(form, raw):
                 raise RungError("cell does not fit its declared rung")
@@ -221,6 +222,15 @@ def _month_hour_keys(col: pd.Series) -> np.ndarray:
     return out
 
 
+def _hod_keys(col: pd.Series) -> np.ndarray:
+    """Hour of day for ts.hour_of_day cells (HH:00), else -1 (blank = wildcard)."""
+    out = np.full(len(col), -1, dtype=np.int64)
+    for i, raw in enumerate(col.fillna("").astype(str).str.strip().tolist()):
+        if raw:
+            out[i] = int(raw[:2])
+    return out
+
+
 def _hour_keys(a0, a1) -> np.ndarray:
     hours = pd.date_range(pd.Timestamp(a0).floor("h"), pd.Timestamp(a1), freq="h")
     return (hours.year * 10_000 + hours.month * 100 + hours.hour).to_numpy(dtype=np.int64)
@@ -258,8 +268,9 @@ class Matcher:
             elif q.kind == "time":
                 rung = _need_rung(rungs, q.prot[0], "time")
                 mh = _month_hour_keys(col) if rung == "ts.month_hour" else np.full(self.n, -1, dtype=np.int64)
-                self.d[i] = parse_interval(col, rung) + (mh,)
-                self.inf[i] = bool((~np.isnat(self.d[i][0])).any() or (mh >= 0).any())
+                hod = _hod_keys(col) if rung == "ts.hour_of_day" else np.full(self.n, -1, dtype=np.int64)
+                self.d[i] = parse_interval(col, rung) + (mh, hod)
+                self.inf[i] = bool((~np.isnat(self.d[i][0])).any() or (mh >= 0).any() or (hod >= 0).any())
             elif q.kind == "name":
                 full = protected[list(q.prot)].fillna("").astype(str).agg(" ".join, axis=1).tolist()
                 index: dict = {}
@@ -342,7 +353,7 @@ class Matcher:
                 before, after = q.window if q.window else (24, 24)
                 a0 = (t0 - pd.Timedelta(hours=before)).to_datetime64()
                 a1 = (t1 + pd.Timedelta(hours=after) - (pd.Timedelta(1, 'ns') if t1 > t0 else pd.Timedelta(0))).to_datetime64()
-                s, e, mh = self.d[i]
+                s, e, mh, hod = self.d[i]
                 known = ~np.isnat(s) & (mh < 0)
                 ok = np.ones(self.n, bool)
                 sk, ek = s[known], e[known]
@@ -351,6 +362,10 @@ class Matcher:
                 is_mh = mh >= 0
                 if is_mh.any():
                     ok[is_mh] = np.isin(mh[is_mh], _hour_keys(a0, a1))
+                is_hod = hod >= 0
+                if is_hod.any():  # hour of day only, any date; blank cells stay compatible
+                    hrs = pd.date_range(pd.Timestamp(a0).floor("h"), pd.Timestamp(a1), freq="h").hour
+                    ok[is_hod] = np.isin(hod[is_hod], np.unique(hrs))
                 mask &= ok
             if self.inf[i]:
                 used += 1

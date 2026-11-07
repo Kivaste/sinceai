@@ -209,6 +209,13 @@ def verify_release(release_dir, *, full: bool = False, kit=None, master_key=None
     bad = [r for r in result.records if r.status not in OK_STATUSES]
     for r in bad:
         problems += _record_lines(r)
+    # The re-run must reproduce what the manifest attests: a status that differs either way (pass vs
+    # not_applicable, or any other) means the release no longer matches its gate record.
+    attested = {c["check"]: c["status"] for c in manifest["gate"]["checks"]}
+    for r in result.records:
+        if r.check in attested and r.status != attested[r.check]:
+            problems.append(f"check {r.check} [{r.scope}]: status mismatch "
+                            f"(manifest {attested[r.check]}, re-run {r.status})")
     if result.refused and not problems:  # the runner's own verdict is a floor, never overridden
         problems.append("checks: runner refused")
 
