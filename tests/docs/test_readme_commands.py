@@ -159,6 +159,17 @@ def test_measured_path_documents_module_cli_and_names_full_kit_dependency():
     assert "--recipient research-group" in release[0]["body"] and "--plan" not in release[0]["body"]
 
 
+def test_draft_policy_help_is_runnable_and_discloses_the_review_boundary():
+    """README/CLI ledger seam: optional drafting is discoverable, not an input to release search (D51)."""
+    draft = [block for block in BLOCKS if "pets-release.exe draft-policy" in block["body"]]
+    assert len(draft) == 1, "Document the built draft-policy CLI in the command ledger"
+    assert draft[0]["kind"] == "run" and "draft-policy --help" in draft[0]["body"]
+    text = README.read_text(encoding="utf-8")
+    assert "[docs/llm-front-end.md](docs/llm-front-end.md)" in text
+    assert "validated draft policy for human review" in text
+    assert "Feeding the draft into the search is future work" in text
+
+
 @pytest.mark.parametrize("command,reason", [
     ("run --scenario CS-S1", "cs-s1-deferred-d46"),
 ])
@@ -388,6 +399,15 @@ def _readme_complete_submission() -> str:
     assert len(stmts) == 1, "README must document exactly one runnable submission example"
     assert "--partial" not in stmts[0]
     return stmts[0]
+
+
+def test_submission_example_uses_the_default_search_release():
+    """README/CLI ledger seam: #128 restores the documented default run -> submission flow."""
+    command = _readme_complete_submission()
+    assert re.search(r"--release\s+\.\.\\sinceai-out\\health-s1(?:\s|$)", command), (
+        "The submission example must package the default search release, not the obsolete hand-plan workaround"
+    )
+    assert "Until #128 lands" not in README.read_text(encoding="utf-8")
 
 
 def _run_readme_submission(tmp_path, release_args: list[str]):
