@@ -126,3 +126,23 @@ def test_verify_refuses_forged_rung_step(spread, tmp_path, edit, code):
     res = cli("verify", str(_planted(spread, tmp_path, edit)))
     assert res.returncode == 1, res.stdout + res.stderr
     assert code in res.stdout
+
+def test_verify_full_re_measures_k_at_from(spread, tmp_path):
+    """A re-signed manifest whose recorded k at month+hour differs from a fresh measurement fails --full."""
+    from pets_release.manifest import compute_signature
+    from pets_release.pseudonym import MasterKey, manifest_signing_key
+    from run_helpers import TEST_KEY
+
+    def forge(m):
+        at = _hu8(m)["rungStep"]["atFrom"]
+        at["unitsSuppressed"] -= 1
+        at["share"] = round(at["unitsSuppressed"] / at["unitsBefore"], 6)
+        m["signature"]["value"] = compute_signature(m, manifest_signing_key(MasterKey.from_text(TEST_KEY)))
+
+    kit = spread[0]
+    dst = _planted(spread, tmp_path, forge)
+    assert cli("verify", str(dst)).returncode == 0  # still self-consistent: only a re-measure can tell
+    res = cli("verify", "--full", "--kit", str(kit), str(dst))
+    assert res.returncode == 1, res.stdout + res.stderr
+    assert "rungStep: H-U8: re-measure differs from the manifest" in res.stdout
+    assert "signature" not in res.stdout
