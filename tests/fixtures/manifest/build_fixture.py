@@ -144,6 +144,11 @@ EXTRA_GATE = [
     _ev("producer.original-values", "producer", "cells", 130),
 ]
 
+# Rungs whose contract form is a validator ID (keep/geo.topn: text, id.pseudonym: hex64, num.round: decimal) may
+# declare a narrower anchored regex; regex-form rungs (timestamp, age, icd) carry exactly their rung's form (#109).
+SHA = "^[0-9a-f]{64}$"
+
+
 def contract() -> dict:
     return {
         "k": 5,
@@ -154,21 +159,21 @@ def contract() -> dict:
                     "age_band": {"form": CONTRACT_FORMS["age.band5"], "params": {"bandYears": 5, "rung": "age.band5"}},
                     "arrival_ts": {"form": CONTRACT_FORMS["ts.month_hour"], "params": {"rung": "ts.month_hour"}},
                     "icd10_primary": {"form": CONTRACT_FORMS["icd.3"], "params": {"rung": "icd.3"}},
-                    "municipality": {"form": CONTRACT_FORMS["geo.topn"], "params": {"rung": "geo.topn", "topN": 8}},
-                    "readmit_30d": {"form": CONTRACT_FORMS["keep"], "params": {"rung": "keep"}},
-                    "sex": {"form": CONTRACT_FORMS["keep"], "params": {"rung": "keep"}},
-                    "triage": {"form": CONTRACT_FORMS["keep"], "params": {"rung": "keep"}},
-                    "visit_id": {"form": CONTRACT_FORMS["id.pseudonym"], "params": {"rung": "id.pseudonym"}},
+                    "municipality": {"form": "^(Municipality-[A-Z]|other)$", "params": {"rung": "geo.topn", "topN": 8}},
+                    "readmit_30d": {"form": "^[01]$", "params": {"rung": "keep"}},
+                    "sex": {"form": "^[FMX]$", "params": {"rung": "keep"}},
+                    "triage": {"form": "^[1-5]$", "params": {"rung": "keep"}},
+                    "visit_id": {"form": SHA, "params": {"rung": "id.pseudonym"}},
                 },
             },
             "lab_results.csv": {
                 "required": ["visit_id"],
                 "columns": {
-                    "lab_id": {"form": CONTRACT_FORMS["id.pseudonym"], "params": {"rung": "id.pseudonym"}},
-                    "test_code": {"form": CONTRACT_FORMS["keep"], "params": {"rung": "keep"}},
-                    "unit": {"form": CONTRACT_FORMS["keep"], "params": {"rung": "keep"}},
-                    "value": {"form": CONTRACT_FORMS["num.round"], "params": {"roundTo": 1, "rung": "num.round"}},
-                    "visit_id": {"form": CONTRACT_FORMS["id.pseudonym"], "params": {"rung": "id.pseudonym"}},
+                    "lab_id": {"form": SHA, "params": {"rung": "id.pseudonym"}},
+                    "test_code": {"form": "^[A-Z]{2,8}$", "params": {"rung": "keep"}},
+                    "unit": {"form": "^[A-Za-z/]{1,8}$", "params": {"rung": "keep"}},
+                    "value": {"form": "^[0-9]+$", "params": {"roundTo": 1, "rung": "num.round"}},
+                    "visit_id": {"form": SHA, "params": {"rung": "id.pseudonym"}},
                 },
             },
         },

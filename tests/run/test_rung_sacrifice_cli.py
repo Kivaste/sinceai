@@ -25,6 +25,8 @@ verify tiers fail.
                                                     -> test_verify_refuses_missing_or_unsupported_contract_rung
   C6 extra hour-of-day contract column (derived_from arrival_ts, listed as QI) no justification backs
      -> verify passes                               -> test_verify_refuses_contract_column_no_justification_backs
+  C7 arrival_ts relabelled keep (justification + contract) with an hour-only regex and cells -> verify passes
+                                                    -> test_verify_refuses_rung_off_the_policy_ladder
 """
 from __future__ import annotations
 
@@ -254,3 +256,22 @@ def test_verify_refuses_contract_column_no_justification_backs(released, tmp_pat
     res = cli("verify", str(dst))
     assert res.returncode == 1, res.stdout + res.stderr
     assert "$.contract.files.ed_visits.csv.columns.arrival_hour: rung-unjustified" in res.stdout
+
+def test_verify_refuses_rung_off_the_policy_ladder(released, tmp_path):
+    """C7: arrival_ts relabelled ``keep`` in both the justification and the contract, with an hour-only regex form
+    (a validator-ID rung may declare a narrower regex) and hour-only cells: a timestamp column must carry a
+    timestamp-ladder rung, or the sacrifice rule is bypassed."""
+    def relabel(col):
+        col["form"] = r"^\d{2}:00$"
+        col["params"]["rung"] = "keep"
+
+    dst = _forged_hour_of_day(released, tmp_path, contract_edit=relabel)
+    from pets_release.manifest import canonical_bytes
+
+    m = _manifest(dst)
+    _just(m, "arrival_ts")["rung"] = "keep"
+    _resign(m)
+    (dst / "privacy_manifest.json").write_bytes(canonical_bytes(m))
+    res = cli("verify", str(dst))
+    assert res.returncode == 1, res.stdout + res.stderr
+    assert "ed_visits.arrival_ts: rung-not-on-ladder" in res.stdout

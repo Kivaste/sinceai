@@ -95,11 +95,20 @@ def _order(errs: list[str], path: str, items: list, key) -> None:
 
 def _applied_rungs(m: dict, errs: list[str]) -> dict:
     """#109: ``{(table, source column): rung}`` as the bound contract applies it to each released field
-    (``contract.files[<table>.csv].columns[<outputColumn>].params.rung``). The justification's rung must equal it
-    and the column's form must be that rung's form; a missing or non-string contract rung, or a contract column
-    no released justification backs, is an error (fail closed: no rung, no sacrifice decision)."""
-    from pets_release.ladders import CONTRACT_FORMS
+    (``contract.files[<table>.csv].columns[<outputColumn>].params.rung``). Fail closed (no rung, no sacrifice
+    decision): the contract rung must exist and equal the justification's, lie on the ladder the pinned policy
+    gives that source column, and the column's form must be the rung's form. A rung whose form is a validator ID
+    (``text``, ``hex64``, ``decimal``, ...) may declare a narrower anchored regex instead; every regex-form rung
+    (all timestamp rungs) must carry exactly its own form. A contract column no released justification backs is
+    an error too."""
+    from pets_release.ladders import CONTRACT_FORMS, RUNG_KIND
+    from pets_release.policy import get_policy
 
+    try:
+        floors = get_policy(m["release"]["scenario"]).floors
+    except KeyError:
+        errs.append("$.release.scenario: no-policy")
+        return {}
     files = m["contract"]["files"]
     applied, backed = {}, set()
     for f in m["fieldJustifications"]:
@@ -115,7 +124,13 @@ def _applied_rungs(m: dict, errs: list[str]) -> dict:
             continue
         if rung != f["rung"]:
             errs.append(f"{where}: rung-contract-mismatch")
-        if CONTRACT_FORMS.get(rung) != col["form"]:
+        floor = floors.get((t, c))
+        if floor is None or RUNG_KIND.get(rung) != floor.family:
+            errs.append(f"{where}: rung-not-on-ladder")
+        want = CONTRACT_FORMS.get(rung)
+        narrower = not want.startswith("^") and col["form"].startswith("^") and col["form"].endswith("$") \
+            if want is not None else False
+        if want is None or (col["form"] != want and not narrower):
             errs.append(f"{where}: rung-form-mismatch")
         applied[(t, c)] = rung
     for file, spec in sorted(files.items()):
