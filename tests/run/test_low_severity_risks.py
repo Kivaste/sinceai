@@ -16,20 +16,10 @@ from __future__ import annotations
 
 import json
 
-import pandas as pd
-from run_helpers import build_kit, cli, coarse_qis, run_args
-from test_verify_assertion_rerun import MANIFEST, resign
+from release_helpers import MANIFEST, plant_health, resign
+from run_helpers import build_kit, cli, run_args
 
-PLANTED = "diabetes follow-up panel"  # synthetic; matches the bundled health lexicon (prefix "diabet")
 RISK = "gate:text.health:HEALTH"
-
-
-def _plant(folder):
-    coarse_qis(folder)
-    p = folder / "lab_results.csv"
-    df = pd.read_csv(p, dtype=str, keep_default_na=False, na_filter=False)
-    df.loc[0, "test_name"] = PLANTED
-    df.to_csv(p, index=False, encoding="utf-8", lineterminator="\n")
 
 
 def _risks(rel, kind="gate_low_severity"):
@@ -38,7 +28,7 @@ def _risks(rel, kind="gate_low_severity"):
 
 
 def test_low_hit_published_as_counted_residual_risk_and_reverified(tmp_path):
-    kit = build_kit(tmp_path / "kit", _plant)
+    kit = build_kit(tmp_path / "kit", plant_health)
     rel = tmp_path / "out" / "rel"
     proc = cli(*run_args(kit, rel))
     assert proc.returncode == 0, proc.stdout + proc.stderr

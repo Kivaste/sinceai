@@ -77,8 +77,14 @@ def low_severity_source(check: str, version: str, scope: str) -> str:
 
 
 def _low_severity_risk_id(check: str, label: str) -> str:
+    """Readable only for an unambiguous, bounded pair; otherwise hash its full identity.
+
+    Replaces legacy truncation and ambiguous colon-joined IDs. Verification re-derives
+    the current format and fails closed on an old ID mismatch; no legacy alias is trusted.
+    Ordinary short, colon-free identities retain their existing readable IDs.
+    """
     risk = f"gate:{check}:{label}"
-    if len(risk) <= 64 and re.fullmatch(r"[A-Za-z0-9._:+-]+", risk):
+    if ":" not in check and ":" not in label and len(risk) <= 64 and re.fullmatch(r"[A-Za-z0-9._:+-]+", risk):
         return risk
     # Hash the complete, unmodified pair, not its truncated or sanitised display.
     # URL-safe base64 preserves all 256 bits within the schema's 64-character limit.

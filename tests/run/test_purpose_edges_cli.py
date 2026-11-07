@@ -6,9 +6,9 @@ import subprocess
 import sys
 
 import pytest
+from release_helpers import MANIFEST, resign
+from release_helpers import plant_health as _plant
 from run_helpers import ROOT, build_kit, coarse_qis, env, run_args
-from test_low_severity_risks import _plant
-from test_verify_assertion_rerun import MANIFEST, resign
 
 # Fault injection, not a passing substitute: execute the real adapter on the real
 # synthetic tables, then make its before-result unavailable. Acceptance and refusal
@@ -22,6 +22,13 @@ def fault(scenario, source, released, *, root):
     results = real(scenario, source, released, root=root)
     if mode == "empty":
         return []
+    if mode.startswith("typed-"):
+        _, side, kind = mode.split("-")
+        if (source is released) == (side == "before"):
+            for r in results:
+                if r["id"] == "H-U4":
+                    r.update(status="ok", score={"one": 1, "zero": 0, "true": True, "false": False}[kind])
+        return results
     if source is released:
         if mode == "missing":
             return [r for r in results if r["id"] != "H-U4"]
@@ -90,6 +97,33 @@ def test_unavailable_before_score_fails_full_verify(released):
     assert "purpose:H-U4:before:not_answerable" in full.stdout
 
 
+@pytest.mark.parametrize("side", ["before", "after"])
+@pytest.mark.parametrize("kind", ["one", "zero", "true", "false"])
+def test_nonfloat_adapter_scores_refuse_run(tmp_path, side, kind):
+    """Seam: CLI run; the adapter promises float scores, never raw ints or bools."""
+    kit = build_kit(tmp_path / "kit", coarse_qis)
+    out = tmp_path / "out" / "rel"
+    proc = _fault_cli(f"typed-{side}-{kind}", *run_args(kit, out))
+    assert proc.returncode == 1, proc.stdout + proc.stderr
+    assert not out.exists()
+    report = json.loads((out.parent / "rel.scoring" / "refusal_report.json").read_text(encoding="utf-8"))
+    reason = "purpose:H-U4:before:error" if side == "before" else "purpose:H-U4:error"
+    assert reason in report["reasons"]
+    assert "Traceback" not in proc.stderr
+
+
+@pytest.mark.parametrize("side", ["before", "after"])
+@pytest.mark.parametrize("kind", ["one", "zero", "true", "false"])
+def test_nonfloat_adapter_scores_fail_full_verify(released, side, kind):
+    """Seam: CLI verify --full; freshly returned ints/bools violate the same adapter contract."""
+    kit, out, proc = released
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    full = _fault_cli(f"typed-{side}-{kind}", "verify", "--full", "--kit", str(kit), str(out))
+    assert full.returncode == 1, full.stdout + full.stderr
+    reason = "purpose:H-U4:before:error" if side == "before" else "purpose:H-U4:error"
+    assert reason in full.stdout
+
+
 def test_empty_purpose_task_set_refuses_run(tmp_path):
     """Seam: CLI run; zero enforced tasks is an explicit refusal, not acceptance or a traceback."""
     kit = build_kit(tmp_path / "kit", coarse_qis)
@@ -126,10 +160,24 @@ health = next(c for c in all_checks() if c.name == "text.health")
 names = [("edge.health-producer", "producer")]
 if os.environ.get("EDGE_LONG_NAMES"):
     names = [("edge." + "q" * 58 + suffix, scope) for suffix, scope in (("a", "release"), ("b", "producer"))]
+colon_names = os.environ.get("EDGE_COLON_NAMES")
+if colon_names:
+    # Fault injection at identity validation only: today's registry/schema forbid
+    # colon check names. Exercise the writer defensively if such a record arrives;
+    # all scans, hit counts, publication rules and verification stay real.
+    import re
+    import pets_release.checks.registry as registry
+    from pets_release.manifest import MANIFEST_SCHEMA
+    pattern = r"^[a-z0-9][a-z0-9._:-]{0,63}$"
+    registry.CHECK_NAME = re.compile(pattern)
+    MANIFEST_SCHEMA["$defs"]["checkName"]["pattern"] = pattern
+    names = [("edge.health:part", "release"), ("edge.health", "release")]
 for name, scope in names:
     def scan(release, contract, context, name=name):
         result = health.run(release, contract, context)
-        return replace(result, violations=tuple(replace(v, check=name) for v in result.violations))
+        return replace(result, violations=tuple(
+            replace(v, check=name, label="part:" + v.label if colon_names and name == "edge.health" else v.label)
+            for v in result.violations))
     register(name=name, version=health.version, scope=scope, unit=health.unit,
              applies_to=health.applies_to)(scan)
 from pets_release.cli import main
@@ -137,9 +185,10 @@ raise SystemExit(main())
 """
 
 
-def _risk_cli(*args, long_names=False):
+def _risk_cli(*args, long_names=False, colon_names=False):
     return subprocess.run([sys.executable, "-c", _RISK_CHECK, *args], cwd=ROOT,
-                          env=env({"EDGE_LONG_NAMES": "1"} if long_names else {}),
+                          env=env({"EDGE_LONG_NAMES": "1" if long_names else "",
+                                   "EDGE_COLON_NAMES": "1" if colon_names else ""}),
                           capture_output=True, text=True, encoding="utf-8", check=False)
 
 
@@ -184,3 +233,22 @@ def test_long_check_names_have_distinct_reverifiable_risk_ids(tmp_path):
     resign(out)
     limited = _risk_cli("verify", str(out), long_names=True)
     assert limited.returncode == 1 and "residualRisks" in limited.stdout, limited.stdout + limited.stderr
+
+
+def test_colon_check_and_label_have_distinct_reverifiable_risk_ids(tmp_path):
+    """Seam: CLI run/verify; planted ambiguous identities cannot alias one residual-risk ID."""
+    kit = build_kit(tmp_path / "kit", _plant)
+    out = tmp_path / "out" / "rel"
+    proc = _risk_cli(*run_args(kit, out), colon_names=True)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    manifest = json.loads((out / MANIFEST).read_text(encoding="utf-8"))
+    low = [r for r in manifest["residualRisks"] if r["kind"] == "gate_low_severity"]
+    assert len(low) == len({r["risk"] for r in low}) == 3
+    ambiguous = [r for r in low if "edge.health" in r["rate"]["source"]]
+    assert len(ambiguous) == 2
+    assert all(r["risk"].startswith("gate-sha256:") for r in ambiguous)
+    assert all(len(r["risk"]) <= 64 for r in ambiguous)
+    limited = _risk_cli("verify", str(out), colon_names=True)
+    assert limited.returncode == 0, limited.stdout + limited.stderr
+    full = _risk_cli("verify", "--full", "--kit", str(kit), str(out), colon_names=True)
+    assert full.returncode == 0, full.stdout + full.stderr

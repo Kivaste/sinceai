@@ -13,29 +13,14 @@ Rows (trigger -> result), real CLI on a real-CLI synthetic release, synthetic ro
 from __future__ import annotations
 
 import csv
-import hashlib
 import io
 import json
 import shutil
 
-from run_helpers import TEST_KEY, cli
+from release_helpers import MANIFEST, resign
+from run_helpers import cli
 
-from pets_release.manifest import canonical_bytes, compute_signature
-from pets_release.pseudonym import MasterKey, manifest_signing_key
-
-MANIFEST = "privacy_manifest.json"
 PLANTED_IP = "10.0.0.7"  # private-use: low severity for rescan.ip-addresses / text.ip-addresses
-
-
-def resign(release) -> None:
-    """Rebind every file digest and re-sign with the published test key (isolates verify from the signature)."""
-    m = json.loads((release / MANIFEST).read_text(encoding="utf-8"))
-    m["bindings"]["files"] = {f: hashlib.sha256((release / f).read_bytes()).hexdigest()
-                              for f in sorted(m["bindings"]["files"])}
-    sk = manifest_signing_key(MasterKey.from_text(TEST_KEY))
-    m["signature"]["value"] = "0" * 64
-    m["signature"]["value"] = compute_signature(m, sk)
-    (release / MANIFEST).write_bytes(canonical_bytes(m))
 
 
 def set_cell(release, name: str, column: str, value: str, row: int = 0) -> None:

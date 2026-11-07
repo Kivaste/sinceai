@@ -20,8 +20,8 @@ from __future__ import annotations
 import json
 import shutil
 
+from release_helpers import MANIFEST, resign
 from run_helpers import blank_columns, build_kit, cli, coarse_qis, run_args
-from test_verify_assertion_rerun import MANIFEST, resign
 
 from pets_release.policy import get_policy
 
@@ -33,7 +33,7 @@ def _manifest(rel):
 
 
 def test_published_release_carries_measured_purpose_scores(released):
-    kit, out, proc = released
+    _kit, out, proc = released
     assert proc.returncode == 0, proc.stdout + proc.stderr
     m = _manifest(out)
     util = m["measured"]["utility"]
