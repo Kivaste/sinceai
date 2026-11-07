@@ -292,6 +292,30 @@ def cli():
 
 # Test tiers: collection only, never skip or change the default full-suite run.
 SLOW_TESTS_PATH = Path(__file__).resolve().with_name("slow_tests.txt")
+D62_SLOW_NODEIDS_PATH = Path(__file__).resolve().with_name("slow_nodeids.txt")
+_D62_COLLECTED = pytest.StashKey[set[str]]()
+
+
+def d62_slow_nodeids() -> set[str]:
+    """D62 overrides, bound to this checkout rather than the caller's cwd."""
+    try:
+        text = D62_SLOW_NODEIDS_PATH.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        # Old isolated conftest harnesses predate this list. Once the list exists
+        # in the tested revision, deleting it must not disable tier policy.
+        has_revision = _guard_git(ROOT, "rev-list", "--all", "--max-count=1")
+        if has_revision and _guard_git(ROOT, "ls-tree", "--name-only", "HEAD", "--", "tests/slow_nodeids.txt"):
+            raise pytest.UsageError("cannot read tests/slow_nodeids.txt") from None
+        return set()
+    except OSError as exc:
+        raise pytest.UsageError("cannot read tests/slow_nodeids.txt") from exc
+    nodeids = {line.strip() for line in text.splitlines() if line.strip() and not line.lstrip().startswith("#")}
+    for nodeid in sorted(nodeids):
+        module, separator, name = nodeid.partition("::")
+        if (not module.startswith("tests/") or not module.endswith(".py") or not separator or not name
+                or "\\" in module or any(part in {"", ".", ".."} for part in module.split("/"))):
+            raise pytest.UsageError("invalid tests/slow_nodeids.txt ID: " + nodeid)
+    return nodeids
 FAST_CLI_SMOKE = frozenset({
     "tests/run/test_run.py::test_planted_card_number_refuses_via_cli",
     "tests/run/test_run.py::test_release_passes_gate_and_both_verify_tiers",
@@ -335,8 +359,41 @@ def pytest_collection_modifyitems(items):
         }
     except OSError as exc:
         raise pytest.UsageError("cannot read canonical tests/slow_tests.txt") from exc
+    overrides = d62_slow_nodeids()
     for item in items:
-        if requires_real_kit(item):
+        if item.nodeid in overrides:
+            item.add_marker(pytest.mark.slow(reason="D62 measured heavy CLI"))
+        elif requires_real_kit(item):
             item.add_marker(pytest.mark.slow(reason="real-kit"))
         elif item.nodeid in measured and not keep_synthetic_cli_fast(item):
             item.add_marker(pytest.mark.slow(reason="profile"))
+
+
+def pytest_itemcollected(item):
+    item.config.stash.setdefault(_D62_COLLECTED, set()).add(item.nodeid)
+
+
+def pytest_collection_finish(session):
+    """Reject stale in-scope IDs before running tests, even with -m/-k.
+
+    Targeted collection validates only its selected paths/nodes. The merger's
+    full collection validates every entry, including deleted modules.
+    """
+    scopes = []
+    for arg in session.config.args:
+        path, *parts = str(arg).split("::")
+        absolute = (Path(session.config.invocation_params.dir) / path).resolve()
+        try:
+            relative = absolute.relative_to(session.config.rootpath).as_posix()
+        except ValueError:
+            continue
+        scopes.append("::".join((relative, *parts)))
+    collected = session.config.stash.get(_D62_COLLECTED, set())
+    missing = sorted(
+        nodeid for nodeid in d62_slow_nodeids() - collected
+        if any(scope == "." or nodeid == scope or nodeid.startswith(
+            (scope.rstrip("/") + "/", scope + "::", scope + "[")
+        ) for scope in scopes)
+    )
+    if missing:
+        raise pytest.UsageError("stale tests/slow_nodeids.txt IDs: " + ", ".join(missing))

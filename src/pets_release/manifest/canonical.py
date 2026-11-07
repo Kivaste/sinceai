@@ -6,6 +6,12 @@ import hashlib
 import json
 from typing import Any
 
+# The one strict loader (#114) lives in the stdlib-only leaf ``pets_release.strict_json`` so scorer modules can use
+# it without reaching pipeline modules (fu85); re-exported here for every existing manifest-side reader.
+from pets_release.strict_json import loads_strict
+
+__all__ = ["canonical_bytes", "canonical_digest", "loads_strict"]
+
 
 def _check_keys(obj: Any) -> None:
     if isinstance(obj, dict):
@@ -29,25 +35,3 @@ def canonical_digest(obj: Any) -> str:
     """SHA-256 hex digest of ``canonical_bytes(obj)``."""
     return hashlib.sha256(canonical_bytes(obj)).hexdigest()
 
-
-def _no_duplicates(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
-    out: dict[str, Any] = {}
-    for key, value in pairs:
-        if key in out:
-            raise ValueError("duplicate JSON object key")
-        out[key] = value
-    return out
-
-
-def _no_constant(_name: str) -> Any:
-    raise ValueError("non-finite JSON number constant")
-
-
-def loads_strict(raw: bytes | str, *, numbers_as_text: bool = False) -> Any:
-    """Parse JSON, rejecting duplicate keys (any depth) and NaN/Infinity. Raises ValueError (JSONDecodeError and
-    UnicodeDecodeError included). ``numbers_as_text`` keeps every number as its exact JSON text (for scanners).
-    The one manifest loader (#114): every production reader of a manifest parses through here."""
-    if isinstance(raw, bytes):
-        raw = raw.decode("utf-8")
-    extra = {"parse_int": str, "parse_float": str} if numbers_as_text else {}
-    return json.loads(raw, object_pairs_hook=_no_duplicates, parse_constant=_no_constant, **extra)

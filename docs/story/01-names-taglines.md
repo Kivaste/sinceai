@@ -1,7 +1,9 @@
 # Name, tagline and built-with draft
 
-PREP for #103, not final submission text. Finalisation waits for the final review
-and fresh proof on the exact final SHA; see `06-numbers-to-fill.md`.
+**PRE-FILL at df79ec20538e8f02b3256911fb01d549e5af0ebb** (#103, D61).
+Not final submission text. Refresh the numbers from the post-freeze manifest;
+final readiness still requires review and fresh proof on that exact revision.
+See `06-numbers-to-fill.md` and `PRE-FILL-SOURCES.md`.
 
 Recommended name (limit 80 characters):
 
@@ -13,7 +15,18 @@ Recommended tagline (limit 140 characters):
 
 Recommended first five built-with chips: Python, pandas, NumPy, jsonschema, Jinja2.
 Evaluation uses pets-eval and scikit-learn; HMAC-SHA256 uses the standard library.
-Do not list a model provider as a shipped dependency without #32 and final-SHA proof.
+Optional request-only policy drafting is not the release engine. Do not list a
+model provider as a shipped dependency without its own integration proof.
+
+## Product positioning (D57)
+
+sinceai's product is the engine: a library and CLI running as a self-hosted
+pipeline step in the customer's infrastructure (CI, Airflow or dbt). Exit 0
+releases; publish only after successful verification. Exit 1 stops on refusal or
+a failed check; exit 2 stops on bad input/configuration or an unknown state.
+The web app is the approval and audit console for one run. A self-hosted REST API
+is future work. Source row values and keys stay in-house; only approved protected
+tables and the content-free signed privacy manifest go to the intended recipient.
 
 ## Story order (D40)
 

@@ -15,9 +15,9 @@ from pets_eval import scorecard as kit_scorecard
 
 from pets_release.kiteval.report import ScorecardRejected, validate_report
 from pets_release.kiteval.rowmap import Lineage, RowMapRejected, validate_row_map
-from pets_release.manifest.canonical import loads_strict
 from pets_release.offline import child_env
 from pets_release.offline import install as install_offline_guard
+from pets_release.strict_json import loads_strict  # leaf module: no pipeline imports (fu85)
 
 
 def _read_str(path, **kw) -> pd.DataFrame:
