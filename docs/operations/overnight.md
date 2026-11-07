@@ -102,6 +102,21 @@ The watchdog only keeps the orchestrator alive; it does not notice an orchestrat
 - **Nudge** (queued through `send-to-orchestrator.ps1`, one message listing every item and asking to dispatch all of them in one turn) only if idle work exists, mean CPU (3 samples) < 70%, live implement+fix sessions < 16, the last nudge was ≥ 10 minutes ago (`utilization-state.json`), phase is not `done`, and the orchestrator is not inactive-and-idle > 25 minutes (that case is the watchdog's).
 - Every run writes one line to `.scratch/local-overnight/utilization.log`: action, reason, CPU, sessions by kind, idle items. Errors are logged and exit 3; a named mutex prevents overlapping runs. If a flagged item is blocked in a way GitHub doesn't record, the orchestrator should add the blocker as an issue dependency so the monitor stops flagging it.
 
+### Main-checkout write guard (#123)
+
+Before any utilization/network probes, each monitor cycle reads `git --no-optional-locks -C <main> status --porcelain=v1 -z --untracked-files=all`. The default `-MainCheckout` is explicitly `C:\Users\kivas\AI\sinceai-hackaton`, not whichever worktree contains the script. Git must identify that exact directory as its top-level. The only baseline paths are `tests/gen_fixtures/test_refusal_manifest_fixtures.py` and `tests/run/test_verify_assertion_rerun.py`; the first scan does **not** silently baseline other dirty paths.
+
+New paths absent from both that baseline and the previous successful snapshot trigger a separate, content-free **steer** message through `send-to-orchestrator.ps1`. This bypasses utilization cooldown, CPU, phase and GitHub checks. The snapshot lives at `main-checkout-writes-<SHA256 of normalized checkout path>.json` in the monitor state directory, with the checkout identity, fixed baseline and previous paths. Failed delivery leaves it unchanged for retry. Git failures (including missing Git) and invalid snapshots produce an **unknown** alert, never clean, and do not advance state.
+
+`-CheckoutCheckOnly` bypasses all capacity probes: exit 0 = no new paths (clean or previously reported), 1 = new dirty paths, 2 = unknown, 3 = delivery/runner failure. `-DryRun` prints the would-be message and writes the monitor log, but never sends or updates snapshots. Use an external `-StateDir` when checking the real main checkout from a worktree:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/overnight/utilization-check.ps1 -CheckoutCheckOnly -DryRun -MainCheckout C:\Users\kivas\AI\sinceai-hackaton -StateDir C:\Users\kivas\AI\sinceai-out\fu123\main-state
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/overnight/test-main-checkout-writes.ps1
+```
+
+This is path-transition polling, not a filesystem audit: it cannot detect a write restored entirely between cycles, another overwrite of an already-dirty path, ignored files, or attribute a write to an agent rather than the orchestrator. A committed clean orchestrator change produces no dirty path. A disappeared path alerts again if it reappears after an observed cycle without it. Deploying the merged script to the existing scheduled monitor remains the orchestrator's job; worktree tests never modify the live task.
+
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/overnight/utilization-check.ps1 -DryRun   # decision + message, nothing sent
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/overnight/install-utilization.ps1
