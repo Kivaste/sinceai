@@ -143,6 +143,11 @@ def _cross_field_errors(m: dict) -> list[str]:
 
     errs += [f"$.{p}" for p in contract_policy_problems(m["release"]["scenario"], m["contract"])]
 
+    # identifier-shaped text anywhere outside the pinned digest/signature metadata (#61)
+    from pets_release.manifest.value_scan import identifier_shape_errors
+
+    errs += identifier_shape_errors(m, _fmt)
+
     meas = m["measured"]
     lists = {"utility": ("tasks", tk("task")), "privacy": ("components", tk("component")),
              "search": ("points", tk("step")), "baselines": ("rows", tk("baseline", "metric")),
