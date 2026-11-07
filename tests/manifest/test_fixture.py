@@ -55,6 +55,14 @@ def test_fixture_evidence_uses_ticket_04_check_names_and_versions():
     assert set(TICKET_04_ASSERTION_CHECKS) == set(ALL_ASSERTIONS)
 
 
+def test_fixture_gate_uses_ticket_11_registered_names():
+    # origin/ticket/11-producer-checks 26de63b: (name, scope, unit)
+    gate = {c["check"]: (c["scope"], c["denominator"]["unit"]) for c in manifest()["gate"]["checks"]}
+    assert gate["producer.row-k"] == ("release", "rows")
+    assert gate["producer.original-values"] == ("producer", "cells")
+    assert "release.row-k" not in gate
+
+
 def test_matches_ticket_04_registry_when_merged():
     checks = pytest.importorskip("pets_release.checks", reason="ticket 04 not merged: not run, not a pass")
     ASSERTION_CHECKS = checks.ASSERTION_CHECKS
