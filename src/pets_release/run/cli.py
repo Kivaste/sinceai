@@ -9,6 +9,7 @@ import sys
 
 from pets_release.cli import UsageError, resolve_run_context
 from pets_release.manifest import loads_strict
+from pets_release.offline import entry_point
 from pets_release.run.pipeline import RunError, RunRefused, run_release
 
 
@@ -31,6 +32,7 @@ def _print_gate(scoring) -> None:
                 print(f"  check {r['check']}: {r['status']} (hits={r.get('hits')})")
 
 
+@entry_point
 def main(argv: list[str]) -> int:
     try:
         ctx = resolve_run_context(argv)

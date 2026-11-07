@@ -8,10 +8,12 @@ from __future__ import annotations
 import sys
 
 from pets_release.manifest.validate import validate_manifest_file
+from pets_release.offline import entry_point
 
 USAGE = "usage: python -m pets_release.manifest validate <manifest.json | release_dir>"
 
 
+@entry_point
 def main(argv: list[str] | None = None) -> int:
     args = sys.argv[1:] if argv is None else argv
     if len(args) != 2 or args[0] != "validate":

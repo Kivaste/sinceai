@@ -15,6 +15,8 @@ from pets_eval import scorecard as kit_scorecard
 
 from pets_release.kiteval.report import ScorecardRejected, validate_report
 from pets_release.kiteval.rowmap import Lineage, RowMapRejected, validate_row_map
+from pets_release.offline import child_env
+from pets_release.offline import install as install_offline_guard
 
 
 def _tables(folder: Path) -> dict[str, Path]:
@@ -91,7 +93,11 @@ def run_scorecard(original_dir, protected_dir, *, scenario: str, root, rowmaps: 
     can only be checked structurally, not for swapped or wrongly suppressed records.
     All paths are resolved to absolute before the child starts (its cwd is out_dir).
 
-    Raises ScorecardRejected / RowMapRejected; nothing missing, errored or empty passes."""
+    Raises ScorecardRejected / RowMapRejected; nothing missing, errored or empty passes.
+
+    Offline: installs the guard in this process and launches the evaluator with `child_env`, whatever
+    route the caller came in by."""
+    install_offline_guard()
     original_dir, protected_dir, root, out_dir = (Path(p).resolve() for p in (original_dir, protected_dir, root, out_dir))
     rowmaps = {t: Path(p).resolve() for t, p in rowmaps.items()}
     if _inside(out_dir, protected_dir) or _inside(protected_dir, out_dir):
@@ -135,7 +141,7 @@ def run_scorecard(original_dir, protected_dir, *, scenario: str, root, rowmaps: 
            "--out", str(out_dir)]
     for table in sorted(rowmaps):
         cmd += ["--rowmap", f"{table}={rowmaps[table]}"]
-    env = {**os.environ, "PYTHONUTF8": "1", "PYTHONDONTWRITEBYTECODE": "1", "TZ": "UTC"}
+    env = child_env({**os.environ, "PYTHONUTF8": "1", "PYTHONDONTWRITEBYTECODE": "1", "TZ": "UTC"})
     proc = subprocess.run(cmd, env=env, capture_output=True, check=False, cwd=str(out_dir))
     (out_dir / "evaluator.log").write_bytes(proc.stdout + b"\n--- stderr ---\n" + proc.stderr)
     if proc.returncode != 0:

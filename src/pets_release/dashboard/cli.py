@@ -14,6 +14,7 @@ from pathlib import Path
 
 from pets_release.dashboard.render import render_csv, render_html
 from pets_release.manifest import loads_strict, validate_manifest_file
+from pets_release.offline import entry_point
 
 MANIFEST = "privacy_manifest.json"
 
@@ -24,6 +25,7 @@ class _Parser(argparse.ArgumentParser):
         self.exit(2, f"{self.prog}: error: {message}\n")
 
 
+@entry_point
 def main(argv: list[str]) -> int:
     p = _Parser(prog="pets-release dashboard", description="render the judge dashboard from the manifest")
     p.add_argument("release_dir")
