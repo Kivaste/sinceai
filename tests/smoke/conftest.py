@@ -4,10 +4,10 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
-from pathlib import Path
 import shutil
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -52,6 +52,7 @@ def smoke_checkout(tmp_path):
                     frame.loc[0, "disposition"] = "4111 1111 1111 1111"
                     frame.to_csv(path, index=False, lineterminator="\n")
             kit = helpers.build_kit(tmp_path / "kit", edit)
+            shutil.copytree(ROOT / "tests/fixtures/minikit/customer_service", kit / "data/customer_service")
             (kit / "results").mkdir()
             (kit / "results/benchmark.json").write_text("{}", encoding="utf-8")
             return kit
@@ -71,6 +72,13 @@ def smoke_checkout(tmp_path):
 
         def record(self, sha):
             return json.loads((tmp_path / "evidence" / sha / "smoke.json").read_text(encoding="utf-8"))
+
+        def validate(self, record):
+            path = tmp_path / "record.json"
+            path.write_text(json.dumps(record, sort_keys=True, separators=(",", ":")), encoding="utf-8")
+            return subprocess.run([sys.executable, str(checkout / "scripts/release_smoke.py"),
+                                   "--validate-record", str(path)], cwd=checkout, env=env,
+                                  capture_output=True, check=False).returncode
 
         path = checkout
         output = tmp_path / "evidence"
