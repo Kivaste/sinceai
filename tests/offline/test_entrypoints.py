@@ -35,6 +35,7 @@ MODULES = [
     "pets_release.redaction_eval",
     "pets_attacker",
     "pets_attacker.bridge",
+    "pets_release.measure.wire",
 ]
 # `<module>.main(argv)` called directly (e.g. from Python, or by the dispatcher).
 MAINS = [
@@ -49,6 +50,7 @@ MAINS = [
     "pets_release.detect.cli",
     "pets_release.verify.cli",
     "pets_release.run.cli",
+    "pets_release.measure.wire",
 ]
 
 _AFTER = (
