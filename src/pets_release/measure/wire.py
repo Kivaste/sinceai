@@ -18,7 +18,7 @@ import sys
 from pathlib import Path
 
 from pets_release.cli import UsageError, resolve_run_context
-from pets_release.measure import MeasureRejected, attackers, measure, person_k_components
+from pets_release.measure import MeasureRejected, attackers, diagnosis_k, measure, person_k_components
 from pets_release.offline import entry_point
 from pets_release.recipient import RecipientError, validate_recipient_id
 from pets_release.run import pipeline
@@ -54,11 +54,13 @@ def run_measured(*, kit, scenario: dict, created: str, key_text: str, out, plan_
                     rowmaps=rowmaps, lineage=lineage, record_keys=spec["record_keys"], out_dir=work / "scorecards",
                     person_k=person_k_components(person, k=first.suppression["k"]))
     attack, why = _attack(kit.root, scratch, rowmaps, work / "attack")
+    dx_k = diagnosis_k.risk_entry(kit=kit, key_text=key_text, release=scratch)  # #143: aggregates only
     original = pipeline.build_narrative
 
     def with_measured(**kw):
         n = original(**kw)
         n["residualRisks"] = attackers.merge(n["residualRisks"], attack, why)  # #138: both personas' rates
+        n["residualRisks"] = sorted([*n["residualRisks"], dx_k], key=lambda r: r["risk"])
         own = n["measured"]["search"]
         n["measured"] = dict(block)
         if own.get("status") == "measured":  # ticket 25: a search run's own measured.search (from its log) stays
