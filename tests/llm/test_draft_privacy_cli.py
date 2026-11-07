@@ -89,6 +89,23 @@ def test_cli_preserves_safe_draft_details(make_kit, tmp_path, column, detail):
     assert not temp.exists()
 
 
+def test_cli_writes_valid_health_draft_with_all_safe_detail_types(make_kit, tmp_path):
+    """A purpose-first HEALTH-S1 draft may combine legitimate details, pseudonyms and redacted text."""
+    fields = [
+        {"table": "ed_visits", "column": "outcome", "detail": "exact", "reason": "Outcome"},
+        {"table": "ed_visits", "column": "subject", "detail": "pseudonymised", "reason": "Linkage"},
+        {"table": "ed_visits", "column": "patient_name", "detail": "pseudonymised", "reason": "Linkage"},
+        {"table": "ed_visits", "column": "narrative", "detail": "redacted", "reason": "Protected narrative"},
+    ]
+    result, out, temp = _draft_cli(make_kit, tmp_path, dict(GOOD, fieldsNeeded=fields), align=True, planted=False)
+    assert result.returncode == 0, result.stderr
+    draft = json.loads(out.read_text(encoding="utf-8"))
+    assert draft["status"] == "draft" and draft["dataset"] == "health"
+    assert draft["fieldsNeeded"] == sorted(fields, key=lambda field: (field["table"], field["column"]))
+    assert "recovered 1 of 1 required analyses" in result.stderr
+    assert not temp.exists()
+
+
 def test_cli_refusal_creates_no_draft_files(make_kit, tmp_path):
     result, out, temp = _draft_cli(make_kit, tmp_path, dict(GOOD, fieldsNeeded=[]), planted=False)
     assert result.returncode == 1, result.stderr
