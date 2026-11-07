@@ -218,7 +218,7 @@ def rung_step_problems(manifest: dict, source: dict, master_key) -> list[str]:
     step's column at ``from`` and re-run the run's own ``protect``/``k_at_from``; the figures must equal the
     signed ``atFrom``. Unknown state fails closed. Content-free lines."""
     from pets_release.policy import get_policy, hand_plan
-    from pets_release.run.pipeline import k_at_from, protect
+    from pets_release.run.pipeline import k_at_from, protect, search_step_at_from
 
     steps = [s for s in manifest["sacrifices"] if "rungStep" in s]
     if not steps:
@@ -231,21 +231,29 @@ def rung_step_problems(manifest: dict, source: dict, master_key) -> list[str]:
     except Exception:  # noqa: BLE001 - unknown state fails closed, content-free
         return ["rungStep: not reproducible (policy or hand plan unavailable)"]
     fj = {(f["table"], f["column"]): f for f in manifest["fieldJustifications"]}
+    sources = {f["source"] for f in fj.values()}
     for s in steps:
         st = s["rungStep"]
         key = (st["table"], st["column"])
         rs = next((r for r in policy.rung_sacrifices if (r["check"], r["table"], r["column"], r["from"], r["to"])
                    == (s["check"], *key, st["from"], st["to"])), None)
         hand = {(e["table"], e["column"]): e for e in plan}
-        if rs is None or hand.get(key, {}).get("rung") != st["from"] or any(
-                f["source"] != "hand" for f in fj.values()):
-            out.append(f"rungStep: {s['check']}: not reproducible (not an enumerated step of the hand plan)")
+        by_hand = sources == {"hand"} and hand.get(key, {}).get("rung") == st["from"]
+        # a search plan (ticket 25): every field from the search, the step's column released at `to`; the run's
+        # own search_step_at_from rebuilds it from the manifest's rungs with the search's params
+        by_search = sources == {"search"} and set(fj) == set(policy.floors) and fj.get(key, {}).get("rung") == st["to"]
+        if rs is None or not (by_hand or by_search):
+            out.append(f"rungStep: {s['check']}: not reproducible (not an enumerated step of the hand or search plan)")
             continue
+        scope = {"source": source, "master": master_key, "scope_id": manifest["release"]["releaseScopeId"],
+                 "recipient": manifest["release"]["recipient"]}
         try:
-            *_, sup, _ = protect(plan, policy=policy, source=source, master=master_key,
-                                 scope_id=manifest["release"]["releaseScopeId"],
-                                 recipient=manifest["release"]["recipient"])
-            fresh = k_at_from(sup)
+            if by_hand:
+                *_, sup, _ = protect(plan, policy=policy, **scope)
+                fresh = k_at_from(sup)
+            else:
+                fields = {k: (f["rung"], f["floor"]) for k, f in fj.items()}
+                fresh = search_step_at_from(policy, fields, rs, **scope)
         except Exception:  # noqa: BLE001 - the message could carry values
             out.append(f"rungStep: {s['check']}: re-measure failed")
             continue

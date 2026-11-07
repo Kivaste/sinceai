@@ -15,6 +15,7 @@ from .search import (
     MinimiserRefused,
     SearchResult,
     apply_suppression,
+    rebuild_plan,
     search,
     write_search_log,
 )
@@ -26,6 +27,7 @@ __all__ = [
     "MinimiserRefused",
     "SearchResult",
     "apply_suppression",
+    "rebuild_plan",
     "search",
     "write_search_log",
 ]

@@ -57,7 +57,10 @@ def run_measured(*, kit, scenario: dict, created: str, key_text: str, out, plan_
 
     def with_measured(**kw):
         n = original(**kw)
-        n["measured"] = block
+        own = n["measured"]["search"]
+        n["measured"] = dict(block)
+        if own.get("status") == "measured":  # ticket 25: a search run's own measured.search (from its log) stays
+            n["measured"]["search"] = own
         return n
 
     pipeline.build_narrative = with_measured
@@ -118,7 +121,10 @@ def main(argv: list[str]) -> int:
             return 2
     try:
         res = run_measured(kit=ctx.kit, scenario=ctx.scenario, created=ctx.created, key_text=ctx.key,
-                           out=a.out, plan_name=a.plan or "hand", tool_revision=rev, recipient=a.recipient)
+                           out=a.out, plan_name=a.plan, tool_revision=rev, recipient=a.recipient)
+    except pipeline.RunRefused as e:  # a refusal is exit 1, as in `pets-release run`; our own content-free message
+        print(f"REFUSED: {str(e)[:200]}")
+        return 1
     except Exception as e:  # noqa: BLE001  content-free: class name and our own short messages only
         own = isinstance(e, (pipeline.RunError, MeasureRejected))  # only our own content-free messages
         print(f"measure.wire: {type(e).__name__}" + (f": {str(e)[:200]}" if own else ""), file=sys.stderr)
