@@ -283,19 +283,52 @@ A static HTML file rendered from the manifest alone. No network assets and no ro
 .\.venv\Scripts\pets-release.exe dashboard ..\sinceai-out\health-s1 --out ..\sinceai-out\health-s1-dashboard.html
 ```
 
+### Optional LLM draft policy
+
+`pets-release draft-policy` produces a validated draft policy for human review,
+not a release. Feeding the draft into the search is future work (D51); `run`
+still uses packaged scenario policies. The optional sender requires explicit
+`--allow-network` and sees only screened request text and allowlisted field
+metadata, never row values. D47 permits the Mistral API; other OpenAI-compatible
+endpoints remain configurable. Keys stay in the sender's environment.
+See [docs/llm-front-end.md](docs/llm-front-end.md) for configuration and validation.
+This help command makes no network request:
+
+<!-- docs-test: run -->
+```powershell
+.\.venv\Scripts\pets-release.exe draft-policy --help
+```
+
+### Evidence pack for a DPO / Findata
+
+Export content-free HTML and Markdown from the signed manifest only. Set the
+signing release's `PETS_HMAC_KEY`; invalid manifests or signatures refuse the export.
+The seven sections cover purpose, legal basis/DPIA, methods, measured risk, utility,
+verbatim residual risks and reproducibility. Missing measurements stay **not measured**;
+legal basis and DPIA are **To be supplied by the data controller**. This is technical
+evidence, not a permit or a DPIA. It never reads tables and does not replace `verify`.
+The example needs the signed measured release built above; its ledger skip is not a pass.
+
+<!-- docs-test: skip reason=evidence-pack-needs-signed-measured-release-and-controller-key -->
+```powershell
+.\.venv\Scripts\pets-release.exe evidence-pack ..\sinceai-out\health-s1-measured --out ..\sinceai-out\health-s1-evidence.html
+```
+
 ### 5. Submission bundle
 
 The bundle goes to `..\sinceai-out\pets_submission`, outside every repo. A complete bundle is the default. Under D46 it holds a verified HEALTH-S1 release (tables, validated row maps, manifest), the unseen labels and the gated CS eval redactions and spans (D37). CS-S1 is out of scope (deferred, D46). `submission_index.json` records that in `outOfScope`, and the packager neither needs nor accepts a CS-S1 release.
 
-Until #128 lands, the default search plan can drop a table's record key, and the packager then refuses (`REFUSED: rowmap_unverifiable`). Build the release you feed to the packager with `--plan hand`:
+The default search retains the record keys needed to recompute and validate row maps (#128). Package the default search release below; if you already ran step 2, skip the first command rather than reuse its output path:
 
 <!-- docs-test: run -->
 ```powershell
-.\.venv\Scripts\pets-release.exe run --scenario HEALTH-S1 --plan hand --out ..\sinceai-out\health-s1-hand --created 2026-11-07T08:00:00Z --kit "$env:PETS_KIT"
-.\.venv\Scripts\pets-release.exe submission --out ..\sinceai-out\pets_submission --release ..\sinceai-out\health-s1-hand --kit "$env:PETS_KIT"
+.\.venv\Scripts\pets-release.exe run --scenario HEALTH-S1 --recipient research-group --out ..\sinceai-out\health-s1 --created 2026-11-07T08:00:00Z --kit "$env:PETS_KIT"
+.\.venv\Scripts\pets-release.exe submission --out ..\sinceai-out\pets_submission --release ..\sinceai-out\health-s1 --kit "$env:PETS_KIT"
 ```
 
-It prints `SUBMISSION BUILT (COMPLETE)`. Without a HEALTH-S1 release (`REFUSED: incomplete`), or without the kit's unseen or CS eval exports, it refuses and writes nothing. `--partial` must be passed explicitly to build without a missing target dataset; such a build prints `SUBMISSION BUILT (PARTIAL)` and lists the missing datasets in `submission_index.json`. With HEALTH-S1 as the only target, `--partial` with no release still refuses (`REFUSED: no_release`).
+It prints `SUBMISSION BUILT (COMPLETE)`. Without a HEALTH-S1 release (`REFUSED: incomplete`), or without the kit's unseen or CS eval exports, it refuses and writes nothing. With HEALTH-S1 as the only target (D46), a valid release still prints `SUBMISSION BUILT (COMPLETE)` when `--partial` is passed; `--partial` with no release exits 1 (`REFUSED: no_release`). There is no supported CLI input that builds a `PARTIAL` bundle in this cut.
+
+The human submission wizard on `main` uses a separate, older two-folder layout check. Stage 5 reports `Partial bundle; missing required items:` followed by `customer_service/` for this D46-complete bundle and requires the typed acknowledgement `PARTIAL` (D59) before pushing. That is the wizard's layout warning, not the packager's `SUBMISSION BUILT` status or a CS-S1 release requirement. Keep the acknowledgement; do not fabricate a `customer_service/` release to silence it. The bundle index records `targetDatasets: ["health"]`, `datasetsMissing: []` and CS-S1 in `outOfScope`.
 
 ## Where row maps go
 

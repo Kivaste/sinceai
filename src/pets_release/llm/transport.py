@@ -8,20 +8,27 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
-
-from pets_release.offline import HOOK_DIR
+from pathlib import Path
 
 
 def sender_env(base: dict[str, str] | None = None) -> dict[str, str]:
-    """A copy of `base` (default os.environ) without the offline flag and hook. The input is not modified."""
-    env = dict(os.environ if base is None else base)
-    env.pop("PETS_OFFLINE", None)
-    hook = os.path.normcase(str(HOOK_DIR))
-    parts = [p for p in env.get("PYTHONPATH", "").split(os.pathsep) if p and os.path.normcase(p) != hook]
-    if parts:
-        env["PYTHONPATH"] = os.pathsep.join(parts)
-    else:
-        env.pop("PYTHONPATH", None)
+    """Minimal sender environment; never inherit application secrets or Python hooks.
+
+    The sender uses only the standard library. Its package path comes from this
+    module's identity, not the parent's PYTHONPATH. Request settings and the API
+    key are supplied explicitly by the transport, not copied from the parent.
+    """
+    source = os.environ if base is None else base
+    required = ("PATH", "SYSTEMROOT", "TEMP") if os.name == "nt" else ("PATH",)
+    if any(not source.get(name) for name in required):
+        raise OSError("sender environment is missing a required OS variable")
+    env = {name: source[name] for name in ("PATH", "SYSTEMROOT", "TEMP", "TMP") if name in source}
+    env.update({
+        "PYTHONPATH": str(Path(__file__).resolve().parents[2]),
+        "PYTHONUTF8": "1",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "TZ": "UTC",
+    })
     return env
 
 

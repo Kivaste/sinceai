@@ -48,6 +48,7 @@ MAINS = [
     "pets_attacker.cli",
     "pets_attacker.bridge",
     "pets_release.dashboard.cli",
+    "pets_release.evidence_pack.cli",
     "pets_release.detect.cli",
     "pets_release.verify.cli",
     "pets_release.run.cli",

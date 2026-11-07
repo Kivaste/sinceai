@@ -152,7 +152,7 @@ def test_duplicate_key_attack_specs_is_refused_by_the_attacker_cli(tmp_path):
 # Exact number of raw json.load(s) calls allowed per file in src/, with the reason each is not an external
 # record reader. A count, not a whole-file exemption: a new raw reader in one of these files also fails.
 RAW_JSON_ALLOWED = {
-    "pets_release/manifest/canonical.py": 1,    # the strict loader itself
+    "pets_release/strict_json.py": 1,           # the strict loader itself (re-exported by manifest/canonical.py)
     "pets_release/minimiser/search.py": 3,      # re-parses its own canonical() bytes (no duplicates, no NaN)
     "pets_release/redaction_eval/frame.py": 1,  # offline redaction metric harness; not a release/verify/measure path
     "pets_release/llm/draft.py": 1,             # already strict: own duplicate-key and non-finite hooks (DraftRejected)
