@@ -19,3 +19,4 @@ releases/
 # Private submission bundle (holds row maps, D15)
 pets_submission/
 
+build/
