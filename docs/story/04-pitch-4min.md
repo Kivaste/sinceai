@@ -19,11 +19,11 @@ Updated to the current build: hand plan for HEALTH-S1, two-tier verify, per-labe
 | Likely question | Answer |
 |---|---|
 | Isn't pseudonymised data still personal data? | Yes, and the manifest says so. We reduce and report risk; we do not claim anonymity. Key custody stays with the controller. |
-| Why trust your manifest? | You do not have to. Each assertion names a check, version, denominator and hits. `verify <release>` re-runs the release-derivable checks. The format cannot express `true`; a failed high-severity check refuses the release; lower-severity hits are listed as residual risks. |
+| Why trust your manifest? | You do not have to. Each assertion names a check, version, denominator and hits. `verify <release>` re-runs the release-derivable checks. The format cannot express `true`; a high-severity hit refuses the release, and so does any hit in a check bound to an assertion. A low-severity hit in another check does not refuse; it stays in that check's hit count in `gate.checks`, not in the residual risks. |
 | What does limited verify not cover? | Producer-scope checks (original-value survival, key material, reversible hashes, per-person k) are reported as producer-attested. Signature and input digests need `verify --full` with the key. Digests alone detect accidents, not a determined editor. |
 | Do you claim "no identifiers remain"? | No. Claims are per label (cards, national IDs, IBANs, emails ...), each with its own check and denominator. |
 | How are detail levels chosen? | Today by a hand-written plan per scenario, with a reason per field in the manifest. <!-- IF #26 search merged -->A bounded measured search then picks the coarsest passing level; the manifest records candidates tried.<!-- END IF --> |
-| What if the gate misses something? | Rescan validators are separate from the transform code. Anything outside the validated labels is a residual risk, listed with a rate or "not measured". |
+| What if the gate misses something? | Rescan validators are separate from the transform code. No assertion covers anything outside the validated labels. Known gaps are named in the residual risks, with a rate or "not measured". |
 | Did you optimise for the scorecard? | We use it, plus our own per-person k over every released quasi-identifier. <!-- IF #23 measured numbers -->Scorecard results appear only as manifest paths from a measured run.<!-- END IF --> |
 | How do you know it generalises? | <!-- IF #24 CS-S1 release -->Free-text results are exact-match per label; the data is templated, so we also point to the organisers' hidden check. <!-- END IF -->For tables, the data is synthetic; we do not claim general attack resistance. |
 | Why no LLM? | Sending data to a cloud model to protect it from an LLM vendor defeats the purpose. A future front end would see only the request text and the data dictionary, never values (ADR 0002). |
@@ -31,4 +31,6 @@ Updated to the current build: hand plan for HEALTH-S1, two-tier verify, per-labe
 | Who holds the key? | The controller (`PETS_HMAC_KEY`, 32+ characters, never in output). One key per release today. <!-- IF #29 recipient keys -->Recipient-scoped keys stop two recipients joining their copies.<!-- END IF --> |
 | Is it reproducible? | Same input, key, creation time and versions give a byte-identical release; the network is blocked at start-up. |
 | What did you not finish? | Read it from the manifest: every `not_measured` field, plus stretch features (search, CS-S1, recipient keys, LLM front end) that are not merged. Never invent a number. |
+
+
 

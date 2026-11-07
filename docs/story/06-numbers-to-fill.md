@@ -47,3 +47,9 @@ Dropped from the first draft (no source in the writer): `singling_out`, `k_below
 
 - Part B fills numbers from a real release; paths above must be re-checked against its manifest (the component ids come from the writer code, not from a release).
 - The description limit is counted with the conditional text and unrendered placeholders included; rendered numbers are shorter.
+
+## Gate severity behaviour (source: integration code)
+
+- High-severity hit: check status fail, release refused (checks/runner.py:88, :107).
+- Hit of any severity in a check bound to an export assertion: the assertion cannot be written false, so the writer refuses (writer/assemble.py:49-50, checks/runner.py:7-9).
+- Low-severity hit in a check not bound to an assertion: status pass, release not refused; counted in that check's gate.checks[].hits (checks/runner.py:88, writer/assemble.py:29). Not copied into esidualRisks, which is a fixed list built in un/narrative.py:79-97.
