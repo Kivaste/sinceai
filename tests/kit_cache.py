@@ -75,9 +75,6 @@ class KitCSVCache:
             raise ValueError("kit CSV changed during read")
         identity = {
             "format": 1,
-            "path": str(source),
-            "size": after.st_size,
-            "mtime_ns": after.st_mtime_ns,
             "sha256": hashlib.sha256(content).hexdigest(),
             "pandas": pd.__version__,
             "python": list(sys.version_info[:2]),
@@ -127,7 +124,7 @@ class KitCSVCache:
 
 def install_kit_cache(kit_root: Path, monkeypatch, *, cache_dir=None):
     """Opt in within a test process; only source CSVs below this kit's data/."""
-    if os.environ.get("PETS_TEST_KIT_CACHE") == "0":
+    if os.environ.get("PETS_TEST_KIT_CACHE") != "1":
         return
     data = (Path(kit_root) / "data").resolve()
     original = pd.read_csv

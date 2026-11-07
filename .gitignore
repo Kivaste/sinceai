@@ -11,6 +11,11 @@ truth/
 # Secrets: HMAC key, API keys
 .env
 *.key
+# Private test parse cache and atomic-write temporary files (outside repo only)
+.authentication-key
+*.cache
+.key-*
+.entry-*
 # Local scratch / outputs
 out/
 releases/

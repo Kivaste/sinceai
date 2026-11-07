@@ -8,6 +8,33 @@ outside the tree instead of recompiling on every run. Child processes may still
 disable writes; they can read the shared cache. Commands below assume that
 environment's Python. Agent test processes run at BelowNormal priority (D27).
 
+## Optional test-only kit parse cache (#97, D30)
+
+The cache is **OFF by default**. Set `PETS_TEST_KIT_CACHE=1` to enable it in
+the real-kit measure, pseudonym and structured-redactor fixtures; every other
+value (including an unset variable or `0`) leaves pandas unchanged. Production
+readers and CLI child processes never install this hook. No end-to-end speedup
+is claimed: round-1 comparisons were slower, and round-2 quiet-window attempts
+timed out amid other Python workloads. Keep this optimisation opt-in unless an
+alternating three-pair slow-tier comparison demonstrates >=10% median improvement.
+
+Parsed private rows and a local authentication key live only under
+`%LOCALAPPDATA%\sinceai-kitcache\`, never in a checkout. Do not publish or log
+cache contents. The cache identity uses source-content SHA-256, pandas version,
+Python minor version and reader options (including `dtype=str`), not absolute
+paths or modification times: identical inputs can share entries across workers
+and worktrees. Each read still hashes source bytes. Entries are authenticated
+before deserialization and published atomically. Reads under any `truth/`
+directory, protected outputs and streaming/memory-mapped reads bypass the hook.
+
+For a controlled measurement, stop no other session's jobs: arrange an idle
+window, prewarm eligible reads, and alternate `PETS_TEST_KIT_CACHE=0` and `1`
+for three runs each of `python -m pytest -n 16 -m slow --durations=15` using
+the shared environment above. Keep aggregate timings and test IDs only outside
+git, report actual exits, and do not treat missing or failed runs as evidence.
+
+## Running the tiers
+
 - **Implementers/fixers/reviewers (D27):** run **only affected tests**, both
   while iterating and for the done-report, through
   `scripts/overnight/affected-tests.ps1 -Run`. The helper maps changed files to
