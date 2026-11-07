@@ -287,7 +287,53 @@ def person_k_values(release, contract, context) -> PersonK:
     return PersonK(per_person, sorted(below_rows), len(unidentified), unid_rows)
 
 
-@register(name=PERSON_K, version="1.0.0", scope="producer", unit="persons")
+QI_ROLE = "quasi_identifier"
+
+
+def _source_of(table: str, column: str, spec) -> tuple[str, str]:
+    """Declared source of a released column: ``params.derived_from`` (``col`` or ``table.col``), else itself."""
+    params = spec.get("params") if isinstance(spec, dict) else None
+    df = params.get("derived_from") if isinstance(params, dict) else None
+    if isinstance(df, str) and df:
+        t, _, c = df.rpartition(".")
+        return (t or table, c)
+    return (table, column)
+
+
+def detector_qis(release, contract, context) -> list[tuple[str, str]]:
+    """(table, released column) of every released column the detector (ticket 20) classifies as a
+    quasi-identifier (#106, D33): on the released values themselves, or through its declared source column in
+    the source tables. The first never reads declared provenance, so a column whose declared source is wrong is
+    still classified by what it holds. Every ``*.csv`` in the release folder is a released table."""
+    from pets_release.detect.inventory import detect_dataset
+
+    rel = release_dir(release)
+    released = {p.name[:-4]: read_table(rel, p.name[:-4]) for p in sorted(rel.glob("*.csv"))}
+    files = (contract or {}).get("files") or {}
+    try:
+        on_release = detect_dataset("release", released)
+        on_source = detect_dataset("source", dict(context["source"]))
+    except Exception as exc:  # noqa: BLE001 - any detector failure is a content-free error
+        raise CheckError("detector failed") from exc
+    src_qi = {(r["table"], r["column"]) for r in on_source if r["role"] == QI_ROLE}
+    out = {(r["table"], r["column"]) for r in on_release if r["role"] == QI_ROLE}
+    for t, df in released.items():
+        cols = (files.get(f"{t}.csv") or {}).get("columns") or {}
+        for c in df.columns:
+            if _source_of(t, c, cols.get(c)) in src_qi:
+                out.add((t, c))
+    return sorted(out)
+
+
+def _require_detector_qis_listed(release, contract, context) -> None:
+    """A released detector QI missing from ``contract.qi`` makes person-k refuse (#106): k over the contract's
+    QIs would not be k over what the recipient holds."""
+    listed = {(q.get("table"), q.get("column")) for q in (contract or {}).get("qi", []) or [] if isinstance(q, dict)}
+    if set(detector_qis(release, contract, context)) - listed:
+        raise CheckError("released quasi-identifier missing from contract qi")
+
+
+@register(name=PERSON_K, version="1.1.0", scope="producer", unit="persons")
 def run_person_k(release, contract, context) -> Outcome:
     context = context or {}
     k = _k(contract, context)
@@ -296,6 +342,7 @@ def run_person_k(release, contract, context) -> Outcome:
         return Outcome.not_run()
     if context["person"].get("normalise") is None:  # identity canonicaliser not supplied
         return Outcome.not_run()
+    _require_detector_qis_listed(release, contract, context)
     res = person_k_values(release, contract, context)
     n = len(res.per_person) + res.unidentified
     if n == 0:
