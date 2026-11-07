@@ -60,9 +60,9 @@ def test_every_source_column_has_a_floor(sid):
 def test_direct_identifier_floors_are_pseudonym_or_withheld(sid):
     pol = get_policy(sid)
     for key in DIRECT[sid]:
-        assert pol.floors[key].rung in ("pseudonym", "withheld"), key
+        assert pol.floors[key].rung in ("id.pseudonym", "withheld"), key
     for key in pol.direct_identifiers:
-        assert pol.floors[key].rung in ("pseudonym", "withheld"), key
+        assert pol.floors[key].rung in ("id.pseudonym", "withheld"), key
 
 
 @pytest.mark.parametrize("sid", SIDS)
@@ -92,17 +92,17 @@ def test_health_hand_plan_matches_spec_table():
               "attending_physician_name"):
         assert ix[("ed_visits", c)]["rung"] == "withheld"
     dob = ix[("ed_visits", "date_of_birth")]
-    assert dob["rung"] in ("age_band_5", "age_band_10")
-    assert dob["params"]["derived_column"] == "age_band"
-    assert dob["params"]["top_code"] == 90
-    assert ix[("ed_visits", "visit_id")]["rung"] == "pseudonym"
-    assert ix[("lab_results", "visit_id")]["rung"] == "pseudonym"
+    assert dob["rung"] in ("age.band5", "age.band10")
+    assert dob["params"]["output"] == "age_band"
+    assert dob["params"]["ref_column"] == "arrival_ts"
+    assert ix[("ed_visits", "visit_id")]["rung"] == "id.pseudonym"
+    assert ix[("lab_results", "visit_id")]["rung"] == "id.pseudonym"
     assert ix[("lab_results", "visit_id")]["params"] == ix[("ed_visits", "visit_id")]["params"]
-    assert ix[("ed_visits", "arrival_ts")]["rung"] == "month_hour"
-    assert ix[("ed_visits", "municipality")]["rung"] == "top_n"
+    assert ix[("ed_visits", "arrival_ts")]["rung"] == "ts.month_hour"
+    assert ix[("ed_visits", "municipality")]["rung"] == "geo.topn"
     assert ix[("ed_visits", "municipality")]["params"]["n"] >= 8
-    assert ix[("ed_visits", "readmit_30d")]["rung"] == "exact"
-    assert ix[("ed_visits", "triage")]["rung"] == "exact"
+    assert ix[("ed_visits", "readmit_30d")]["rung"] == "keep"
+    assert ix[("ed_visits", "triage")]["rung"] == "keep"
 
 
 def test_health_policy_contents():
@@ -115,9 +115,9 @@ def test_health_policy_contents():
         ("ed_visits", "arrival_ts"),
     }
     assert pol.floors[("ed_visits", "patient_hetu")].rung == "withheld"
-    assert pol.floors[("ed_visits", "ambulance_unit")].rung == "pseudonym"
-    assert pol.floors[("ed_visits", "attending_physician_id")].rung == "pseudonym"
-    assert pol.floors[("lab_results", "sampled_ts")].rung == "exact"
+    assert pol.floors[("ed_visits", "ambulance_unit")].rung == "id.pseudonym"
+    assert pol.floors[("ed_visits", "attending_physician_id")].rung == "id.pseudonym"
+    assert pol.floors[("lab_results", "sampled_ts")].rung == "ts.exact"
     assert any("join" in q.get("note", "") for q in pol.qi if q["column"] == "sampled_ts")
 
 
@@ -126,14 +126,14 @@ def test_cs_hand_plan_matches_spec_table():
     assert all(e["rung"] == "withheld" for e in hand_plan("CS-S1") if e["table"] == "customers")
     for c in ("customer_id", "agent_name", "agent_note"):
         assert ix[("conversations", c)]["rung"] == "withheld"
-    assert ix[("conversations", "split")]["rung"] == "exact"
-    assert ix[("conversations", "started_ts")]["rung"] == "hour"
-    assert ix[("turns", "ts")]["rung"] == "hour"
-    assert ix[("turns", "text")]["rung"] == "redacted"
-    assert ix[("conversations", "conversation_id")]["rung"] == "pseudonym"
+    assert ix[("conversations", "split")]["rung"] == "keep"
+    assert ix[("conversations", "started_ts")]["rung"] == "ts.hour"
+    assert ix[("turns", "ts")]["rung"] == "ts.hour"
+    assert ix[("turns", "text")]["rung"] == "text.redacted"
+    assert ix[("conversations", "conversation_id")]["rung"] == "id.pseudonym"
     assert ix[("conversations", "conversation_id")]["params"] == ix[("turns", "conversation_id")]["params"]
     assert ix[("turns", "turn_id")]["params"]["requires_check"] == "turn-id-synthetic"
-    assert ix[("turns", "turn_id")]["params"]["fallback_rung"] == "pseudonym"
+    assert ix[("turns", "turn_id")]["params"]["fallback_rung"] == "id.pseudonym"
 
 
 def test_cs_policy_contents():
@@ -145,9 +145,9 @@ def test_cs_policy_contents():
     assert rec["min"] == 0.98
     assert set(rec["labels"]) == {"NATIONAL_ID", "PAYMENT_CARD", "IBAN", "SECRET"}
     assert pol.qi == ()
-    assert pol.floors[("turns", "ts")].rung == "hour"
-    assert pol.floors[("conversations", "started_ts")].rung == "hour"
-    assert pol.floors[("conversations", "agent_id")].rung == "pseudonym"
+    assert pol.floors[("turns", "ts")].rung == "ts.hour"
+    assert pol.floors[("conversations", "started_ts")].rung == "ts.hour"
+    assert pol.floors[("conversations", "agent_id")].rung == "id.pseudonym"
 
 
 @pytest.mark.parametrize("sid", SIDS)
@@ -225,7 +225,7 @@ def test_validate_rejects_rung_finer_than_floor():
     def raw_ts(pl):
         for e in pl:
             if (e["table"], e["column"]) == ("turns", "ts"):
-                e["rung"] = "exact"
+                e["rung"] = "ts.exact"
     with pytest.raises(PlanError, match="floor"):
         validate_plan(_mutated("CS-S1", raw_ts), get_policy("CS-S1"))
 
@@ -234,7 +234,7 @@ def test_validate_rejects_raw_direct_identifier_and_unknown_rung():
     def raw_name(pl):
         for e in pl:
             if (e["table"], e["column"]) == ("ed_visits", "patient_name"):
-                e["rung"] = "exact"
+                e["rung"] = "ts.exact"
     with pytest.raises(PlanError):
         validate_plan(_mutated("HEALTH-S1", raw_name), get_policy("HEALTH-S1"))
 
@@ -248,7 +248,7 @@ def test_validate_rejects_changed_floor_field():
     def f(pl):
         for e in pl:
             if (e["table"], e["column"]) == ("ed_visits", "postcode"):
-                e["floor"] = "exact"
+                e["floor"] = "ts.exact"
     with pytest.raises(PlanError, match="floor"):
         validate_plan(_mutated("HEALTH-S1", f), get_policy("HEALTH-S1"))
 
@@ -266,8 +266,8 @@ def test_validate_rejects_mismatched_pseudonym_scope_across_joined_tables():
     def f(pl):
         for e in pl:
             if (e["table"], e["column"]) == ("lab_results", "visit_id"):
-                e["params"] = {"scope": "conversation"}
-    with pytest.raises(PlanError, match="scope"):
+                e["params"] = {"label": "OTHER"}
+    with pytest.raises(PlanError, match="linked"):
         validate_plan(_mutated("HEALTH-S1", f), get_policy("HEALTH-S1"))
 
 
@@ -276,7 +276,7 @@ def test_validate_rejects_top_n_below_policy_minimum():
         for e in pl:
             if (e["table"], e["column"]) == ("ed_visits", "municipality"):
                 e["params"] = {"n": 3}
-    with pytest.raises(PlanError, match="top_n"):
+    with pytest.raises(PlanError, match="topn"):
         validate_plan(_mutated("HEALTH-S1", f), get_policy("HEALTH-S1"))
 
 
@@ -284,7 +284,7 @@ def test_validate_rejects_released_column_of_withheld_table():
     def f(pl):
         for e in pl:
             if e["table"] == "customers" and e["column"] == "customer_id":
-                e["rung"] = "pseudonym"
+                e["rung"] = "id.pseudonym"
     # floor for customers.customer_id is withheld -> finer than floor
     with pytest.raises(PlanError):
         validate_plan(_mutated("CS-S1", f), get_policy("CS-S1"))
@@ -297,3 +297,50 @@ def test_no_row_like_values_in_serialised_artefacts():
         blob = json.dumps([get_policy(sid).to_json(), hand_plan(sid)])
         assert not re.search(r"\d{6,}", blob)
         assert not re.search(r"@|\d{4}-\d{2}-\d{2}", blob)
+
+
+def test_ladders_07_apply_accepts_hand_plans_on_synthetic_frames():
+    """Production check: ticket 07's real apply must accept the plan shape (hand-made rows)."""
+    import pandas as pd
+    from pets_release.ladders import apply
+
+    class K:
+        def token(self, value, label="RECORD_KEY"):
+            return "a" * 64
+
+    def frames(sid, red):
+        out = {}
+        for t, cols in SRC[sid].items():
+            out[t] = pd.DataFrame({c: ["x1"] * 3 for c in cols})
+        return out
+
+    h = frames("HEALTH-S1", None)
+    h["ed_visits"]["date_of_birth"] = ["1980-05-01", "1990-01-01", "1950-02-02"]
+    h["ed_visits"]["arrival_ts"] = ["2025-03-04T14:30:00"] * 3
+    h["ed_visits"]["municipality"] = ["A", "B", "A"]
+    h["ed_visits"]["icd10_primary"] = ["J10.1", "A09", "S72.0"]
+    out = apply(hand_plan("HEALTH-S1"), h, K())
+    assert "age_band" in out["ed_visits"].columns and "date_of_birth" not in out["ed_visits"].columns
+    assert set(out) == {"ed_visits", "lab_results"}
+
+    c = frames("CS-S1", None)
+    for t, col in (("conversations", "started_ts"), ("turns", "ts")):
+        c[t][col] = ["2025-03-04T14:30:00"] * 3
+    out = apply(hand_plan("CS-S1"), c, K(), redactor=lambda t, col, df, p: df[col])
+    assert set(out) == {"conversations", "turns"}
+
+
+def test_turn_id_fallback_plan_validates_and_is_accepted_by_apply():
+    from pets_release.policy.cs_s1 import turn_id_fallback_plan
+    plan = turn_id_fallback_plan(hand_plan("CS-S1"))
+    validate_plan(plan, get_policy("CS-S1"))
+    e = idx(plan)[("turns", "turn_id")]
+    assert e["rung"] == "id.pseudonym" and e["floor"] == "id.pseudonym"
+
+
+def test_policy_rung_ids_are_07_ids():
+    from pets_release.ladders import CONTRACT_FORMS, WITHHELD
+    for sid in SIDS:
+        for e in hand_plan(sid):
+            assert e["rung"] in CONTRACT_FORMS or e["rung"] == WITHHELD
+            assert e["floor"] in CONTRACT_FORMS or e["floor"] == WITHHELD

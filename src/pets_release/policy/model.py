@@ -1,7 +1,6 @@
 """Policy record, ladder vocabulary and Plan validation. Schema names only; no row values.
 
-Rung IDs are the policy's pinned vocabulary. Ticket 07 (ladders) implements the same IDs; if it
-renames one, change LADDERS here and nothing else.
+Rung IDs are ticket 07's (pets_release.ladders.LADDERS); this module defines none of its own.
 """
 from __future__ import annotations
 
@@ -9,19 +8,8 @@ import json
 from dataclasses import dataclass
 from typing import Any
 
-# family -> rungs ordered finest -> coarsest (last is always "withheld")
-LADDERS: dict[str, tuple[str, ...]] = {
-    "timestamp": ("exact", "hour", "month_hour", "day", "week", "month", "withheld"),
-    "age": ("age_band_5", "age_band_10", "withheld"),  # params: top_code
-    "geo": ("exact", "top_n", "withheld"),  # municipality/postcode; top_n params: n (rest "other")
-    "icd10": ("exact", "chars3", "chapter", "withheld"),
-    "numeric": ("exact", "rounded", "binned", "withheld"),
-    "categorical": ("exact", "withheld"),
-    "identifier": ("pseudonym", "withheld"),  # keyed 64-hex; never raw
-    "key": ("exact", "pseudonym", "withheld"),  # synthetic record key, conditionally kept as-is
-    "text": ("redacted", "withheld"),
-}
-PSEUDONYM_SCOPES = ("conversation", "release", "recipient")
+from pets_release.ladders import LADDERS, WITHHELD  # single source of rung IDs (ticket 07)
+
 PLAN_KEYS = frozenset({"table", "column", "rung", "params", "floor", "reason", "source"})
 
 
@@ -50,6 +38,7 @@ class ScenarioPolicy:
     joint_qi_moves: tuple[tuple[dict, ...], ...]  # each move = tuple of {table, column, rung[, params]}
     linked: tuple[tuple[tuple[str, str], ...], ...]  # column groups that must share rung + params
     param_minimums: dict  # (table, column) -> {"rung": r, "param": p, "min": n}
+    alt_floors: dict = None  # (table, column) -> alternative floor rung (conditional-keep fallback)
 
     def to_json(self) -> dict:
         return {
@@ -107,6 +96,10 @@ def validate_plan(plan: list, policy: ScenarioPolicy) -> None:
         except (TypeError, ValueError):
             raise PlanError(f"params not JSON-serialisable for {key}") from None
         fl = policy.floors[key]
+        alt = (policy.alt_floors or {}).get(key)
+        if alt and e["floor"] == alt and e["rung"] in (alt, WITHHELD):
+            seen[key] = e
+            continue
         ladder = LADDERS[fl.family]
         if e["floor"] != fl.rung:
             raise PlanError(f"floor field for {key} does not match the policy floor")
@@ -114,8 +107,8 @@ def validate_plan(plan: list, policy: ScenarioPolicy) -> None:
             raise PlanError(f"rung {e['rung']!r} not on the {fl.family} ladder for {key}")
         if ladder.index(e["rung"]) < ladder.index(fl.rung):
             raise PlanError(f"rung for {key} is finer than its floor")
-        if e["rung"] == "pseudonym" and e["params"].get("scope") not in PSEUDONYM_SCOPES:
-            raise PlanError(f"pseudonym scope missing or invalid for {key}")
+        if e["rung"] == "id.pseudonym" and not isinstance(e["params"].get("label", "RECORD_KEY"), str):
+            raise PlanError(f"pseudonym label must be a string for {key}")
         seen[key] = e
     missing = set(policy.floors) - set(seen)
     if missing:
