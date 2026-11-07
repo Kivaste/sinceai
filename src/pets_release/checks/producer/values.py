@@ -21,7 +21,9 @@ Context:
   source:       {table: DataFrame (dtype=str)}
   identifiers:  [{table, column}] source columns whose values are identifiers
                 (direct identifiers; hashing also covers technical identifiers listed here)
-  keys:         [str | bytes] key material (master and derived keys)
+  keys:         [key object | str | bytes] key material (master and derived keys). A key object exposes
+                ``scannable_forms() -> (exact, lowercase-hex)`` (pseudonym.keys.SecretKey); its raw bytes
+                are never read outside the keys module (#84)
 """
 
 from __future__ import annotations
@@ -317,7 +319,20 @@ def run_key_material(release, contract, context) -> Outcome:
         return Outcome.not_run()
     exact, lower = set(), set()
     for k in keys:
-        if not k or len(k) < MIN_KEY_FORM:
+        forms = getattr(k, "scannable_forms", None)
+        if callable(forms):  # an opaque key object (pseudonym.keys.SecretKey): its bytes are never read here
+            try:
+                e, lo = forms()
+            except Exception as exc:  # noqa: BLE001 - content-free
+                raise CheckError("key object cannot give its scannable forms") from exc
+            e = {f for f in e if isinstance(f, str) and len(f) >= MIN_KEY_FORM}
+            lo = {f.lower() for f in lo if isinstance(f, str) and len(f) >= MIN_KEY_FORM}
+            if not e and not lo:
+                raise CheckError("key material too short to scan in every form")
+            exact |= e
+            lower |= lo
+            continue
+        if not isinstance(k, (str, bytes, bytearray)) or not k or len(k) < MIN_KEY_FORM:
             raise CheckError("key material too short to scan in every form")
         e, lo = _key_forms(k)
         exact |= e
