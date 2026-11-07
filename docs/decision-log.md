@@ -830,3 +830,63 @@ CS-S1 chain done-report + 4 reviews (23 + #53/#54/#56/#92) -> merge -> #63 -> 25
   - D34 smoke on a merged integration SHA (first run comes with train 26).
   - Final person-k with test_name as a QI (#106).
   - CS-S1 real-kit release: dropped (D46).
+
+### Sat 17:06-18:15 - orchestrator hand-over; dispatches; D54-D56; recording window; trains 26-27
+
+- **When:** Sat 17:06-18:15 EET
+- **Decision:**
+  1. **Hand-over.** New orchestrator session ses_e4973db3 claimed the heartbeat at 17:06. The previous one (ses_e49bb457) was idle. Its live children were train 26, #106 r2, #110/#113/#131 r2, the #117 capture and #136. Inherited sessions can't be messaged through the subagent tool, so they are steered with `send-to-orchestrator.ps1 -SessionId`. Scripts need `-ExecutionPolicy Bypass`.
+  2. **Dispatched after the pin:**
+     - #133 (Opus).
+     - #134, #93, #135, #124 r2 and #125+#126 r2 (Sol).
+     - #138 (Opus). It is branched from fu110, because both edit measure/wire.py, and merges after #110.
+     - #128's xfail removal (Opus).
+     - #141 (Sol, from #133's head).
+     - #142 (Sol, from #93's head).
+     - #93's "Merge after #24" no longer applies, because CS-S1 is dropped (D46).
+  3. **D54 #139** (red team, Opus, all 4 reviews): it starts when #138 merges (native blocked-by #138), with a deadline of 23:00 (D55). **D55:** freeze at 23:00. **D56:** recording hold lifted; #106, #128 and #138 merge when green. #127 starts when #106 merges.
+  4. **Recording window 17:35-~17:50:** every lane finished its current step and ended its turn; train 26 paused at a tier boundary. Read-only reviews continued. All lanes resumed when the planning session ended the window.
+  5. **Train 26 pushed 1fc72f2** (#30, #32, #132, #116):
+     - Fast tier exit 0: 2855 passed, 7 named skips, 1 xfail.
+     - Slow tier exit 0: 123 passed.
+     - Guard tier exit 0: 101 passed.
+     - D34 smoke exit 0. This is the first smoke run on a merged SHA.
+  6. **Train 27 pushed 6b4c6a5** (#80 only):
+     - #121 and #130 conflicted in README.md and the README tests; a Sol rebase is running.
+     - Fast run 1 had one flaky failure (`tests/ui/test_http.py`, Windows PermissionError) and passed 3/3 on recheck. Fast run 2 exit 0: 2862 passed. Slow and guard tiers exit 0; smoke passed.
+     - The flaky test is filed as #144.
+  7. **Closed on evidence:** #30, #32 and #132, with worktrees and branches removed.
+     - #32, #132, #116 and #80 had no done-report on the issue. Sol evidence agents re-ran each check on the merged head and copied review verdicts verbatim from the review sessions; nothing was reconstructed.
+     - The post-merge affected-tests runs select only the scaffold when there is no diff; the merged-result full tiers are the suite evidence.
+  8. **Accepted deviation #133:** refusing on any missing search score would refuse every real search run (13 of 45 rejected candidates are unscored on the pin proof). So `run` refuses on empty or non-numeric risk maps, empty score maps and accepted steps with a missing score. Rejected unscored candidates are published as utility null, never 0.0. All 4 reviews approved this.
+  9. **Defect found: fu110 (#131 b87e0ae) trips two repo-wide guards.** One is a raw json.loads in ui/server.py flagged by its own strict-reader guard; the other is the CSV read policy on its new test file. This was found by #138's affected tests and steered to the fu110 owner (comment on #131).
+  10. **#138 round 1:** Sol Standards and Grok Standards both returned CHANGES REQUIRED (high). The attacker-boundary exemption lets `getattr(builtins, "__import__")(ATTACKER_MODULE)` and a computed `"__imp" + "ort__"` import the attacker in-process while both guards pass. Round 2 replaces the denylist with a structural allowlist and adds planted-file regressions, plus a sampling disclosure for the insider denominator.
+  11. **#125+#126 close parked (ready-for-human).** The guard's truthful live result is exit 2 (3 unprovable sessions), and the close gate treats that as not-run. The ticket still merges via the main tooling train.
+  12. **Orchestrator errors, corrected:**
+      - (a) I reworded #124's Outcome line when posting its done-report; I reposted it verbatim, and the implementer restated it.
+      - (b) My Spec review line on #106 carried "CHANGES REQUIRED" in a parenthetical, which the gate parsed; the fixer reposts with exact lines.
+      - (c) My issue-comment timestamps from about 17:40 on ran ahead of real time, by up to ~1 h (for example "19:10 EET" was written at 18:08). This entry's times are correct.
+- **Why:** D46, D53-D56 (human); close only on evidence (D31); AGENTS.md fail-closed and "never mint evidence".
+- **Evidence:** `sinceai-out/train26/`, `sinceai-out/train27/`, `sinceai-out/smoke/1fc72f2.../` and `sinceai-out/smoke/6b4c6a5.../`; review sessions named in issue comments #93, #106, #124-#126, #128, #133-#135, #138.
+
+### Sat 18:15 - STATUS
+
+- **Effective policies (changes only):** D54 (#139 red team), D55 (freeze 23:00), D56 (recording hold lifted). UI steer (planning session, 18:00): #117 is being redesigned, #136 is backend-only, #140 is held, and no other UI work is dispatched.
+- **Critical path:** train 28 (#128, #93, #133), then #106 (done-report fix) and #134 → #127 (Opus, starts on #106's merge, deadline 23:00); #138 r2, then fu110 merge, then #138 → #139 (Opus, deadline 23:00); then at 23:00 the final review (D32), fresh proof, #103 and PR #95.
+- **Blocker owners (issue → session/model):**
+  - train 28 → ses_e493733f / Opus merger
+  - #106 done-report fix → ses_e4a0a4c1 / claude-agent/opus
+  - #110/#113/#131 (fu110, incl. the 2 guard failures) → ses_e4a02df0 / claude-agent/opus
+  - #138 r2 → ses_e497039f / claude-agent/opus
+  - #121 + #130 rebase → ses_e49370c1 / openai/gpt-6.1-sol
+  - #80, #116 evidence → ses_e4936c6a, ses_e4953838 / openai/gpt-6.1-sol
+  - #136 backend → ses_e4975d2a / openai/gpt-6.1-sol
+  - #141 → ses_e4943b2a and #142 → ses_e493b183 / openai/gpt-6.1-sol
+  - #117 capture → ses_e49cc60d, blocked: it needs the proof-5b260ec key path from the human
+  - main tooling train (#124, #125+#126, #135) → after the integration trains
+- **Latest verified revision:** 6b4c6a5061c30837296b8610c99f07abea7b852d. Fast tier exit 0 (2862 passed, 7 named skips, 1 xfail, on run 2); slow tier exit 0 (123); guard tier exit 0 (101); D34 smoke pass. Logs: `sinceai-out/train27/`.
+- **Missing evidence:**
+  - #117: real-kit UI capture at 5b260ec (needs the key path).
+  - #116 and #80: done-reports in progress.
+  - #125/#126: close needs a human decision.
+  - #106: final person-k is measured (minK 5, suppression 0.09942) but not yet merged.

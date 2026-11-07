@@ -40,6 +40,7 @@ _SIMPLE: dict[str, Callable[[pd.Series, dict], pd.Series]] = {
     "num.round": T.num_round,
     "num.bin": T.num_bin,
     "keep": T.identity,
+    "lab.full": T.identity,
 }
 _AGE = {"age.band5": T.age_band5, "age.band10": T.age_band10}
 
@@ -135,6 +136,11 @@ def apply(
                         raise LadderError(f"age ref_column unknown in table {tname}")
                     ref = src[rc]  # original values, not the generalised column
                 res = _AGE[rung](s, params, ref)
+            elif rung == "lab.crp_other":
+                rc = params.get("ref_column", T.LAB_REF_COLUMN)
+                if not isinstance(rc, str) or rc not in src.columns:
+                    raise LadderError(f"lab.crp_other ref_column unknown in table {tname}")
+                res = T.lab_crp_other(s, params, src[rc])  # original codes, not the generalised column
             elif rung == "id.pseudonym":
                 label = params.get("label", "RECORD_KEY")
                 res = s.map(lambda v, label=label: v if _null(v) or v == "" else _token(keys, str(v), label))
@@ -157,4 +163,4 @@ def apply(
     return out
 
 
-assert set(_SIMPLE) | set(_AGE) | {"id.pseudonym", "text.redacted"} == set(CONTRACT_FORMS)
+assert set(_SIMPLE) | set(_AGE) | {"id.pseudonym", "text.redacted", "lab.crp_other"} == set(CONTRACT_FORMS)

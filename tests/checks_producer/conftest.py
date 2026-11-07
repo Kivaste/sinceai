@@ -5,10 +5,14 @@ All rows are hand-made synthetic values; nothing is copied from the kit.
 
 from __future__ import annotations
 
+import sys
 import types
+from pathlib import Path
 
 import pandas as pd
 import pytest
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))  # producer_helpers
 
 
 def _write_release(root, tables):

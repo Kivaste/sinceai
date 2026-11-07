@@ -157,6 +157,7 @@ RAW_JSON_ALLOWED = {
     "pets_release/redaction_eval/frame.py": 1,  # offline redaction metric harness; not a release/verify/measure path
     "pets_release/llm/draft.py": 1,             # already strict: own duplicate-key and non-finite hooks (DraftRejected)
     "pets_release/submission/guards.py": 1,     # key scanner: keeps every duplicate pair (tests/submission/test_build.py)
+    "pets_release/run/provenance.py": 1,        # deep copy of its own in-memory params (json.loads(json.dumps(...))); no external bytes
 }
 
 
