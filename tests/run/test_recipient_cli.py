@@ -145,9 +145,9 @@ def test_every_cli_token_column_uses_the_recorded_recipient_not_just_a_new_scope
         for token in manifest["contract"]["tokens"]:
             table, column = token["table"], token["column"]
             source = pd.read_csv(kit / "data" / "health" / f"{table}.csv", dtype=str,
-                                 keep_default_na=False)[column]
+                                 keep_default_na=False, na_filter=False)[column]
             actual = set(pd.read_csv(outs[name] / f"{table}.csv", dtype=str,
-                                     keep_default_na=False)[column])
+                                     keep_default_na=False, na_filter=False)[column])
             assert actual
             for recipient in (release["recipient"], other, None):
                 keys = PseudonymKeys(pseudonymiser_for(master, recipient=recipient), scope)
