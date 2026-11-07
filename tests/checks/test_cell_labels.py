@@ -69,6 +69,16 @@ CASES = [
     ("rescan.raw-timestamps", "seen 2025-03-01T14:00:00.250 at desk", 1),  # non-zero fraction
     ("rescan.raw-timestamps", "seen 2025-03-01T14:00:00,5 at desk", 1),
     ("rescan.raw-timestamps", "seen 2025-03-01T14:00:00.000 at desk", 0),
+    # review r2 (87bc8c8): every format, any non-zero sub-hour component is a hit
+    ("rescan.raw-timestamps", "seen 2025-03-01 14:00:30 at desk", 1),
+    ("rescan.raw-timestamps", "seen 2025-03-01 14:00:00.5 at desk", 1),
+    ("rescan.raw-timestamps", "seen 1.3.2025 klo 14.00.30 at desk", 1),
+    ("rescan.raw-timestamps", "seen 1.3.2025 14:00:30 at desk", 1),
+    ("rescan.raw-timestamps", "seen 1.3.2025 14:00:00,250 at desk", 1),
+    ("rescan.raw-timestamps", "seen 1.3.2025 14.00.00.5 at desk", 1),
+    ("rescan.raw-timestamps", "seen 1.3.2025 klo 14.00 at desk", 0),
+    ("rescan.raw-timestamps", "seen 1.3.2025 14:00:00 at desk", 0),
+    ("rescan.raw-timestamps", "seen 1.3.2025 14:00:00.000 at desk", 0),
 ]
 
 
