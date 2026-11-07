@@ -11,6 +11,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -38,18 +39,20 @@ def number(value, *, integer=False):
 
 def validate_record(record):
     """Closed record validation, including dynamic maps of schema/check names (no value-bearing text)."""
-    exact(record, "sha toolRevision metadataDigest inputs scenarios pass")
+    exact(record, "sha toolRevision metadataDigest inputs scenarios delivery pass")
     if not re.fullmatch(r"[0-9a-f]{40}", record["sha"]) or record["toolRevision"] != record["sha"]:
         raise ValueError("invalid revision")
     if record["metadataDigest"] is not None and not re.fullmatch(r"[0-9a-f]{64}", record["metadataDigest"]):
         raise ValueError("invalid metadata digest")
     exact(record["inputs"], "HEALTH-S1 CS-S1")
     exact(record["scenarios"], "HEALTH-S1 CS-S1")
+    exact(record["delivery"], "HEALTH-S1")
     for inputs in record["inputs"].values():
         for name, digest in inputs.items():
             if not re.fullmatch(r"[a-z][a-z0-9_]*", name) or not re.fullmatch(r"[0-9a-f]{64}", digest):
                 raise ValueError("invalid input digest")
-    for scenario in record["scenarios"].values():
+    results = [*record["scenarios"].values(), *record["delivery"].values()]
+    for scenario in results:
         exact(scenario, "expected steps gate failures personK purpose dashboardWritten pass error")
         if scenario["expected"] not in (None, "released", "refused"):
             raise ValueError("invalid expectation")
@@ -90,7 +93,7 @@ def validate_record(record):
             number(task["threshold"])
             if type(task["pass"]) is not bool:
                 raise ValueError("invalid task verdict")
-    if type(record["pass"]) is not bool or record["pass"] != all(s["pass"] for s in record["scenarios"].values()):
+    if type(record["pass"]) is not bool or record["pass"] != all(s["pass"] for s in results):
         raise ValueError("invalid overall verdict")
 
 
@@ -104,7 +107,7 @@ def read_json(path):
     return loads_strict(path.read_bytes())
 
 
-def cli(args, env, deadline):
+def cli(args, env, deadline, *, module="pets_release"):
     start = time.monotonic()
     step = {"exitCode": None, "elapsedSeconds": 0, "status": "timeout"}
     if start >= deadline:
@@ -112,7 +115,7 @@ def cli(args, env, deadline):
     try:
         flags = {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP} if os.name == "nt" else {
             "start_new_session": True}
-        proc = subprocess.Popen([sys.executable, "-m", "pets_release", *args], cwd=ROOT, env=env,
+        proc = subprocess.Popen([sys.executable, "-m", module, *args], cwd=ROOT, env=env,
                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
                                 encoding="utf-8", errors="replace", **flags)
         try:
@@ -158,14 +161,16 @@ def new_result(expected):
             "dashboardWritten": False, "pass": False, "error": "not-run"}
 
 
-def scenario_smoke(scenario, expected, kit, folder, sha, inputs, env, deadline):
+def scenario_smoke(scenario, expected, kit, folder, sha, inputs, env, deadline, *, measured=False):
     out = folder / scenario
     scoring = folder / f"{scenario}.scoring"
     result = new_result(expected)
     result["error"] = None
     try:
-        step, _ = cli(["run", "--scenario", scenario, "--kit", str(kit.root), "--out", str(out),
-                       "--created", "2026-11-07T00:00:00Z"], env, deadline)
+        args = ["--scenario", scenario, "--kit", str(kit.root), "--out", str(out),
+                "--created", "2026-11-07T00:00:00Z"]
+        step, _ = cli(args if measured else ["run", *args], env, deadline,
+                      module="pets_release.measure.wire" if measured else "pets_release")
         result["steps"]["run"] = step
         code = step["exitCode"]
         if code not in (0, 1):
@@ -246,7 +251,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--kit", type=Path, default=None)
     parser.add_argument("--out-root", type=Path, default=DEFAULT_OUTPUT)
-    parser.add_argument("--timeout", type=float, default=360, help="total CLI time budget in seconds")
+    parser.add_argument("--timeout", type=float, default=720, help="total CLI time budget in seconds")
     parser.add_argument("--sha", help="require this exact full Git HEAD")
     parser.add_argument("--validate-record", type=Path, help="check record format only; never reruns the smoke")
     args = parser.parse_args()
@@ -273,6 +278,7 @@ def main():
     evidence.mkdir(parents=True, exist_ok=True)
     record = {"sha": sha, "toolRevision": sha, "metadataDigest": None,
               "inputs": {s: {} for s in SCENARIOS}, "scenarios": {s: new_result(None) for s in SCENARIOS},
+              "delivery": {"HEALTH-S1": new_result("released")},
               "pass": False}
     path = evidence / "smoke.json"
     write_record(path, record)
@@ -303,18 +309,24 @@ def main():
         record["metadataDigest"], record["inputs"] = input_bindings(kit)
         folder = Path(tempfile.mkdtemp(prefix="attempt-", dir=evidence))
         deadline = time.monotonic() + args.timeout
-        for scenario in SCENARIOS:
-            record["scenarios"][scenario] = scenario_smoke(scenario, expectations[scenario], kit, folder,
-                                                         sha, record["inputs"][scenario], env, deadline)
+        # Delivery and plain release are independent CLI lanes. Both are mandatory; neither can hide the other.
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            measured = pool.submit(scenario_smoke, "HEALTH-S1", "released", kit, folder / "measured", sha,
+                                   record["inputs"]["HEALTH-S1"], env, deadline, measured=True)
+            for scenario in SCENARIOS:
+                record["scenarios"][scenario] = scenario_smoke(scenario, expectations[scenario], kit, folder,
+                                                             sha, record["inputs"][scenario], env, deadline)
+            record["delivery"]["HEALTH-S1"] = measured.result()
         error = "identity-changed"
         if (git("rev-parse", "HEAD") != sha or git("status", "--porcelain=v1", "--untracked-files=all")
                 or input_bindings(kit) != (record["metadataDigest"], record["inputs"])):
             raise ValueError("identity changed")
         error = None
     except Exception:  # noqa: BLE001 - even a path/catalogue error may contain source values.
-        for scenario in record["scenarios"].values():
+        for scenario in [*record["scenarios"].values(), *record["delivery"].values()]:
             scenario.update({"pass": False, "error": error})
-    record["pass"] = error is None and all(s["pass"] for s in record["scenarios"].values())
+    record["pass"] = error is None and all(s["pass"] for s in [*record["scenarios"].values(),
+                                                              *record["delivery"].values()])
     try:
         write_record(path, record)
     except Exception:  # noqa: BLE001 - retain the initial failed record, never echo contents.

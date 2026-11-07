@@ -4,6 +4,8 @@ import json
 import shutil
 from copy import deepcopy
 
+import pytest
+
 
 def test_released_expectation_refuses_at_the_real_gate(smoke_checkout):
     """Rule: gate refusal cannot satisfy a committed released expectation (CLI seam)."""
@@ -134,4 +136,23 @@ def test_requested_revision_must_match_actual_head(smoke_checkout):
     health = smoke_checkout.record(sha)["scenarios"]["HEALTH-S1"]
     assert health["pass"] is False
     assert health["error"] == "revision-mismatch"
+    assert result.returncode == 1
+
+
+@pytest.mark.parametrize("missing", [False, True], ids=["errored-measured-cli", "missing-measured-cli"])
+def test_measured_delivery_is_required_even_when_plain_release_passes(smoke_checkout, missing):
+    """Rule: missing/errored measure.wire cannot hide behind a plain release (real CLI seam)."""
+    if missing:
+        (smoke_checkout.path / "src/pets_release/measure/wire.py").unlink()
+    sha = smoke_checkout.commit()
+    result = smoke_checkout.run(smoke_checkout.kit())
+    record = smoke_checkout.record(sha)
+    assert record["scenarios"]["HEALTH-S1"]["pass"] is True
+    assert "delivery" in record, "the measured delivery CLI must actually run"
+    delivery = record["delivery"]["HEALTH-S1"]
+    assert delivery["steps"]["run"]["status"] == "completed"
+    assert delivery["steps"]["run"]["exitCode"] == (1 if missing else 2)
+    assert delivery["pass"] is False
+    assert delivery["error"] is not None
+    assert record["pass"] is False
     assert result.returncode == 1

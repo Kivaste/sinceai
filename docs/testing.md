@@ -104,6 +104,12 @@ executes the production CLI, with a fresh in-memory HMAC key passed only through
 private scoring artefacts stay outside the checkout, in a new attempt directory.
 
 - HEALTH-S1 must release; both verify tiers and the dashboard then run.
+- HEALTH-S1's **measured delivery** must also release through
+  `python -m pets_release.measure.wire`, followed by both verify tiers and the
+  dashboard on that measured release. This exercises the actual scoring,
+  baseline assembly, final manifest scan and publication path (#120), not just
+  a plain release or a scratch candidate. Its verdict lives under
+  `delivery.HEALTH-S1` in the same record and is mandatory for overall success.
 - CS-S1 follows `tests/smoke/expectations.json` **read from Git at that SHA**, not
   from the working file or the presence of a release. It remains `refused` until
   #24's change commits `released`; a released expectation runs the same four steps.
@@ -115,7 +121,13 @@ private scoring artefacts stay outside the checkout, in a new attempt directory.
 - An expected refusal needs exit 1, no published release, and actual gate failure
   names and positive hit counts. Exit 2 is unknown, **not** a valid refusal.
 - Dirty checkouts, SHA mismatch, unavailable inputs, identity drift, missing steps,
-  errors and timeouts fail. `--timeout` sets the total CLI budget (default 360 seconds).
+  errors and timeouts fail. In particular, a missing or errored measured CLI fails
+  even when the plain release passes; there is no fallback to the plain verdict.
+  `--timeout` sets the shared CLI budget (default 720 seconds). The plain and
+  measured lanes run concurrently, each with fresh output paths and the same
+  in-memory key. The added two-pass measured path may exceed the original
+  approximately six-minute target; the larger ceiling prevents that target from
+  silently skipping delivery coverage, and actual per-step timings are recorded.
   Expectations, tool revision and input digests never come from a planted pass file.
 
 Each invocation atomically replaces
