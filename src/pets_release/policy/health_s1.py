@@ -73,6 +73,30 @@ _ROWS += withheld_table("published_weekly_stats", [
 ], "table withheld: " + _NOTE + "; unsuppressed, a differencing aid")
 
 FLOORS, DIRECT, _PLAN = build(_ROWS)
+
+# D64 (#157): bounded attribute-inference lift. Content-free; stated in the manifest via the residual note below.
+LOS_MAX_LIFT = 2.0  # human decision D64 option (b), 23:00: los_minutes bounded, icd10_primary disclosed only
+LOS_BIN_MIN = 30
+LIFT_ATTACKER = ("the #139 red-team attribute-inference attacker: knows a released visit's quasi-identifiers and "
+                 "guesses the most common released value among the visits that match them; compared with always "
+                 "guessing the release's most common value (base rate); seeded sample of at most 3000 targets")
+LIFT_REASON = (f"lift = attacker accuracy / base-rate accuracy. los_minutes at most {LOS_MAX_LIFT}: binned at "
+               f"least {LOS_BIN_MIN} minutes wide (10-minute bins measure 2.92 on the kit, #157); a plan over it is "
+               f"refused, never relaxed. icd10_primary is measured and disclosed, not bounded: chapter-level coding "
+               f"scores H-U4 0.0, so it stays at 3 characters with every QI at its coarsest accepted rung, where its "
+               f"lift measures about 2.1")
+# The manifest note; the run appends the measured lift per attribute (run.narrative, from the search's final step).
+LIFT_NOTE = (f"D64: lift = accuracy guessing from the QIs / base rate. los_minutes bound {LOS_MAX_LIFT}, else "
+             f"refused; {LOS_BIN_MIN}-min bins cost H-U2 0.967 -> 0.920 (kit). icd10_primary: no bound, a disclosed "
+             f"residual risk (lift about 2.1); it cannot be reduced: chapter-level coding makes H-U4 0.0. Lifts are "
+             f"the producer population estimator (exact QI classes, all released rows), distinct from #139's "
+             f"sampled attacker, whose rates are the attribute-inference-redteam entries.")
+ATTRIBUTE_LIFT = {"attacker": LIFT_ATTACKER, "reason": LIFT_REASON,
+                  "attributes": [{"table": "ed_visits", "column": "icd10_primary", "max_lift": None},
+                                 {"table": "ed_visits", "column": "los_minutes", "max_lift": LOS_MAX_LIFT,
+                                  # #157 r3: recorded as a manifest sacrifice liftStep (H-U2 before/after the
+                                  # wider bins); a record only, H-U2's 0.9 floor is unchanged
+                                  "tradeoff": {"check": "H-U2", "rung": "num.bin", "from_params": {"width": 10}}}]}
 # clinical_notes.author_name is a staff direct identifier (floor withheld)
 DIRECT = tuple(sorted(set(DIRECT) | {("clinical_notes", "author_name")}))
 
@@ -97,6 +121,8 @@ POLICY = ScenarioPolicy(
                  "suppression / suppression share needed, cap 0.10): full 0.536 / 0.663, CRP vs other 0.372 / 0.507, "
                  "withheld 0.043 / 0.099. The search withholds it and the cap holds, so the justified non-QI "
                  "fallback is not taken; H-U7 0.983 either way (it selects CRP by test_code)"},
+        {"id": "attribute-lift-bound", "status": "open",
+         "note": LIFT_NOTE},
         {"id": "lab-test-code-identity", "status": "open",
          "note": "test_code is released exact for H-U7 and is not a detector QI, yet carries the same test identity "
                  "as test_name: a person's set of lab tests could single them out to someone who knows their test "
@@ -154,7 +180,10 @@ POLICY = ScenarioPolicy(
     linked=((("ed_visits", "visit_id"), ("lab_results", "visit_id")),),
     alt_floors={("ed_visits", "patient_hetu"): "id.pseudonym"},
     alt_floor_conditions={("ed_visits", "patient_hetu"): {"check": "H-U6", "outcome": "fail_without"}},
-    param_minimums={("ed_visits", "municipality"): {"rung": "geo.topn", "param": "n", "min": 8}},
+    param_minimums={("ed_visits", "municipality"): {"rung": "geo.topn", "param": "n", "min": 8},
+                    # D64 (#157): 30-minute stay bands, the width that brings the los_minutes lift under the bound
+                    ("ed_visits", "los_minutes"): {"rung": "num.bin", "param": "width", "min": LOS_BIN_MIN}},
+    attribute_lift=ATTRIBUTE_LIFT,
 )
 
 

@@ -190,6 +190,32 @@ def _rung_step_errors(m: dict) -> list[str]:
             errs.append(f"{_fmt(['sacrifices', i, 'rungStep', 'atFrom'])}: budget-not-exceeded")
         if not isinstance(s["after"], (int, float)) or isinstance(s["after"], bool) or not s["after"] >= THRESHOLD:
             errs.append(f"{_fmt(['sacrifices', i, 'after'])}: rung-sacrifice-check-not-strict")
+    errs += _lift_step_errors(m, released, THRESHOLD)
+    return errs
+
+
+def _lift_step_errors(m: dict, released: dict, threshold: float) -> list[str]:
+    """#157 r3: a ``liftStep`` sacrifice entry records a purpose cost that stays above the strict floor; it can never
+    lower a floor. Its floor must be exactly the strict threshold, its check must still score >= it, it carries no
+    rungStep, its field must be released at its rung, and the lift must exceed the bound at ``from`` and hold it at
+    ``to`` (fail closed)."""
+    errs: list[str] = []
+    for i, s in enumerate(m["sacrifices"]):
+        st = s.get("liftStep")
+        if st is None:
+            continue
+        p = ["sacrifices", i]
+        after = s["after"]
+        if isinstance(s["floor"], bool) or s["floor"] != threshold:
+            errs.append(f"{_fmt([*p, 'floor'])}: lift-step-floor-not-strict")
+        if not isinstance(after, (int, float)) or isinstance(after, bool) or not after >= threshold:
+            errs.append(f"{_fmt([*p, 'after'])}: lift-step-check-not-strict")
+        if "rungStep" in s:
+            errs.append(f"{_fmt(p)}: lift-step-with-rung-step")
+        if released.get((st["table"], st["column"])) != st["rung"] or st["fromParams"] == st["toParams"]:
+            errs.append(f"{_fmt([*p, 'liftStep'])}: field-mismatch")
+        if not st["atFrom"]["lift"] > st["maxLift"] >= st["atTo"]["lift"]:
+            errs.append(f"{_fmt([*p, 'liftStep'])}: bound-not-shown")
     return errs
 
 

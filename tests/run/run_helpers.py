@@ -66,7 +66,8 @@ GROUPS = 4
 def grouped_qis(folder):
     """Edit the synthetic copy so the search can reach k: each person gets one of GROUPS QI profiles (the
     birth date, municipality and arrival hour of a representative row), consistent across that person's visits;
-    arrival dates and every other column are left as they are."""
+    arrival dates are left as they are, and ``dominant_sensitive`` then gives 3 of every 5 visits one diagnosis
+    and one stay (D64: the lift bound); every other column is left as it is."""
     import pandas as pd
 
     p = folder / "ed_visits.csv"
@@ -80,7 +81,20 @@ def grouped_qis(folder):
         df.at[i, "municipality"] = df.at[r, "municipality"]
         ts, rep = df.at[i, "arrival_ts"], df.at[r, "arrival_ts"]
         df.at[i, "arrival_ts"] = ts[:11] + rep[11:13] + ts[13:]
+    dominant_sensitive(df)
     df.to_csv(p, index=False, encoding="utf-8", lineterminator="\n")
+
+
+DOMINANT_SHARE = 3  # of every 5 visits
+
+
+def dominant_sensitive(df) -> None:
+    """D64 (#157): 3 of every 5 visits share one diagnosis and one stay, so on the small minikit the most common
+    value of a QI class is the release's most common value and the attribute-inference lift stays under the
+    HEALTH-S1 bound; the other visits keep their own values (the purpose checks still see variety)."""
+    dom = [i for i in df.index if i % 5 < DOMINANT_SHARE]
+    df.loc[dom, "icd10_primary"] = df.at[0, "icd10_primary"]
+    df.loc[dom, "los_minutes"] = "120"
 
 
 def grouped_spread_arrivals(folder):

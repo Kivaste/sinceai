@@ -329,6 +329,15 @@ MANIFEST_SCHEMA: dict = {
                     "withinBound": {"const": False},
                 }),
             }),
+            # #157 r3: the purpose cost of holding an attribute-lift bound, a record only (floor = the strict
+            # threshold, never a waiver): the check's score at the finer params and the lift at both
+            "liftStep": _obj({
+                "cause": {"const": "attribute-lift-bound"}, "table": _ref("name"), "column": _ref("name"),
+                "rung": _ref("id"), "fromParams": _ref("params"), "toParams": _ref("params"),
+                "maxLift": {"type": "number", "minimum": 1},
+                "atFrom": _obj({"score": _SCORE, "lift": {"type": "number", "minimum": 0}}),
+                "atTo": _obj({"lift": {"type": "number", "minimum": 0}}),
+            }),
         }, required=["after", "before", "check", "floor", "reason"])),
         "residualRisks": _arr(_RESIDUAL_RISK, 1),
         "fitFor": _arr(_ref("fit"), 1),
