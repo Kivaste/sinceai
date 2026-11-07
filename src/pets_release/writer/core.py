@@ -180,13 +180,31 @@ def _self_scan(build: Path, c: Candidate, manifest: dict, context: dict) -> list
     verify = run_checks(build, c.contract, {**context, "phase": "verify"})
     reasons += _gate_reasons(verify, "selfscan")
     reasons += [r.replace("gate:", "selfscan:") for r in _registry_reasons(verify.records)]
-    text = "\x00".join(_strings({k: v for k, v in manifest.items() if k != "contract"}, []))
-    values = set()
+    strings = _strings({k: v for k, v in manifest.items() if k != "contract"}, [])
+    released = set()
     for t in c.tables:
-        values.update(v for v in pd.unique(t.frame.to_numpy(dtype=object).ravel()) if len(v) >= SCAN_MIN_LEN)
-    if any(v in text for v in values):
+        released.update(v for v in pd.unique(t.frame.to_numpy(dtype=object).ravel()) if len(v) >= SCAN_MIN_LEN)
+    # #80: every source cell value (withheld tables and columns, suppressed rows, raw forms) is scanned too. The
+    # one exemption is by identity, not frequency: a manifest string that IS a table or column header name (the
+    # writer's structured table/column fields) may contain a source value, e.g. a category inside a column name.
+    source = context.get("source", {})
+    headers = {stem for stem in source} | {str(col) for df in source.values() for col in df.columns} \
+        | {t.name[:-4] for t in c.tables} | {col for t in c.tables for col in t.frame.columns}
+    from_source = set()
+    for df in source.values():
+        for col in df.columns:
+            from_source.update(v for v in pd.unique(df[col].to_numpy(dtype=object))
+                               if isinstance(v, str) and len(v) >= SCAN_MIN_LEN)
+    if _occurs(released, "\x00".join(strings)) or _occurs(from_source, "\x00".join(s for s in strings
+                                                                                     if s not in headers)):
         reasons.append("selfscan:manifest-value")
     return reasons
+
+
+def _occurs(values: set, text: str) -> bool:
+    """Any value (each >= SCAN_MIN_LEN long) a substring of ``text``. An n-gram prefilter keeps big kits fast."""
+    grams = {text[i:i + SCAN_MIN_LEN] for i in range(len(text) - SCAN_MIN_LEN + 1)}
+    return any(v[:SCAN_MIN_LEN] in grams and v in text for v in values)
 
 
 def _publish_scoring(staging: Path, scoring: Path) -> None:
