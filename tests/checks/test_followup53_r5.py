@@ -81,6 +81,20 @@ def test_bare_network_cue_prose_passes_in_cells_and_text(tmp_path, check, text):
     assert _hits(tmp_path, text, check) == 0
 
 
+# a cue joined by "-" to a plain word is a compound ("wifi-yhteys"), an ordinary word as in the cell walker,
+# not a symbol-bearing value; a value later in the clause still counts
+@pytest.mark.parametrize("check", SECRETS)
+@pytest.mark.parametrize("text", ["wifi-yhteys ei toimi.", "wifi-verkko katkeilee", "wlan-reititin on rikki."])
+def test_cue_hyphen_compound_is_not_a_value(tmp_path, check, text):
+    assert _hits(tmp_path, text, check) == 0
+
+
+@pytest.mark.parametrize("check", SECRETS)
+@pytest.mark.parametrize("text", ["wifi-verkko on Talvi2031", "wifi-Talvi2031 toimii"])
+def test_cue_hyphen_compound_then_value_refuses(tmp_path, check, text):
+    assert _hits(tmp_path, text, check) >= 1
+
+
 # (b) hedge glued to its value
 GLUED_SECRETS = [f"{pre}{d}kissakala" for pre in ("password probably", "salasana nyt",
                                                   "password for the router still")

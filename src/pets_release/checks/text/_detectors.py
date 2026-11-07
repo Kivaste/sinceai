@@ -424,12 +424,22 @@ def _cue_end(kind, lo, hi, text, pos, network=False):
     is the redacted value (skipped, disarms) unless a value is glued to it."""
     armed = False
     words = 0
+    cue_end = pos
     for _ in range(_cues.WINDOW):
         m = _CTOK.match(text, pos)
         if not m:
             return None
         pos = m.end()
         raw = m.group(1)
+        rest = raw.rstrip(_TRAIL)[1:]
+        if (m.start(1) == cue_end and raw[:1] == "-" and rest[:1].isalpha() and not _secret_like(rest)
+                and raw.rstrip(_TRAIL)[-1:] not in (":", "=")):
+            # the cue joined by "-" to a plain word is a compound ("wifi-yhteys"): an ordinary word, as in
+            # the cell rescan, not a symbol-bearing value; a copula later in the clause still arms
+            words += 1
+            if raw[-1:] in _SENTENCE_END:
+                return None
+            continue
         if raw == _MASKED or _cues.is_placeholder(raw.rstrip(_TRAIL)):
             # ``_normalise.MASK`` is " <mask> ": exactly one space and then a value character means the
             # source glued a value to the placeholder ("[SECRET_1]hunterxyz")
