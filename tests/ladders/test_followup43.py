@@ -4,10 +4,25 @@ from __future__ import annotations
 
 import pandas as pd
 import pytest
-from test_apply import FakeKeys, e
 
-from pets_release.ladders import LadderError, apply
+from pets_release.ladders import LADDERS, LadderError, apply
 from pets_release.ladders import transforms as T
+
+
+class FakeKeys:
+    def token(self, value, label="RECORD_KEY"):
+        import hashlib
+
+        return hashlib.sha256(f"{label}|{value}".encode()).hexdigest()
+
+
+def _finest(rung):
+    return next((lad[0] for lad in LADDERS.values() if rung in lad), "keep")
+
+
+def e(table, column, rung, params=None, floor=None):
+    floor = floor or _finest(rung)
+    return {"table": table, "column": column, "rung": rung, "params": params or {}, "floor": floor, "reason": "t", "source": "hand"}
 
 
 def _df(**cols):
