@@ -27,7 +27,7 @@ _NUM = r"-?\d+(?:\.\d+)?"
 
 # rung -> contract form. ``withheld`` has no form (the column is absent).
 CONTRACT_FORMS: dict[str, str] = {
-    "ts.exact": r"^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}(?::\d{2})?$",
+    "ts.exact": r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$",
     "ts.hour": r"^\d{4}-\d{2}-\d{2}T\d{2}:00$",
     "ts.month_hour": r"^\d{4}-\d{2}-01T\d{2}:00$",
     "ts.day": r"^\d{4}-\d{2}-\d{2}$",
@@ -40,13 +40,23 @@ CONTRACT_FORMS: dict[str, str] = {
     "icd.full": r"^[A-Z]\d{2}(?:\.[A-Z0-9]{1,4})?$",
     "icd.3": r"^[A-Z]\d{2}$",
     "icd.chapter": r"^[A-Z]$",
-    "num.exact": "decimal",
+    "num.exact": rf"^[<>]?{_NUM}$",
     "num.round": "decimal",
     "num.bin": rf"^\[{_NUM},{_NUM}\)$",
     "id.pseudonym": "hex64",
     "text.redacted": "text",
     "keep": "text",
 }
+
+# Every rung emits an empty cell for a null or malformed source value, so every contract entry
+# built from it must say `params.nullable: true` (ticket 04's gate accepts empty values then).
+CONTRACT_PARAMS: dict[str, dict] = {r: {"nullable": True} for r in CONTRACT_FORMS}
+
+
+def contract_entry(rung: str) -> dict:
+    """``{form, params}`` for a contract column produced by ``rung``."""
+    return {"form": contract_form(rung), "params": dict(CONTRACT_PARAMS[rung])}
+
 
 # Rung -> ladder kind (inverse of LADDERS, without withheld).
 RUNG_KIND: dict[str, str] = {r: k for k, ladder in LADDERS.items() for r in ladder if r != WITHHELD}

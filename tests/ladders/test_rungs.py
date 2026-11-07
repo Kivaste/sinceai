@@ -27,9 +27,15 @@ class FakeKeys:
         return hashlib.sha256(f"{label}|{value}".encode()).hexdigest()
 
 
+def _finest(rung):
+    from pets_release.ladders import LADDERS
+
+    return next((lad[0] for lad in LADDERS.values() if rung in lad), "keep")
+
+
 def _plan(rows):
     return [
-        {"table": t, "column": c, "rung": r, "params": p or {}, "floor": "", "reason": "t", "source": "hand"}
+        {"table": t, "column": c, "rung": r, "params": p or {}, "floor": _finest(r), "reason": "t", "source": "hand"}
         for t, c, r, p in rows
     ]
 
