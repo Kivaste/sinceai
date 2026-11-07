@@ -1,6 +1,6 @@
 {
   "failing": {
-    "emptyTables": [
+    "release.empty-tables": [
       {
         "column": null,
         "count": 1,

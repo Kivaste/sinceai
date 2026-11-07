@@ -3,8 +3,9 @@ from __future__ import annotations
 
 import numpy as np
 
-from pets_release.checks.cells.validators import HEX64_TOKEN
+from pets_release.checks.cells._validators import HEX64_TOKEN
 from pets_release.checks.records import Violation, locations
+from pets_release.checks.release import MANIFEST
 
 
 def table_file(table: str) -> str:
@@ -20,6 +21,22 @@ def contract_files(contract) -> dict:
     if not isinstance(files, dict):
         raise TypeError("contract.files must be a mapping")
     return files
+
+
+def file_label(release, contract, name: str) -> str:
+    """Contract-listed names (and the manifest) are reported as-is; any other release-derived
+    file name is replaced by a content-free marker (its position in the sorted folder listing)."""
+    if name == MANIFEST or name in contract_files(contract):
+        return name
+    return f"unlisted-file#{release.entries.index(name)}"
+
+
+def column_label(contract, file: str, idx: int, col: str) -> str:
+    """Contract-declared column names are reported as-is; others become ``unlisted-column#<pos>``."""
+    spec = contract_files(contract).get(file)
+    if spec is not None and col in spec["columns"]:
+        return col
+    return f"unlisted-column#{idx}"
 
 
 def scan_cells(release, contract, check: str, label: str, finder):
@@ -51,5 +68,6 @@ def scan_cells(release, contract, check: str, label: str, finder):
             for sev, mask in (("high", hi), ("low", lo)):
                 if mask.any():
                     rows = np.nonzero(mask[codes])[0]
-                    out.append(Violation(check, label, sev, f, col, len(rows), locations(rows)))
+                    out.append(Violation(check, label, sev, file_label(release, contract, f),
+                                         column_label(contract, f, idx, col), len(rows), locations(rows)))
     return n, tuple(out)

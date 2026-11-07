@@ -59,14 +59,22 @@ def payment_cards(s):
 
 
 # --- IBAN (mod-97, country length) -----------------------------------------------------------
-_IBAN = re.compile(_NB + r"([A-Z]{2}\d{2}(?:[ ]?[A-Z0-9]){11,30})" + _NA)
-_IBAN_LEN = {"FI": 18, "SE": 24, "NO": 15, "DK": 18, "DE": 22, "EE": 20, "GB": 22, "FR": 27, "NL": 18, "ES": 24,
-             "IT": 27, "BE": 16, "AT": 20, "CH": 21, "PL": 28, "LT": 20, "LV": 21, "IE": 22, "PT": 29, "IS": 26}
+# Case-insensitive; groups may be separated by up to two spaces/dashes. Validated after normalising.
+_IBAN = re.compile(_NB + r"([A-Z]{2}\d{2}(?:[\s-]{0,2}[A-Z0-9]){11,30})" + _NA, re.IGNORECASE)
+_IBAN_SEP = re.compile(r"[\s-]+")
+# ISO 13616 registry lengths (European/SEPA subset). Countries not listed: any length 15..34 with valid mod-97.
+_IBAN_LEN = {"AD": 24, "AT": 20, "BE": 16, "BG": 22, "CH": 21, "CY": 28, "CZ": 24, "DE": 22, "DK": 18, "EE": 20,
+             "ES": 24, "FI": 18, "FO": 18, "FR": 27, "GB": 22, "GI": 23, "GL": 18, "GR": 27, "HR": 21, "HU": 28,
+             "IE": 22, "IS": 26, "IT": 27, "LI": 21, "LT": 20, "LU": 20, "LV": 21, "MC": 27, "MT": 31, "NL": 18,
+             "NO": 15, "PL": 28, "PT": 25, "RO": 24, "SE": 24, "SI": 19, "SK": 24, "SM": 27}
 
 
 def _iban_ok(raw: str) -> bool:
-    s = raw.replace(" ", "")
-    want = _IBAN_LEN.get(s[:2])
+    s = _IBAN_SEP.sub("", raw)
+    want = _IBAN_LEN.get(s[:2].upper())
+    if want is None and not s.isupper():
+        return False  # unlisted country: only upper-case text (limits mod-97 chance hits on lower-case words)
+    s = s.upper()
     if (want is not None and len(s) != want) or not (15 <= len(s) <= 34):
         return False
     r = s[4:] + s[:4]
@@ -77,10 +85,13 @@ def ibans(s):
     n = 0
     for m in _IBAN.finditer(s):
         raw = m.group(1)
+        glued = (m.start() > 0 and s[m.start() - 1] in "_-") or (m.end() < len(s) and s[m.end()] in "_-")
+        if glued and not _IBAN_SEP.sub("", raw)[:2].isupper():
+            continue  # lower/mixed case joined to an identifier by _ or -: pseudonym text, not an IBAN
         # try the longest prefix that validates (trailing words may be swallowed by the pattern)
-        parts = raw.split(" ")
+        parts = _IBAN_SEP.split(raw)
         for k in range(len(parts), 0, -1):
-            if _iban_ok(" ".join(parts[:k])):
+            if _iban_ok("".join(parts[:k])):
                 n += 1
                 break
     return n, 0
@@ -174,7 +185,7 @@ _HANDLE = re.compile(r"(?<![\w.@])@([A-Za-z0-9_]{3,30})(?![\w@.]*\.[A-Za-z]{2,})
 
 
 def usernames(s):
-    n = sum(1 for m in _USER.finditer(s) if any(ch.isdigit() or ch in "._" for ch in m.group(1)))
+    n = sum(1 for _ in _USER.finditer(s))  # the cue is required; the value may be purely alphabetic
     n += len(_HANDLE.findall(s))
     return n, 0
 
@@ -188,7 +199,7 @@ def property_ids(s):
 
 
 # --- licence plates (Finnish ABC-123) -----------------------------------------------------------
-_PLATE = re.compile(r"(?<![\w-])[A-ZÅÄÖ]{2,3}-\d{1,3}(?![\w-])")
+_PLATE = re.compile(r"(?<![\w-])[A-ZÅÄÖ]{2,3}-\d{1,3}(?![\w-])", re.IGNORECASE)
 
 
 def plates(s):
@@ -207,7 +218,7 @@ _SECRET_CUE = re.compile(
 
 def secrets(s):
     n = len(_KEYSHAPES.findall(s))
-    n += sum(1 for m in _SECRET_CUE.finditer(s) if any(ch.isdigit() for ch in m.group(1)))
+    n += sum(1 for _ in _SECRET_CUE.finditer(s))  # the cue is required; the value may be purely alphabetic
     return n, 0
 
 
@@ -239,19 +250,20 @@ def urls_with_tokens(s):
 
 
 # --- raw timestamps (minute or second precision) ------------------------------------------------
-_ISO_TS = re.compile(r"(?<!\d)\d{4}-\d{2}-\d{2}[T ](\d{2}):(\d{2})(?::(\d{2})(?:[.,]\d+)?)?")
-_FI_TS = re.compile(r"(?<![\d.])\d{1,2}\.\d{1,2}\.\d{4}\s*(?:klo|kl\.?|at|,)?\s*(\d{1,2})[:.](\d{2})(?![\d])")
+# Every supported format captures (hour, minute, second?, fraction?); any non-zero sub-hour part is a hit.
+_ISO_TS = re.compile(r"(?<!\d)\d{4}-\d{2}-\d{2}[T ](\d{2}):(\d{2})(?::(\d{2})(?:[.,](\d+))?)?(?!\d)")
+_FI_TS = re.compile(r"(?<![\d.])\d{1,2}\.\d{1,2}\.\d{4}\s*(?:klo|kl\.?|at|,)?\s*"
+                    r"(\d{1,2})[:.](\d{2})(?:[:.](\d{2})(?:[.,](\d+))?)?(?!\d)")
+TIMESTAMP_FORMATS = (_ISO_TS, _FI_TS)
+
+
+def _sub_hour(m) -> bool:
+    _, minute, second, frac = m.groups()
+    return minute != "00" or (second or "00") != "00" or bool((frac or "").strip("0"))
 
 
 def raw_timestamps(s):
-    n = 0
-    for m in _ISO_TS.finditer(s):
-        if m.group(2) != "00" or (m.group(3) and m.group(3) != "00"):
-            n += 1
-    for m in _FI_TS.finditer(s):
-        if m.group(2) != "00":
-            n += 1
-    return n, 0
+    return sum(1 for rx in TIMESTAMP_FORMATS for m in rx.finditer(s) if _sub_hour(m)), 0
 
 
 # --- 64-hex anywhere --------------------------------------------------------------------------

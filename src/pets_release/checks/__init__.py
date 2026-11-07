@@ -28,15 +28,39 @@ violations: [Violation]}``. Violation: ``{check, label, severity, file, column, 
 ``count`` = number of cells (or files/columns) with a hit, ``locations`` = up to the first 100
 0-based data-row indices, sorted. Never values.
 
+``result.registry_error`` is set (module names only) when discovery failed; then nothing ran and
+``refused`` is True.
+
 Adding a check (sibling tickets): put a module anywhere under ``pets_release/checks/`` (e.g.
 ``checks/text/stitch.py``) and decorate a function::
 
-    from pets_release.checks.registry import register, Outcome, Violation
+    from pets_release.checks import register, Outcome, Violation
 
-    @register(name="healthInText", version="1", scope="release", unit="turns")
-    def run(release, contract, context) -> Outcome: ...
+    @register(name="text.health", version="1.0.0", scope="release", unit="turns")
+    def run(release, contract, context) -> Outcome:
+        if context.get("source_tables") is None:      # producer checks: inputs unavailable
+            return Outcome.not_run()                   # -> status not_run, refuses
+        ...
+        return Outcome(n=scanned, violations=(Violation(name, label, "high", file, column, count, rows),))
 
-The registry auto-imports every submodule on first ``all_checks()``; names must be unique.
+Names match ticket 02's ``checkName`` pattern ``^[a-z0-9][a-z0-9._-]{0,63}$`` (``contract.files``,
+``rescan.payment-cards``, ``text.payment-cards``, ``producer.person-k``); versions are semver
+``1.0.0``. ``register`` raises on anything else. ``ASSERTION_CHECKS`` maps each manifest
+export-assertion key (camelCase) to the one check name that is its evidence.
+
+The registry auto-imports every submodule on first ``all_checks()``; names must be unique. Discovery
+fails closed: a non-package submodule not starting with ``_`` that registers zero checks, or fails
+to import, raises ``RegistryError`` (the runner refuses). Put helpers in ``_``-prefixed modules; no
+module-level ``CHECKS`` tuples.
+``Outcome.not_applicable()`` is allowed only for a check registered with ``applies_to=(forms...)``
+when the contract declares no column with any of those forms; the runner verifies this, records
+``not_applicable`` with denominator 0 (does not refuse), and records ``error`` for any other use.
+A run where nothing but not_applicable records exist refuses. Writer rules (16): see the
+``runner`` docstring (not_applicable and low-severity hits can never back an export assertion).
+
+Violation ``file``/``column`` name only contract-listed files and columns; any other
+release-derived name is reported as ``unlisted-file#<i>`` / ``unlisted-column#<pos>``.
+
 The runner, not the check, decides status: an exception -> ``error``; ``Outcome.not_run()`` ->
 ``not_run``; denominator 0 on a non-empty release -> ``error``; any high-severity violation ->
 ``fail``; otherwise ``pass`` (low-severity hits stay counted, as residual risk). Nothing outside
@@ -49,7 +73,14 @@ folder), ``.csv_files``, ``.table(file)`` -> ``Table(header, frame)`` with every
 This package imports nothing from the detector, redactor or transforms (tested).
 """
 from pets_release.checks.records import CheckRecord, Outcome, Violation
-from pets_release.checks.registry import Check, all_checks, register
+from pets_release.checks.registry import (
+           ASSERTION_CHECKS,
+           Check,
+           RegistryError,
+           all_checks,
+           register,
+)
 from pets_release.checks.runner import GateResult, run_checks
 
-__all__ = ["Check", "CheckRecord", "GateResult", "Outcome", "Violation", "all_checks", "register", "run_checks"]
+__all__ = ["ASSERTION_CHECKS", "Check", "CheckRecord", "GateResult", "Outcome", "RegistryError", "Violation",
+           "all_checks", "register", "run_checks"]
