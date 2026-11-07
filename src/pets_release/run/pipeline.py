@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from pets_release.checks import text as text_checks
 from pets_release.contract import generate as generate_contract
 from pets_release.ladders import apply as apply_plan
 from pets_release.manifest import canonical_bytes, release_scope_id
@@ -110,10 +111,12 @@ def run_release(*, kit, scenario: dict, created: str, key_text: str, out, plan_n
     narrative = build_narrative(policy=policy, plan=plan, scenario_ids=[s["id"] for s in kit.scenarios()],
                                 suppression=sup, k=contract["k"])
     cand = Candidate(
-        scenario=scenario_id, recipient=recipient, tables=tuple(tables), contract=contract, inputs=inputs,
+        scenario=scenario_id, recipient=recipient, tables=tuple(tables), contract=contract,
         tool_revision=tool_revision, created=created, narrative=narrative,
+        # keep/geo rungs carry the gate's `text` form, so text.health runs and needs its lexicon bound
+        lexicon_digests={text_checks.LEXICON_NAME: text_checks.lexicon_digest()},
         scoring_files={SUPPRESSION_REPORT: canonical_bytes(sup),
                        PERSON_K_REPORT: canonical_bytes(sup.get("personKAfter", {}))},
     )
-    res = write_release(cand, out, master, context=gate_ctx)
+    res = write_release(cand, out, master, kit, context=gate_ctx)
     return RunOutcome(res.status, res.out, res.scoring, res.reasons, sup)
