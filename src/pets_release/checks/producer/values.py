@@ -1,0 +1,295 @@
+"""Producer-scope value checks: original identifier survival, unkeyed hashes, key material.
+
+Each scans every cell of every released CSV and every string in the manifest.
+
+Original-value survival is a hit when any of these holds for a cell:
+  - whole-cell equality (case-folded, whitespace collapsed) with an original value, any length;
+  - the original's alphanumeric-compact form (case-folded, separators removed) of at least
+    SUBSTRING_MIN (8) characters occurs anywhere in the cell's compact form, with no token
+    boundary required (cells that are a single 32+ hex digest are left to the hash check);
+  - a token n-gram equals an original of at least 4 normalised characters (or its compact form
+    of at least 6 characters).
+Shorter originals inside longer text are not hits; that floor is deliberate (false refusals).
+
+Key material: every supplied key must be at least MIN_KEY_FORM (16) characters/bytes, so every
+form (raw, hex, base64 std/url, padded or not) is scannable; a shorter key is an error.
+Originals and hash sets are built in memory from the source data and never
+leave this module; records carry only schema names, counts and row indices.
+
+Context:
+  source:       {table: DataFrame (dtype=str)}
+  identifiers:  [{table, column}] source columns whose values are identifiers
+                (direct identifiers; hashing also covers technical identifiers listed here)
+  keys:         [str | bytes] key material (master and derived keys)
+"""
+
+from __future__ import annotations
+
+import base64
+import binascii
+import hashlib
+import json
+import re
+from collections import defaultdict
+
+from pets_release.checks.records import Outcome
+from pets_release.checks.registry import register
+
+from ._common import CheckError, read_csv, release_dir, viol
+
+ORIGINAL_VALUES = "producer.original-values"
+UNKEYED_HASHES = "producer.unkeyed-hashes"
+KEY_MATERIAL = "producer.key-material"
+
+MANIFEST = "privacy_manifest.json"
+MIN_NORM = 4
+MIN_COMPACT = 6
+MAX_GRAM = 8
+MIN_KEY_FORM = 16
+
+_SPLIT = re.compile(r"[\s:;,=()\[\]{}<>\"'|/\\]+")
+_EDGE = ".!?*"
+_NON_ALNUM = re.compile(r"[\W_]+", re.UNICODE)
+_HEX = re.compile(r"[0-9a-fA-F]{32,}")
+_HEX_LENS = (32, 40, 64)
+# A cell that is one hex digest/token is not substring-scanned for originals: the
+# reversible-hash check covers it, and a digit run inside a keyed digest is chance.
+_DIGEST = re.compile(r"[0-9a-fA-F]{32,}")
+SUBSTRING_MIN = 8
+
+
+def _tokens(s: str) -> list[str]:
+    return [t.strip(_EDGE) for t in _SPLIT.split(s.casefold()) if t.strip(_EDGE)]
+
+
+def _norm(s: str) -> str:
+    return " ".join(_tokens(s))
+
+
+def _compact(s: str) -> str:
+    return _NON_ALNUM.sub("", s.casefold())
+
+
+def _whole(s: str) -> str:
+    return " ".join(s.casefold().split())
+
+
+def _cells(release):
+    """Yield (file, column, location, text) for every released cell and manifest string.
+
+    Unique values per column are yielded once with all their row indices.
+    """
+    root = release_dir(release)
+    files = sorted(p for p in root.iterdir() if p.is_file())
+    if not files:
+        raise CheckError("release folder is empty")
+    n = 0
+    out = []
+    for p in files:
+        if p.suffix.lower() == ".csv":
+            df = read_csv(p)
+            for col in df.columns:
+                n += len(df)
+                rows = defaultdict(list)
+                for i, v in enumerate(df[col].tolist()):
+                    if v:
+                        rows[v].append(i)
+                out.append((p.name, col, rows))
+            out.append((p.name, "<header>", {c: [] for c in df.columns}))
+        elif p.name == MANIFEST:
+            strings: dict[str, list] = defaultdict(list)
+            _walk(json.loads(p.read_text(encoding="utf-8")), strings)
+            n += sum(len(v) for v in strings.values())
+            out.append((p.name, "", strings))
+        else:
+            # any other file is scanned as text; the gate refuses it elsewhere
+            n += 1
+            out.append((p.name, "", {p.read_text(encoding="utf-8", errors="replace"): [0]}))
+    return n, out
+
+
+def _walk(node, acc):
+    if isinstance(node, dict):
+        for k, v in node.items():
+            acc[str(k)].append(0)
+            _walk(v, acc)
+    elif isinstance(node, list):
+        for v in node:
+            _walk(v, acc)
+    elif isinstance(node, str):
+        acc[node].append(0)
+
+
+def _source_values(context):
+    source = context["source"]
+    out = []
+    for ident in sorted(context["identifiers"], key=lambda d: (d["table"], d["column"])):
+        df = source.get(ident["table"])
+        if df is None or ident["column"] not in df.columns:
+            raise CheckError("identifier column missing from source")
+        label = f"{ident['table']}.{ident['column']}"
+        vals = {v for v in df[ident["column"]].tolist() if isinstance(v, str) and v.strip()}
+        out.append((label, vals))
+    return out
+
+
+def _scan(release, check, match):
+    """Run ``match(text) -> set[label]`` over every cell; build the record."""
+    n, groups = _cells(release)
+    if n == 0:
+        raise CheckError("nothing to scan")
+    hits_by = defaultdict(list)
+    for file, col, rows in groups:
+        for text, locs in rows.items():
+            for label in match(text):
+                hits_by[(file, col, label)].extend(locs if locs else [0])
+    # count = distinct rows hit in that file/column (manifest strings count as row 0)
+    vs = [viol(check, label, file, col, len(set(locs)), locs) for (file, col, label), locs in sorted(hits_by.items())]
+    return Outcome(n=n, violations=tuple(vs))
+
+
+# --- original identifier survival -------------------------------------------------
+
+
+@register(name=ORIGINAL_VALUES, version="1.0.0", scope="producer", unit="cells")
+def run_original_values(release, contract, context) -> Outcome:
+    context = context or {}
+    if not context.get("source") or not context.get("identifiers"):
+        return Outcome.not_run()
+    norm: dict[str, set] = defaultdict(set)
+    compact: dict[str, set] = defaultdict(set)
+    whole_cell: dict[str, set] = defaultdict(set)
+    prefix: dict[str, list] = defaultdict(list)  # first SUBSTRING_MIN compact chars -> [(compact, label)]
+    max_gram = 1
+    for label, vals in _source_values(context):
+        for v in vals:
+            whole_cell[_whole(v)].add(label)
+            cv = _compact(v)
+            if len(cv) >= SUBSTRING_MIN:
+                prefix[cv[:SUBSTRING_MIN]].append((cv, label))
+            nv = _norm(v)
+            if len(nv) >= MIN_NORM:
+                norm[nv].add(label)
+                max_gram = max(max_gram, min(MAX_GRAM, nv.count(" ") + 1))
+            cv = _compact(v)
+            if len(cv) >= MIN_COMPACT:
+                compact[cv].add(label)
+
+    def match(text):
+        found = set(whole_cell.get(_whole(text), ()))
+        c = _compact(text)
+        if not _DIGEST.fullmatch(text.strip()):
+            for i in range(len(c) - SUBSTRING_MIN + 1):
+                cands = prefix.get(c[i : i + SUBSTRING_MIN])
+                if cands:
+                    for cv, label in cands:
+                        if c.startswith(cv, i):
+                            found.add(label)
+        toks = _tokens(text)
+        ctoks = [_compact(t) for t in toks]
+        whole = _compact(text)
+        if whole in compact:
+            found |= compact[whole]
+        for size in range(1, min(max_gram, len(toks)) + 1):
+            for i in range(len(toks) - size + 1):
+                gram = " ".join(toks[i : i + size])
+                if gram in norm:
+                    found |= norm[gram]
+                cg = "".join(ctoks[i : i + size])
+                if cg in compact:
+                    found |= compact[cg]
+        return found
+
+    return _scan(release, ORIGINAL_VALUES, match)
+
+
+# --- reversible (unkeyed) hashes of original values ---------------------------------
+
+
+def _variants(v: str):
+    s = v.strip()
+    n = " ".join(s.split())
+    c = re.sub(r"[\W_]+", "", s)
+    return {v, s, n, n.casefold(), n.upper(), c, c.casefold(), c.upper()} - {""}
+
+
+@register(name=UNKEYED_HASHES, version="1.0.0", scope="producer", unit="cells")
+def run_unkeyed_hashes(release, contract, context) -> Outcome:
+    context = context or {}
+    if not context.get("source") or not context.get("identifiers"):
+        return Outcome.not_run()
+    digests: dict[str, set] = defaultdict(set)
+    for label, vals in _source_values(context):
+        for v in vals:
+            for var in _variants(v):
+                b = var.encode("utf-8")
+                for algo in ("md5", "sha1", "sha256"):
+                    digests[hashlib.new(algo, b).hexdigest()].add(f"{algo}:{label}")
+
+    def match(text):
+        found = set()
+        for m in _HEX.finditer(text):
+            run = m.group(0).lower()
+            for size in _HEX_LENS:
+                if len(run) < size:
+                    break
+                windows = [run] if len(run) == size else (run[i : i + size] for i in range(len(run) - size + 1))
+                for w in windows:
+                    if w in digests:
+                        found |= digests[w]
+        return found
+
+    return _scan(release, UNKEYED_HASHES, match)
+
+
+# --- key material ---------------------------------------------------------------------
+
+
+def _key_forms(key) -> tuple[set, set]:
+    """Return (case-sensitive forms, case-insensitive lowercase forms)."""
+    raw = key.encode("utf-8") if isinstance(key, str) else bytes(key)
+    exact = set()
+    if isinstance(key, str):
+        exact.add(key)
+    for b in {raw, raw.strip()}:
+        std = base64.b64encode(b).decode()
+        url = base64.urlsafe_b64encode(b).decode()
+        exact |= {std, std.rstrip("="), url, url.rstrip("=")}
+        try:
+            exact.add(b.decode("utf-8"))
+        except UnicodeDecodeError:
+            pass
+    lower = {raw.hex(), binascii.hexlify(raw.strip()).decode()}
+    # a key given as hex text: also look for its decoded bytes in base64
+    if isinstance(key, str) and re.fullmatch(r"(?:[0-9a-fA-F]{2})+", key):
+        b = bytes.fromhex(key)
+        exact |= {base64.b64encode(b).decode().rstrip("="), base64.urlsafe_b64encode(b).decode().rstrip("=")}
+    exact = {f for f in exact if len(f) >= MIN_KEY_FORM}
+    lower = {f.lower() for f in lower if len(f) >= MIN_KEY_FORM}
+    return exact, lower
+
+
+@register(name=KEY_MATERIAL, version="1.0.0", scope="producer", unit="cells")
+def run_key_material(release, contract, context) -> Outcome:
+    keys = (context or {}).get("keys")
+    if not keys:
+        return Outcome.not_run()
+    exact, lower = set(), set()
+    for k in keys:
+        if not k or len(k) < MIN_KEY_FORM:
+            raise CheckError("key material too short to scan in every form")
+        e, lo = _key_forms(k)
+        exact |= e
+        lower |= lo
+    if not exact and not lower:
+        raise CheckError("key material too short to scan")
+
+    def match(text):
+        if any(f in text for f in exact):
+            return {"keyMaterial"}
+        tl = text.lower()
+        if any(f in tl for f in lower):
+            return {"keyMaterial"}
+        return set()
+
+    return _scan(release, KEY_MATERIAL, match)

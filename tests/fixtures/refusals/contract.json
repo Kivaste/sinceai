@@ -1,0 +1,84 @@
+{
+  "files": {
+    "notes.csv": {
+      "columns": {
+        "note_text": {
+          "form": "text",
+          "params": {
+            "nullable": true
+          }
+        },
+        "note_token": {
+          "form": "hex64",
+          "params": {}
+        },
+        "visit_token": {
+          "form": "hex64",
+          "params": {}
+        }
+      },
+      "required": [
+        "note_token",
+        "visit_token"
+      ]
+    },
+    "visits.csv": {
+      "columns": {
+        "age_band": {
+          "form": "^(\\d{1,2}-\\d{1,2}|90\\+)$",
+          "params": {}
+        },
+        "arrival_ts": {
+          "form": "^\\d{4}-\\d{2}-01T\\d{2}:00$",
+          "params": {}
+        },
+        "los_minutes": {
+          "form": "integer",
+          "params": {}
+        },
+        "municipality_group": {
+          "form": "enum",
+          "params": {
+            "values": [
+              "north",
+              "other",
+              "south"
+            ]
+          }
+        },
+        "visit_token": {
+          "form": "hex64",
+          "params": {}
+        }
+      },
+      "required": [
+        "visit_token",
+        "age_band"
+      ]
+    }
+  },
+  "qi": [
+    {
+      "column": "age_band",
+      "derived_from": "date_of_birth",
+      "table": "visits"
+    }
+  ],
+  "tokens": [
+    {
+      "column": "visit_token",
+      "scope": "release",
+      "table": "visits"
+    },
+    {
+      "column": "note_token",
+      "scope": "release",
+      "table": "notes"
+    },
+    {
+      "column": "visit_token",
+      "scope": "release",
+      "table": "notes"
+    }
+  ]
+}

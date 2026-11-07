@@ -1,0 +1,14 @@
+term,lang,label,match,boundary,notes
+@case_ending,fi,PERSON,rule,include,"case ending is part of the span (Virtasen, Ainolle); set to exclude to cut the ending"
+@case_ending,fi,LOCATION,rule,include,"case ending is part of the span (Thaimaassa, Turussa)"
+@case_ending,fi,ORG,rule,include,case ending is part of the span
+@case_ending,fi,ADDRESS,rule,include,case ending on the street word is part of the span (Koivukadulla 12)
+@postcode_town,fi,ADDRESS,rule,absorb,contiguous postcode and town are absorbed into the ADDRESS span
+@date_trailing_dot,fi,DATE,rule,include,trailing dot of '15.3.' belongs to the DATE span; set to exclude to cut it
+@age_unit,fi,AGE,rule,exclude,"only the number is the AGE span, never the unit or cue (olen 83-vuotias -> 83)"
+@health_left,fi,HEALTH,rule,4,max tokens taken to the left of the health term into the phrase
+@health_right,fi,HEALTH,rule,6,max tokens taken to the right of the health term into the phrase
+@person_merge,fi,PERSON,rule,merge,adjacent name tokens separated by one space form one span; set to split for one span per token
+@person_lowercase,fi,PERSON,rule,party,"lower-case known names count: cue (only after a cue or in a known pair), gazetteer (also any lower-case gazetteer name of 4+ letters), party (also the lower-case names of this conversation's customer and agent), known (also any lexicon name)"
+@person_gz_capitalised,fi,PERSON,rule,any,"capitalised names known only from the gazetteer: any (always) or party (only this conversation's customer or agent, or after a cue)"
+@org_lower_run,fi,ORG,rule,3,max tokens of a lower-case organisation name after an employer/operator cue (ASR output)
