@@ -54,6 +54,8 @@ If `claude-agent/opus` is rate-limited or errors, use `openai/gpt-6.1-sol`. Log 
 - **At most 8 concurrent review sessions per provider** (xai, opencode-go). Review only a ticket's current head, and cancel a review when its head is superseded.
 - **Final whole-branch `code-review`:** `opencode-go/gemini-4-argon#medium` + `opencode-go/gpt-6-luna#medium`. Use `openai/gpt-6.1-sol` instead of Luna if its quota has reset.
 
+**GPT-6.1 Sol switch-back (D13d):** `scripts/overnight/gpt-quota-probe.ps1` polls every 5 minutes. When the quota resets, it writes `.scratch/local-overnight/gpt-available.json` and sends you `scripts/overnight/gpt-switch-back-message.md`. **On every start or resume, if `gpt-available.json` exists, apply the rules in that message file.** If Sol hits the limit again, fall back to Luna and log it.
+
 **Quality recovery (D13c, Sat 05:50; user decision):**
 - **Must-fix follow-ups:** the privacy and fail-closed follow-ups are **#41, #42, #44, #45, #47 and #50**, plus any later follow-up touching fail-closed behaviour, value leaks, the kit/truth guards or vacuous tests. They must be fixed and merged **before the Sat 20:00 freeze**. Each fix gets a delta review by `xai/grok-4.7#medium` **and** `opencode-go/gemini-4-argon#medium`. Cosmetic follow-ups (#46, #48, #49) are optional.
 - **Numbers code counts as core:** tickets that produce numbers judges see get **two reviewers** (Grok + Gemini 4 Argon, or Grok + Luna): **18 dashboard, 19 measurer, 22 story kit, 25 search, 29 submission**. 18 and 19 merged on one review, so they get a retroactive read-only Gemini review now. Its findings become must-fix if they affect numbers, assertions or leaks.
