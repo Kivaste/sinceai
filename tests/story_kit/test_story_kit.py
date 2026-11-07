@@ -99,8 +99,14 @@ def test_no_mislabelled_scope_in_script_or_csv():
     """Keys resolve across all tables (row-weighted / worst table / dataset level), never one table or HEALTH-S1."""
     texts = [(KIT / "pitch-beats.md").read_text(encoding="utf-8"), (KIT / "numbers-template.csv").read_text(encoding="utf-8"),
              (KIT / "numbers.csv").read_text(encoding="utf-8")]
+    readme = (KIT / "README.md").read_text(encoding="utf-8")
     assert all("ed_visits" not in t for t in texts)
     assert "same scenario" not in texts[0]
+    assert "share of ROWS (worst table)" not in readme, "k_below_5_share is row-weighted, not the worst table"
+    for t in texts + [readme]:
+        for line in t.splitlines():
+            if "k_below_5_share" in line:
+                assert "worst table" not in line, line
 
 
 def test_bare_decimal_regex_catches_typed_numbers():

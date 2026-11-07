@@ -46,7 +46,7 @@ revision it was built at (see its manifest); docs-only commits after it do not c
 
 - `measured.utility.after.*` is the scorecard of the SUPPRESSED release (what the recipient gets). H-U4 is the
   visible loss and is a policy-enumerated sacrifice (`sacrifices.H-U4.floor`).
-- Rows vs persons: `k_below_5_share` is the scorecard's share of ROWS (worst table); `person_k.below_k_share` is OUR
+- Rows vs persons: `k_below_5_share` is the scorecard's share of ROWS (row-weighted over the tables scored for k); `person_k.below_k_share` is OUR
   share of PERSONS. Never mix them up. Per-person k is authoritative (D22: the scorecard is blind to the renamed `age_band`).
 - A baseline task the kit publishes as null (B2-k H-U6/H-U7/H-U8) renders `—`: that baseline cannot answer it.
 
