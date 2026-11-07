@@ -28,7 +28,7 @@ _ROWS = [
     _r(E, "municipality", "geo", "exact", False, "QI; H-U4 needs the eight largest municipalities",
        "top_n", {"n": 8}, "H-U4 needs the top 8; rest grouped as other to help k"),
     _r(E, "arrival_ts", "timestamp", "exact", False, "QI; H-U8 hour-of-day vs k on arrival week",
-       "month_hour", {}, "month+hour keeps the hour-of-day curve, collapses the date"),
+       "hour_of_day", {}, "hour of day only: H-U8 needs the hour-of-day curve; no date raises per-person k"),
     _r(E, "arrival_mode", "categorical", "exact", False, "QI (kit dictionary role); no required check", "withheld", {}, "no check needs it; withheld to raise per-person k"),
     _r(E, "ambulance_unit", "identifier", "pseudonym", False, "technical identifier", "withheld", {}, "no check needs it"),
     _r(E, "triage", "categorical", "exact", False, "H-U2", "exact"),

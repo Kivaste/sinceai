@@ -103,7 +103,57 @@ def _as_cs(m):
     m["bindings"]["checkVersions"] = {c["check"]: c["version"] for c in m["gate"]["checks"]}
     m["bindings"]["lexiconDigests"] = {"health-lexicon": "a" * 64}
     m["release"]["releaseScopeId"] = _scope_id(m)
+    m["contract"].pop("k", None)
+    _rebind_contract(m)
     return m
+
+
+def _rebind_contract(m):
+    from pets_release.manifest import canonical_digest
+
+    m["bindings"]["contractDigest"] = canonical_digest(m["contract"])
+
+
+# --- contract.k: the scenario's k-anonymity target --------------------------------------------------------------
+
+def test_health_fixture_contract_carries_k_5_and_binds_it(m):
+    from pets_release.manifest import canonical_digest
+
+    assert m["contract"]["k"] == 5
+    assert m["bindings"]["contractDigest"] == canonical_digest(m["contract"])
+    assert validate_manifest(m) == []
+
+
+def test_health_contract_without_k_is_invalid(m):
+    del m["contract"]["k"]
+    _rebind_contract(m)
+    assert "$.contract: required" in validate_manifest(m)
+
+
+def test_cs_contract_with_k_is_invalid(m):
+    m = _as_cs(m)
+    m["contract"]["k"] = 5
+    _rebind_contract(m)
+    assert "$.contract: not" in validate_manifest(m)
+
+
+@pytest.mark.parametrize("value,code", [
+    (1, "minimum"), (0, "minimum"), (-3, "minimum"), (2.5, "type"), ("5", "type"), (True, "type"), (None, "type"),
+])
+def test_invalid_k_is_invalid(m, value, code):
+    m["contract"]["k"] = value
+    assert f"$.contract.k: {code}" in validate_manifest(m)
+
+
+def test_k_2_is_the_smallest_valid_target(m):
+    m["contract"]["k"] = 2
+    _rebind_contract(m)
+    assert validate_manifest(m) == []
+
+
+def test_changed_k_without_rebinding_digest_is_invalid(m):
+    m["contract"]["k"] = 6
+    assert "$.bindings.contractDigest: mismatch" in validate_manifest(m)
 
 
 def test_cs_variant_is_valid(m):
