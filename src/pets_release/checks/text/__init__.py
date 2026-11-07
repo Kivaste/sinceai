@@ -36,6 +36,8 @@ from . import _detectors, _lexicon, _normalise, _scan
 SCOPE = "release"
 VERSION = "1.0.0"
 UNIT = "turns"
+# A contract with no ``text``-form column makes every text check not_applicable (runner-verified).
+APPLIES_TO = (_scan.TEXT_FORM,)
 HEALTH_CHECK = "text.health"
 HEALTH_REQUIRED_KEY = "healthInTextRequired"
 LEXICON_NAME = _lexicon.LEXICON_NAME
@@ -75,8 +77,19 @@ def _violations(name, label, severity, per_field):
     return tuple(out)
 
 
+def _not_applicable(release, contract):
+    """True when the contract declares no text-form column. The undeclared-free-text guard still
+    runs first (via `_scan.load`), so free text hidden under another form is an error."""
+    if _scan.text_fields(contract):
+        return False
+    _scan.load(release, contract)
+    return True
+
+
 def _make(name, label, detector, view):
     def run(release, contract, context):
+        if _not_applicable(release, contract):
+            return Outcome.not_applicable()
         fields = _scan.load(release, contract)
         per_field = [(f, _scan.detect(f, detector, view)) for f in fields]
         viol = _violations(name, label, "high", per_field)
@@ -87,7 +100,7 @@ def _make(name, label, detector, view):
         return Outcome(n=sum(f.n_turns for f in fields), violations=viol)
 
     run.__name__ = "check_" + name.replace(".", "_").replace("-", "_")
-    register(name=name, version=VERSION, scope=SCOPE, unit=UNIT)(run)
+    register(name=name, version=VERSION, scope=SCOPE, unit=UNIT, applies_to=APPLIES_TO)(run)
     return run
 
 
@@ -122,8 +135,10 @@ def _check_lexicon_binding(release, context):
         raise _scan.TextCheckError("health lexicon digest differs from the one bound in the manifest")
 
 
-@register(name=HEALTH_CHECK, version=VERSION, scope=SCOPE, unit=UNIT)
+@register(name=HEALTH_CHECK, version=VERSION, scope=SCOPE, unit=UNIT, applies_to=APPLIES_TO)
 def check_text_health(release, contract, context):
+    if _not_applicable(release, contract):
+        return Outcome.not_applicable()
     required = contract.get(HEALTH_REQUIRED_KEY, False) if isinstance(contract, dict) else None
     if not isinstance(required, bool):
         raise _scan.TextCheckError("contract does not state whether health in text is forbidden")
