@@ -13,6 +13,7 @@ import os
 import sys
 
 from pets_release.kit import Kit, KitError
+from pets_release.offline import entry_point
 from pets_release.pseudonym import KeyConfigError, MasterKey
 from pets_release.submission.build import build_submission
 from pets_release.submission.errors import SubmissionRefused
@@ -24,6 +25,7 @@ class _Parser(argparse.ArgumentParser):
         self.exit(2, f"{self.prog}: error: {message}\n")
 
 
+@entry_point
 def main(argv: list[str]) -> int:
     p = _Parser(prog="pets-release submission",
                 description="Build pets_submission/ outside the public repo from verified releases.")

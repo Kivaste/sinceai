@@ -50,6 +50,7 @@ MAINS = [
     "pets_release.detect.cli",
     "pets_release.verify.cli",
     "pets_release.run.cli",
+    "pets_release.submission.cli",
     "pets_release.measure.wire",
 ]
 

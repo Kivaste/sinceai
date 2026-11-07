@@ -1,10 +1,9 @@
-﻿"""Guards: where the submission may be written, what may go into it, and what must never be in it.
+"""Guards: where the submission may be written, what may go into it, and what must never be in it.
 
 Every guard fails closed: a git answer that cannot be obtained is a refusal, never a pass.
 """
 from __future__ import annotations
 
-import base64
 import csv
 import io
 import json
@@ -145,11 +144,19 @@ def _ancestors(rel: str) -> list[str]:
     return ["/".join(parts[:i + 1]) for i in range(len(parts))]
 
 
-def key_needles(master: MasterKey) -> list[bytes]:
-    out = []
-    for k in (master._k, manifest_signing_key(master)._k):
-        out += [k, k.hex().encode(), k.hex().upper().encode(), base64.b64encode(k), base64.urlsafe_b64encode(k)]
-    return sorted(set(out))
+def _keys(master: MasterKey) -> tuple:
+    return (master, manifest_signing_key(master))
+
+
+def _squashed_forms(master: MasterKey) -> tuple[list[str], list[str]]:
+    """(case-sensitive, lower-case hex) text forms of both keys, separators removed; through the keys module's
+    ``scannable_forms`` (raw key bytes are read only there)."""
+    exact, lower = set(), set()
+    for k in _keys(master):
+        e, lo = k.scannable_forms()
+        exact |= {q for q in map(_squash, e) if len(q) >= 16}
+        lower |= {q for q in map(_squash, lo) if len(q) >= 16}
+    return sorted(exact), sorted(lower)
 
 
 def _squash(s: str) -> str:
@@ -195,21 +202,18 @@ def scan_key_material(root: Path, master: MasterKey) -> None:
     """No file under ``root`` may contain the master or manifest-signing key, in any encoding: raw bytes, hex or
     base64, and also in the decoded cells/strings (CSV and JSON escaping cannot hide it) with separators and
     quotes ignored."""
-    needles = key_needles(master)
-    texts = []
-    for n in needles:
-        try:
-            texts.append(n.decode("ascii"))
-        except UnicodeDecodeError:
-            continue
-    squashed = sorted({q for q in (_squash(t) for t in texts) if len(q) >= 16})
-    shortest = min((len(q) for q in squashed), default=0)
+    keys = _keys(master)
+    exact, lower = _squashed_forms(master)
+    shortest = min((len(q) for q in (*exact, *lower)), default=0)
     for p in sorted(Path(root).rglob("*")):
         if not p.is_file():
             continue
         data = p.read_bytes()
-        if any(n in data for n in needles):
+        if any(k.occurs_in(data) for k in keys):
             raise SubmissionRefused("key_material")
         for s in _decoded_strings(p, data):
-            if len(s) >= shortest and any(q in _squash(s) for q in squashed):
+            if len(s) < shortest:
+                continue
+            q = _squash(s)
+            if any(f in q for f in exact) or any(f in q.lower() for f in lower):
                 raise SubmissionRefused("key_material")

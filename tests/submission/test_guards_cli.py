@@ -87,6 +87,25 @@ def test_key_material_scan_finds_hex_encoded_key(tmp_path):
         scan_key_material(root, master)
 
 
+@pytest.mark.parametrize("form", ["signing-raw", "master-hex-upper", "signing-b64url-unpadded"])
+def test_key_material_scan_finds_every_planted_form(tmp_path, form):
+    """The scan reads keys only through the keys module (scannable_forms / occurs_in); every form still trips it."""
+    import base64
+
+    from pets_release.pseudonym import manifest_signing_key
+
+    master = MasterKey.from_text(TEST_KEY)
+    sk = manifest_signing_key(master)._k  # tests may read raw bytes; src may not (test_context_keys)
+    data = {"signing-raw": b"x" + sk + b"y",
+            "master-hex-upper": master._k.hex().upper().encode(),
+            "signing-b64url-unpadded": base64.urlsafe_b64encode(sk).rstrip(b"=")}[form]
+    root = _tree(tmp_path / "t")
+    (root / "d" / "leak.bin").write_bytes(data)
+    with pytest.raises(SubmissionRefused) as e:
+        scan_key_material(root, master)
+    assert e.value.code == "key_material"
+
+
 # ---------- real CLI ----------
 
 def test_cli_usage_errors_exit_2(world, tmp_path):
