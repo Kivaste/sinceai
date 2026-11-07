@@ -11,6 +11,7 @@ You implement <ticket NN / issue #N: title> in repo Kivaste/sinceai, unattended.
 Read: AGENTS.md (binding), GLOSSARY.md, the issue (`gh issue view <N> -R Kivaste/sinceai --comments`),
 spec #1 › Testing Decisions (approved seams), docs/testing.md, C:\Users\kivas\AI\sinceai-notes\conventions.md.
 Worktree: C:\Users\kivas\AI\sinceai-wt\<slug>  Branch: ticket/<slug>  Base: origin/integration/pets-release @ <base sha>
+Never edit, test or commit in C:\Users\kivas\AI\sinceai-hackaton (the main checkout); use `git -C <your worktree>` only.
 
 Process — call the Skill tool with `tdd` FIRST and follow it (also read its tests.md and mocking.md):
 - Test only at the approved seams: the CLI (`pets-release run|verify|detect|dashboard|submission`), the redactor seam
