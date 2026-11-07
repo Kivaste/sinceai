@@ -1,8 +1,8 @@
 <# Exercise the production selector CLI with synthetic changed-file lists from a temporary Git repo. #>
-param([ValidateSet('planted', 'missing', 'marker', 'tooling', 'all')][string]$Case = 'all')
+param([ValidateSet('planted', 'missing', 'marker', 'tooling', 'mapped', 'fallback', 'incomplete', 'all')][string]$Case = 'all')
 $ErrorActionPreference = 'Stop'
 $selector = Join-Path $PSScriptRoot 'affected-tests.ps1'
-$root = Join-Path $env:LOCALAPPDATA ('Temp\opencode\affected-tests-' + [guid]::NewGuid().ToString('N'))
+$root = Join-Path (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path ('.scratch\affected-tests-' + [guid]::NewGuid().ToString('N'))
 $repo = Join-Path $root 'repo with spaces'
 New-Item -ItemType Directory -Force -Path $repo | Out-Null
 function Invoke-TestGit([string[]]$Arguments) {
@@ -33,8 +33,56 @@ try {
   }
   Plant 'tests/scaffold/test_smoke.py'
   Plant 'tests/overnight/test_affected_tests.py'
+  foreach ($path in @('tests/writer/test_writer.py', 'tests/writer/test_assemble.py', 'tests/writer/test_policy_target.py', 'tests/writer/test_manifest_value_scan.py',
+    'tests/run/test_manifest_number_scan.py', 'tests/run/test_self_scan_source_values.py', 'tests/run/test_recipient_cli.py',
+    'tests/verify/test_recipient.py', 'tests/verify/test_planted.py', 'tests/verify/test_manifest_value_scan.py', 'tests/verify/test_policy_target.py',
+    'tests/run/test_run.py', 'tests/run/test_unrelated.py', 'tests/verify/test_full.py', 'tests/e2e/test_e2e.py')) { Plant $path }
   Invoke-TestGit @('add', '.')
   Invoke-TestGit @('-c', 'user.name=test', '-c', 'user.email=test@example.invalid', 'commit', '-q', '-m', 'synthetic')
+  if ($Case -in @('mapped', 'all')) {
+    # Rule: a known source file selects its tests/CLI consumers, not whole folders.
+    # Failure row: writer/core.py -> entire writer + run + verify + e2e folders.
+    Plant 'src/pets_release/writer/core.py'
+    $result = Select-Tests
+    Assert ($result.code -eq 0) "selector failed: $($result.output)"
+    $selection = @(($result.output.Trim() -split 'selection: ')[-1] -split ' ')
+    foreach ($path in @('tests/writer/test_writer.py', 'tests/run/test_run.py', 'tests/verify/test_full.py', 'tests/e2e/test_e2e.py') + $guards) {
+      Assert ($selection -contains $path) "mapped writer change missed $path; $($result.output)"
+    }
+    foreach ($path in @('tests/writer', 'tests/run', 'tests/verify', 'tests/e2e', 'tests/run/test_unrelated.py')) {
+      Assert ($selection -notcontains $path) "mapped writer change did not slim $path; $($result.output)"
+    }
+    Remove-Item -LiteralPath (Join-Path $repo 'src/pets_release/writer/core.py')
+    Write-Output 'PASS mapped: per-file selection is a strict subset and retains CLI consumers and guards'
+  }
+  if ($Case -in @('fallback', 'all')) {
+    # Rule: an unmapped source file retains the old folder/consumer fallback.
+    Plant 'src/pets_release/writer/future_module.py'
+    $result = Select-Tests
+    Assert ($result.code -eq 0) "selector failed: $($result.output)"
+    $selection = @(($result.output.Trim() -split 'selection: ')[-1] -split ' ')
+    foreach ($path in @('tests/writer', 'tests/run', 'tests/verify', 'tests/e2e')) {
+      Assert ($selection -contains $path) "unmapped source did not fall back to $path; $($result.output)"
+    }
+    Remove-Item -LiteralPath (Join-Path $repo 'src/pets_release/writer/future_module.py')
+    Write-Output 'PASS fallback: unmapped source retains folder and consumer fallback'
+  }
+  if ($Case -in @('incomplete', 'all')) {
+    # A planted lookalike test cannot repair an absent exact mapped destination.
+    Plant 'src/pets_release/writer/core.py'
+    Remove-Item -LiteralPath (Join-Path $repo 'tests/writer/test_writer.py')
+    Plant 'tests/writer/test_core.py'
+    $result = Select-Tests
+    Assert ($result.code -eq 0) "selector failed: $($result.output)"
+    Assert ($result.output.Contains('per-file mapping incomplete for src/pets_release/writer/core.py; folder fallback')) 'incomplete mapping did not report folder fallback'
+    $selection = @(($result.output.Trim() -split 'selection: ')[-1] -split ' ')
+    foreach ($path in @('tests/writer', 'tests/run', 'tests/verify', 'tests/e2e')) {
+      Assert ($selection -contains $path) "incomplete mapping failed to retain $path; $($result.output)"
+    }
+    Remove-Item -LiteralPath (Join-Path $repo 'src/pets_release/writer/core.py')
+    Plant 'tests/writer/test_writer.py'
+    Write-Output 'PASS incomplete: missing exact destination retains fallback despite planted lookalike'
+  }
   if ($Case -in @('planted', 'all')) {
     # Rule: ANY src change selects every whole-source guard, even an unmapped new package.
     # Failure row: synthetic changed list [src/pets_release/new_package/cli.py] -> smoke only.
