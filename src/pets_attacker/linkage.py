@@ -325,13 +325,16 @@ class Matcher:
                 s, e, mh = self.d[i]
                 known = ~np.isnat(s) & (mh < 0)
                 ok = np.ones(self.n, bool)
-                ok[known] = (s[known] <= a1) & (np.maximum(e[known], s[known]) >= a0)
+                sk, ek = s[known], e[known]
+                # buckets are half-open [s, e); an exact instant (e == s) matches at both window edges
+                ok[known] = (sk <= a1) & ((ek > a0) | ((ek == sk) & (sk >= a0)))
                 is_mh = mh >= 0
                 if is_mh.any():
                     ok[is_mh] = np.isin(mh[is_mh], _hour_keys(a0, a1))
                 mask &= ok
             used += 1
         return np.flatnonzero(mask), used
+
 
 
 

@@ -149,3 +149,22 @@ def test_single_target_release_in_ladder_forms_links_with_certainty():
     rungs = {"arrival_ts": "ts.month_hour", "municipality": "geo.topn", "age_band": "age.band5"}
     rows, used = Matcher(prot, qis, rungs).candidates({"t": "2025-03-20T10:10:00", "p": "Kaarina", "a": "32", "s": "F"})
     assert list(rows) == [0] and used == 4
+
+
+def test_buckets_are_half_open_so_the_previous_day_does_not_match():
+    prot = pd.DataFrame({"arrival_ts": ["2025-03-01", "2025-03-02", "2025-03-03"]})
+    m = Matcher(prot, [QI("time", ("t",), ("arrival_ts",), window=(0, 0))], {"arrival_ts": "ts.day"})
+    assert list(m.candidates({"t": "2025-03-02T09:00:00"})[0]) == [1]
+    assert list(m.candidates({"t": "2025-03-02T00:00:00"})[0]) == [1]  # exclusive end of day 1 is not day 2
+    assert list(m.candidates({"t": "2025-03-02"})[0]) == [1]  # date-only: the whole day, no neighbours
+
+
+def test_hour_buckets_are_half_open_and_exact_instants_still_match_at_the_edge():
+    hour = pd.DataFrame({"arrival_ts": ["2025-03-17T09:00", "2025-03-17T10:00"]})
+    m = Matcher(hour, [QI("time", ("t",), ("arrival_ts",), window=(0, 0))], {"arrival_ts": "ts.hour"})
+    assert list(m.candidates({"t": "2025-03-17T10:00:00"})[0]) == [1]
+    exact = pd.DataFrame({"arrival_ts": ["2025-03-17T10:00:00", "2025-03-17T10:30:00"]})
+    m = Matcher(exact, [QI("time", ("t",), ("arrival_ts",), window=(0, 1))], {"arrival_ts": "ts.exact"})
+    assert list(m.candidates({"t": "2025-03-17T09:30:00"})[0]) == [0, 1]
+    m = Matcher(exact, [QI("time", ("t",), ("arrival_ts",), window=(1, 0))], {"arrival_ts": "ts.exact"})
+    assert list(m.candidates({"t": "2025-03-17T10:30:00"})[0]) == [0, 1]  # instant exactly at the window start matches
