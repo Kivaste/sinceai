@@ -30,7 +30,8 @@ def _by_id(results) -> dict:
 
 
 def _score(r):
-    return r["score"] if r is not None and r.get("status") == "ok" else None
+    score = r.get("score") if r is not None and r.get("status") == "ok" else None
+    return score if isinstance(score, float) and math.isfinite(score) else None
 
 
 def evaluate(policy, source, released, *, root) -> PurposeResult:
@@ -43,12 +44,20 @@ def evaluate(policy, source, released, *, root) -> PurposeResult:
     except Exception:  # noqa: BLE001 - adapter text could carry values; keep the code only
         return PurposeResult((), ("purpose:unavailable",))
     enforced = sorted(set(policy.purpose_checks) | {i for i, r in after.items() if r.get("required")})
+    if not enforced:
+        return PurposeResult((), ("purpose:no-tasks",))
     floors = {s["check"]: s["floor_score"] for s in policy.sacrifices}
     tasks, reasons = [], []
     for tid in enforced:
         a = after.get(tid)
+        b = before.get(tid)
         status = a["status"] if a is not None else "missing"
-        tasks.append({"task": tid, "status": status, "before": _score(before.get(tid)), "after": _score(a)})
+        tasks.append({"task": tid, "status": status, "before": _score(b), "after": _score(a)})
+        if _score(b) is None:
+            before_status = b.get("status") if b is not None else "missing"
+            if before_status not in ("error", "not_answerable", "missing"):
+                before_status = "error"
+            reasons.append(f"purpose:{tid}:before:{before_status}")
         if a is None or counts_as_fail(a):
             reasons.append(f"purpose:{tid}:{status}")
             continue
