@@ -113,9 +113,9 @@ pets-release dashboard ..\sinceai-out\health-s1 --out ..\sinceai-out\health-s1-d
 
 ### 5. Submission bundle
 
-<!-- docs-test: pending ticket=29 -->
+<!-- docs-test: skip reason=needs-kit-and-release -->
 ```powershell
-pets-release submission --out ..\pets_submission --kit "$env:PETS_KIT"
+pets-release submission --out ..\pets_submission --release ..\sinceai-out\health-s1 --kit "$env:PETS_KIT"
 ```
 
 ## Where row maps go

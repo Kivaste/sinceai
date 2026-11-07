@@ -31,6 +31,7 @@ ALLOWED_SKIP_REASONS = (
     "runs-the-whole-test-suite-recursively",
     # the CS-S1 release needs ticket 23 (turn_id check); guarded below
     "cs-s1-run-needs-ticket-23",
+    "needs-kit-and-release",
 )
 SUBCOMMANDS = ("run", "verify", "detect", "dashboard", "submission")
 MARKER = re.compile(r"<!--\s*docs-test:\s*(run|skip|pending)\b([^>]*?)-->")
