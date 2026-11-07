@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from pets_release.kit import Kit, KitError
+from pets_release.offline import entry_point
 
 COMMAND_PACKAGES: dict[str, str] = {
     "run": "pets_release.run",
@@ -127,6 +128,7 @@ def _kit_info(argv: list[str]) -> int:
     return 0
 
 
+@entry_point
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     top = _Parser(prog="pets-release", description="Purpose-first PETs release tool.")

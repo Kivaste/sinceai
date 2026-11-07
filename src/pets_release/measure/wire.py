@@ -19,6 +19,7 @@ from pathlib import Path
 
 from pets_release.cli import UsageError, resolve_run_context
 from pets_release.measure import MeasureRejected, measure, person_k_components
+from pets_release.offline import entry_point
 from pets_release.run import pipeline
 from pets_release.run.context import SCENARIO_SPEC
 from pets_release.writer import load_lineage, scoring_dir
@@ -97,6 +98,7 @@ def _person_k_from_release(*, kit, key_text, scratch):
     return person_k_values(scratch, manifest["contract"], ctx)
 
 
+@entry_point
 def main(argv: list[str]) -> int:
     try:
         ctx = resolve_run_context(argv)

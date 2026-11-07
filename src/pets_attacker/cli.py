@@ -12,6 +12,8 @@ from pathlib import Path
 
 import pandas as pd
 
+from pets_release.offline import entry_point
+
 from .linkage import RungError, qis_from_spec
 from .personas import broker_attack, insider_attack
 from .truth import load_adversary_truth, load_identity, load_rowmap
@@ -59,6 +61,7 @@ def run(kit: Path, release: Path, label: str, scoring_dir: Path | None = None, r
     return {"label": label, "broker": broker, "insider": insider}
 
 
+@entry_point
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="pets_attacker")
     ap.add_argument("--kit", required=True, type=Path)
