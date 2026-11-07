@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 from html import escape
 
+from pets_release.dashboard.render import fmt_num
 from pets_release.run.purpose import THRESHOLD
 
 HEADINGS = (
@@ -15,7 +16,14 @@ CONTROLLER = "To be supplied by the data controller"
 
 
 def _json(value):
-    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    def display(node):
+        if isinstance(node, dict):
+            return {k: display(v) for k, v in node.items()}
+        if isinstance(node, list):
+            return [display(v) for v in node]
+        return fmt_num(node) if isinstance(node, float) else node
+
+    return json.dumps(display(value), ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
 def _measurement(value):
@@ -25,7 +33,7 @@ def _measurement(value):
 
 
 def _score(value, reason):
-    return str(value) if value is not None else "not measured: " + reason
+    return fmt_num(value) if value is not None else "not measured: " + reason
 
 
 def _digest(value):
@@ -37,11 +45,11 @@ def sections(m):
     """Only manifest fields are evidence; product threshold is explicitly labelled."""
     release, measured = m["release"], m["measured"]
     purpose = [("Scenario", release["scenario"]), ("Recipient", release["recipient"]),
-               ("Trust level", "not measured: not recorded in the signed manifest")]
+               ("Trust level", "not supplied in the signed manifest")]
     for key in ("fitFor", "notFitFor"):
         purpose += [(key, _json(m[key]))]
     method = [("k target", str(m["contract"].get("k", "not measured: no k target in the signed manifest"))),
-              ("ε", "no differential privacy used")]
+              ("ε (product statement, not recorded in the manifest)", "no differential privacy used by this tool")]
     for f in m["fieldJustifications"]:
         method.append((f'{f["table"]}.{f["column"]}', _json(f)))
     for pet in m["pets"]:
@@ -50,6 +58,7 @@ def sections(m):
     suppression = [p for p in m["pets"] if p["pet"] == "local_suppression"]
     method += [("Local suppression", _json(suppression) if suppression
                 else "not measured: not recorded in the signed manifest")]
+    method.append(("Measured search", _measurement(measured["search"])))
     privacy = measured["privacy"]
     risk = [("Privacy measurements", _measurement(privacy))]
     missing_reason = privacy.get("reason", "not recorded in the signed manifest")
@@ -59,9 +68,14 @@ def sections(m):
         for c in privacy["components"]:
             risk.append((c["component"], (f'before={_score(c["before"], missing_reason)}; '
                          f'after={_score(c["after"], missing_reason)}; source={privacy["source"]}')))
+    persona_present = False
     for r in m["residualRisks"]:
         if r["kind"] in ("linkage", "attribute_inference"):
             risk.append((r["risk"], r["description"] + "; " + _measurement(r["rate"])))
+            persona_present |= r["risk"].startswith(("linkage-broker-", "linkage-insider", "attribute-inference-"))
+    if not persona_present:
+        risk.append(("attacker personas", "not measured (pending #138)"))
+    risk.append(("Redaction evaluation", _measurement(measured["redaction"])))
     utility = [("Purpose checks", _measurement(measured["utility"]))]
     if measured["utility"]["status"] == "measured":
         sacrifices = {s["check"]: s for s in m["sacrifices"]}
@@ -81,7 +95,8 @@ def sections(m):
             utility.append((task["task"], (f'{status}; before={_score(task["before"], reason)}; '
                             f'after={_score(score, reason)}')))
     utility += [("Product purpose threshold (not a measured value)", str(THRESHOLD)),
-                ("Sacrifices", _json(m["sacrifices"]))]
+                ("Sacrifices", _json(m["sacrifices"])),
+                ("Published baselines", _measurement(measured["baselines"]))]
     residual = []
     for r in m["residualRisks"]:
         residual.append((r["risk"], r["description"]))
@@ -100,18 +115,25 @@ def sections(m):
 
 
 def section_statuses(m):
-    """Content-free summary: a rendered section may still carry unmeasured evidence."""
-    return [(heading, "to be supplied" if heading == HEADINGS[1] else
-             "not measured" if any("not measured" in value or '"not_measured"' in value for _, value in body)
-             else "rendered") for heading, body in sections(m)]
+    """Summarise validated records, never rendered prose; individual rows retain their own statuses."""
+    measured = m["measured"]
+    statuses = (
+        "rendered", "to be supplied", "rendered",
+        "not measured" if measured["privacy"]["status"] == "not_measured" else "rendered",
+        "not measured" if measured["utility"]["status"] == "not_measured" else "rendered",
+        "rendered", "rendered",
+    )
+    return list(zip(HEADINGS, statuses))
 
 
 def render(m):
     """Return deterministic HTML and Markdown, escaping manifest prose in both."""
     html = ['<!doctype html><html lang="en"><meta charset="UTF8"><title>Evidence pack</title>',
             '<body><h1>DPO / Findata evidence pack</h1>',
-            '<p>Technical evidence, not a DPIA, legal opinion, permit or anonymity certification.</p>']
-    md = ["# DPO / Findata evidence pack", "", "Technical evidence, not a DPIA, legal opinion, permit or anonymity certification.", ""]
+            '<p>Technical evidence, not a DPIA, legal opinion, permit or anonymity certification.</p>',
+            '<p>Numeric aggregates use four decimal places; nonzero values below display precision are marked.</p>']
+    md = ["# DPO / Findata evidence pack", "", "Technical evidence, not a DPIA, legal opinion, permit or anonymity certification.",
+          "Numeric aggregates use four decimal places; nonzero values below display precision are marked.", ""]
     for i, (heading, rows) in enumerate(sections(m), 1):
         html.append(f'<section id="section-{i}"><h2>{i}. {heading}</h2><dl>')
         md += [f"## {i}. {heading}", ""]

@@ -90,6 +90,7 @@ def test_generic_and_persona_risks_and_missing_k_sets_are_explicit(release, tmp_
     assert "not measured: persona evaluation not run" in section
     assert "k on scenario QIs: not measured" in section
     assert "k on all kept catalogued QIs: not measured" in section
+    assert "pending #138" not in section
 
 
 @pytest.mark.parametrize("tamper", ["prose", "signature", "contract", "missing-key", "wrong-key"])
@@ -205,3 +206,103 @@ def test_residual_risk_prose_is_verbatim_not_json_escaped(release, tmp_path):
         section = unescape(path.read_text(encoding="utf-8")).split(start)[1].split(end)[0]
         assert description in section
         assert "not measured: synthetic rate unavailable" in section
+
+
+@pytest.mark.parametrize("reason", ["Synthetic approved purpose", "Approved purpose; risk not measured"])
+def test_purpose_and_recipient_are_rendered_statements_not_measurements(release, tmp_path, reason):
+    """CLI seam: a policy statement must not acquire a measurement verdict from prose."""
+    m = loads_strict((release / "privacy_manifest.json").read_bytes())
+    m["fitFor"][0]["reason"] = reason
+    write_manifest(release, m)
+    out = tmp_path / "pack.md"
+    result = run_pack(release, out)
+    assert result.returncode == 0, result.stderr
+    assert "Purpose and recipient: rendered" in result.stdout
+    section = unescape(out.read_text(encoding="utf-8")).split("## 1.")[1].split("## 2.")[0]
+    assert m["release"]["recipient"] in section
+    assert "fitFor:" in section and "notFitFor:" in section
+    assert reason in section
+    assert "Trust level: not supplied in the signed manifest" in section
+    assert "Trust level: not measured" not in section
+
+
+def test_section_statuses_use_structured_fields_not_planted_prose(release, tmp_path):
+    m = loads_strict((release / "privacy_manifest.json").read_bytes())
+    m["fieldJustifications"][0]["reason"] = "Purpose retained; other risk not measured"
+    m["measured"]["utility"]["source"] = "Purpose checks measured; unrelated risk not measured"
+    m["measured"]["privacy"]["source"] = "Privacy scored; unrelated risk not measured"
+    m["residualRisks"][0]["description"] = "Other risk not measured"
+    m["residualRisks"][0]["rate"] = {"status": "not_measured", "reason": "synthetic rate unavailable"}
+    write_manifest(release, m)
+    out = tmp_path / "pack.md"
+    result = run_pack(release, out)
+    assert result.returncode == 0, result.stderr
+    for heading in ("Method and parameters", "Measured re-identification risk against stated attackers",
+                    "Utility justification", "Residual risks"):
+        assert f"{heading}: rendered" in result.stdout
+    section = unescape(out.read_text(encoding="utf-8")).split("## 6.")[1].split("## 7.")[0]
+    assert "Other risk not measured" in section
+    assert "not measured: synthetic rate unavailable" in section
+
+
+def test_absent_per_persona_attackers_are_explicitly_pending(release, tmp_path):
+    out = tmp_path / "pack.md"
+    result = run_pack(release, out)
+    assert result.returncode == 0, result.stderr
+    section = out.read_text(encoding="utf-8").split("## 4.")[1].split("## 5.")[0]
+    assert "attacker personas: not measured (pending #138)" in section
+
+
+def test_no_differential_privacy_is_labelled_as_a_product_statement(release, tmp_path):
+    out = tmp_path / "pack.md"
+    result = run_pack(release, out)
+    assert result.returncode == 0, result.stderr
+    section = unescape(out.read_text(encoding="utf-8")).split("## 3.")[1].split("## 4.")[0]
+    assert "ε (product statement, not recorded in the manifest): no differential privacy used by this tool" in section
+
+
+@pytest.mark.parametrize("name,section,label,aggregate,expected", [
+    ("search", 3, "Measured search", {"candidates": 3, "accepted": 1, "boundReached": False,
+                                    "points": [{"step": 0, "risk": .2, "utility": .95, "accepted": True}]},
+     '"candidates":3'),
+    ("baselines", 5, "Published baselines", {"rows": [{"baseline": "B0", "metric": "utility_mean", "value": .8}]},
+     '"baseline":"B0"'),
+    ("redaction", 4, "Redaction evaluation", {"mode": "exact", "frame": "synthetic frame", "split": "synthetic split",
+                                            "labels": [{"label": "PERSON", "support": 3, "tp": 2, "fp": 1, "fn": 1,
+                                                        "precision": .5, "recall": .5}], "summary": []},
+     '"support":3'),
+])
+@pytest.mark.parametrize("status", ["measured", "not_measured"])
+def test_every_measurement_block_renders_its_status_and_aggregates(
+        release, tmp_path, name, section, label, aggregate, expected, status):
+    m = loads_strict((release / "privacy_manifest.json").read_bytes())
+    m["measured"][name] = ({"status": status, "source": "synthetic " + name, **aggregate} if status == "measured"
+                            else {"status": status, "reason": "synthetic " + name + " unavailable"})
+    write_manifest(release, m)
+    out = tmp_path / "pack.md"
+    result = run_pack(release, out)
+    assert result.returncode == 0, result.stderr
+    text = unescape(out.read_text(encoding="utf-8")).split(f"## {section}.")[1].split(f"## {section + 1}.")[0]
+    assert label + ":" in text
+    if status == "measured":
+        assert '"status":"measured"' in text and expected in text
+        assert "synthetic " + name in text
+    else:
+        assert "not measured: synthetic " + name + " unavailable" in text
+
+
+def test_fractional_aggregates_render_safely_without_rounding_nonzero_to_zero(release, tmp_path):
+    m = loads_strict((release / "privacy_manifest.json").read_bytes())
+    m["measured"]["baselines"] = {"status": "measured", "source": "synthetic aggregate precision",
+                                  "rows": [{"baseline": "B0", "metric": "linkage", "value": .4111111111111111},
+                                           {"baseline": "B2", "metric": "linkage", "value": .00000001}]}
+    m["measured"]["utility"]["tasks"][0]["before"] = .4111111111111111
+    write_manifest(release, m)
+    out = tmp_path / "pack.md"
+    result = run_pack(release, out)
+    assert result.returncode == 0, result.stderr
+    text = unescape(out.read_text(encoding="utf-8"))
+    assert "0.4111" in text and "0.4111111111111111" not in text
+    assert "<0.0001" in text
+    assert "Numeric aggregates use four decimal places" in text
+    assert identifier_shape_counts(text) == {}
