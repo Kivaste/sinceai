@@ -188,7 +188,8 @@ def test_not_run_without_source_or_k(h):
         rec = PERSON_K.run(rel, h.contract([("ed_visits", "sex")]), ctx)
         assert rec["status"] == "not_run", missing
     assert PERSON_K.run(rel, h.contract([("ed_visits", "sex")]), None)["status"] == "not_run"
-    assert PERSON_K.run(rel, h.contract([("ed_visits", "sex")], k=None), full)["status"] == "not_run"
+    # no contract k (CS-S1): not applicable, which the runner verifies against the contract (ticket 23)
+    assert PERSON_K.run(rel, h.contract([("ed_visits", "sex")], k=None), full)["status"] == "not_applicable"
 
 
 def test_fail_closed_on_bad_rowmap_or_missing_qi_column(h):

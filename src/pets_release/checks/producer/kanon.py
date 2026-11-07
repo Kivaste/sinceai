@@ -22,7 +22,8 @@ Context (producer scope; any missing item → ``not_run``):
   k:            optional; if given it must equal the contract's k (else error)
 
 k itself comes from the release contract's top-level ``k`` (int >= 2), so recipient
-verify needs only the release. No contract ``k`` -> both k checks return not_run.
+verify needs only the release. No contract ``k`` -> both k checks return not_applicable
+(registered ``applies_to=("contract:k",)``; ticket 23), so CS-S1 (no k target) does not refuse.
   source:       {table: DataFrame (dtype=str)} original tables
   rowmaps:      {table: DataFrame[protected_row, original_record_id]} per released QI table
   record_keys:  {table: record-key column in source}
@@ -36,7 +37,7 @@ from collections import defaultdict
 from typing import NamedTuple
 
 from pets_release.checks.records import Outcome
-from pets_release.checks.registry import register
+from pets_release.checks.registry import CONTRACT_K, register
 
 from ._common import CheckError, qi_by_table, read_table, release_dir, viol
 
@@ -239,12 +240,14 @@ def person_k_values(release, contract, context) -> PersonK:
     return PersonK(per_person, sorted(below_rows), len(unidentified), unid_rows)
 
 
-@register(name=PERSON_K, version="1.0.0", scope="producer", unit="persons")
+@register(name=PERSON_K, version="1.0.0", scope="producer", unit="persons", applies_to=(CONTRACT_K,))
 def run_person_k(release, contract, context) -> Outcome:
     context = context or {}
     k = _k(contract, context)
     needed = ("source", "rowmaps", "record_keys", "person")
-    if k is None or any(context.get(n) is None for n in needed):
+    if k is None:
+        return Outcome.not_applicable()  # no k target (CS-S1); the runner verifies the contract has no k
+    if any(context.get(n) is None for n in needed):
         return Outcome.not_run()
     res = person_k_values(release, contract, context)
     n = len(res.per_person) + res.unidentified
@@ -261,12 +264,12 @@ def run_person_k(release, contract, context) -> Outcome:
     return Outcome(n=n, violations=tuple(vs))
 
 
-@register(name=ROW_K, version="1.0.0", scope="release", unit="rows")
+@register(name=ROW_K, version="1.0.0", scope="release", unit="rows", applies_to=(CONTRACT_K,))
 def run_row_k(release, contract, context) -> Outcome:
     """Rows of each table whose QI combination occurs fewer than k times (release only)."""
     k = _k(contract, context)
     if k is None:
-        return Outcome.not_run()
+        return Outcome.not_applicable()  # no k target (CS-S1); the runner verifies the contract has no k
     release_dir(release)
     qis = qi_by_table(contract)
     if not qis:

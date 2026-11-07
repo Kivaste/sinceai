@@ -54,6 +54,11 @@ def _sorted_like_writer(df: pd.DataFrame, final: list[str]) -> tuple[pd.DataFram
 def run_release(*, kit, scenario: dict, created: str, key_text: str, out, plan_name: str,
                 tool_revision: str) -> RunOutcome:
     scenario_id = scenario.get("id")
+    if scenario_id == "CS-S1" and plan_name == "hand":  # ticket 23: CS-S1 glue
+        from pets_release.cs_s1.release import run_cs_s1
+
+        return run_cs_s1(kit=kit, scenario=scenario, created=created, key_text=key_text, out=out,
+                         tool_revision=tool_revision)
     if scenario_id not in SCENARIO_SPEC:
         raise RunError("run supports only HEALTH-S1 in this build")
     if plan_name != "hand":

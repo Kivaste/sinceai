@@ -359,6 +359,8 @@ _FILLERS = {
     "your", "now", "nyt", "nu", "code", "koodi", "kod", "number", "numero", "nummer", ":", "=",
     "#", "-",
 }
+_PLACEHOLDER = re.compile(r"\[[A-Z][A-Z_]*_\d+\]")
+_COPULAS = {"is", "was", "on", "oli", "är", "var", "it's", "its", ":", "="}
 _VTOK = re.compile(r"[ \t]*([^\s\u00a6,;]+)")
 _TRAIL = ".)\"'"  # "!" and "?" stay on the value: they can be password symbols
 _TAIL_PUNCT = "!?"
@@ -379,11 +381,17 @@ def _secret_like(tok: str) -> bool:
 def _cue_value(text, pos):
     """(collapsed value, end offset, token count, all single chars) after a cue, or None."""
     fillers = 0
+    copula = False  # a copula/colon between cue and value (the redactor's shape, ticket 12)
     while True:
         m = _VTOK.match(text, pos)
         if not m:
             return None
-        tok = m.group(1).rstrip(_TRAIL).lstrip(":=#")
+        raw = m.group(1).rstrip(_TRAIL)
+        tok = raw.lstrip(":=#")
+        if _PLACEHOLDER.match(raw):
+            return None  # an already-redacted value ("[SECRET_1]") is not a leak
+        if raw[:1] in ":=" or raw.lower() in _COPULAS:
+            copula = True
         if (not tok or tok.lower() in _FILLERS) and fillers < 4:
             pos, fillers = m.end(), fillers + 1
             continue
@@ -407,10 +415,10 @@ def _cue_value(text, pos):
         if n.group(1) != core:  # trailing punctuation ends the value
             break
     single = len(parts) >= 2 and all(len(x) == 1 for x in parts)
-    return "".join(parts), end, single
+    return "".join(parts), end, single, copula
 
 
-def _value_ok(kind, lo, hi, value, single):
+def _value_ok(kind, lo, hi, value, single, copula=True):
     if kind != "secret":
         value = value.rstrip(_TAIL_PUNCT)
     if kind == "digits":
@@ -418,6 +426,9 @@ def _value_ok(kind, lo, hi, value, single):
         return digits.isdigit() and lo <= len(digits) <= hi
     if kind == "code":
         return value.isalnum() and any(c.isdigit() for c in value) and lo <= len(value) <= hi
+    value = value.rstrip(":")  # "label:" after a cue is prose, not a symbol
+    if not copula:  # no copula/colon: only a credential-shaped token counts ("password reset?" is prose)
+        value = value.rstrip(_TAIL_PUNCT)
     return len(value) >= lo and len(value) <= hi and (_secret_like(value) or single)
 
 
@@ -431,8 +442,8 @@ def secrets(text):
             got = _cue_value(text, m.end())
             if got is None:
                 continue
-            value, end, single = got
-            if _value_ok(kind, lo, hi, value, single):
+            value, end, single, copula = got
+            if _value_ok(kind, lo, hi, value, single, copula):
                 hits.append((m.start(), end))  # cue + value: a next-turn value touches the cue turn
     return hits
 

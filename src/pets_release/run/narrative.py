@@ -10,7 +10,8 @@ from pets_release.manifest import not_measured
 
 _RECORD_KEYS = {("ed_visits", "visit_id"), ("lab_results", "lab_id"), ("lab_results", "visit_id"),
                 ("clinical_notes", "note_id"), ("clinical_notes", "visit_id"),
-                ("published_weekly_stats", "stat_id")}
+                ("published_weekly_stats", "stat_id"),
+                ("conversations", "conversation_id"), ("turns", "conversation_id"), ("turns", "turn_id")}
 
 
 def _role(policy, table, column) -> str:
@@ -37,6 +38,8 @@ def _pet(entry) -> tuple[str, dict]:
         return "withholding", {}
     if rung == "id.pseudonym":
         return "keyed_pseudonym", {"scope": "release", "label": params.get("label", "RECORD_KEY")}
+    if rung == "text.redacted":
+        return "text_redaction", {"placeholders": "typed, numbered per conversation"}
     if rung == "geo.topn":
         return "top_n_grouping", {"topN": params["n"]}
     if rung == "num.round":
@@ -48,7 +51,7 @@ def _pet(entry) -> tuple[str, dict]:
     return "generalisation", {"rung": rung}
 
 
-def build_narrative(*, policy, plan, scenario_ids, suppression: dict, k: int) -> dict:
+def build_narrative(*, policy, plan, scenario_ids, suppression: dict, k: int | None) -> dict:
     by_key = sorted(plan, key=lambda e: (e["table"], e["column"]))
     inventory = [{"dataset": policy.dataset, "table": e["table"], "column": e["column"],
                   "role": _role(policy, e["table"], e["column"]),
@@ -99,7 +102,8 @@ def build_narrative(*, policy, plan, scenario_ids, suppression: dict, k: int) ->
                           "reason": s["reason"][:500]} for s in policy.sacrifices), key=lambda s: s["check"])
     checks = ", ".join(policy.purpose_checks)
     fit = [{"scenario": policy.scenario,
-            "reason": f"built and gated for {policy.scenario} purpose checks {checks}; per-person k >= {k}"}]
+            "reason": f"built and gated for {policy.scenario} purpose checks {checks}"
+                      + (f"; per-person k >= {k}" if k is not None else "")}]
     not_fit = [{"scenario": s, "reason": "different recipient or purpose; not gated for it"}
                for s in sorted(scenario_ids) if s != policy.scenario]
     return {"inventory": inventory, "pets": pets, "fieldJustifications": fj, "measured": measured,

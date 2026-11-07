@@ -15,7 +15,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from pets_release.checks.records import SEVERITIES, CheckRecord, Outcome, Violation
-from pets_release.checks.registry import Check, RegistryError, all_checks
+from pets_release.checks.registry import Check, RegistryError, all_checks, selector_declared
 from pets_release.checks.release import Release
 
 
@@ -56,10 +56,12 @@ def _valid(out, chk: Check) -> bool:
     return True
 
 
-def _declares_any(contract, forms) -> bool:
-    """True if any contract column has one of ``forms``; an unreadable contract counts as True."""
+def _declares_any(contract, selectors) -> bool:
+    """True if the contract declares any of ``selectors`` (forms, ``contract:k``,
+    ``column:<file>/<col>``; see ``registry.valid_selector``). Unreadable contract or unknown
+    selector counts as True (fail closed)."""
     try:
-        return any(spec["form"] in forms for f in contract["files"].values() for spec in f["columns"].values())
+        return any(selector_declared(contract, s) for s in selectors)
     except Exception:  # noqa: BLE001
         return True
 

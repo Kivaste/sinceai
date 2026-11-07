@@ -177,15 +177,64 @@ def device_ids(s):
     return n, 0
 
 
+# --- cue + value rule shared by usernames and secrets ------------------------------------------
+# Same shape as the redactor (ticket 12): a value counts after a cue + copula/colon ("is", "on", "är", ":",
+# optional hedge) unless it is a function/prose word; without a copula only a credential-shaped token counts.
+_HEDGE = (r"(?:varmaan|kai|luultavasti|ehkä|probably|maybe|still|edelleen|nog|kanske|typ|fortfarande|nyt|now|nu)")
+_COPULA_VALUE = (
+    r"(?P<sep>[^\w\[]{0,4}(?:(?:on|oli|is|was|är|var)\b|[:=]))?[^\w\[]{0,4}"
+    r"(?:" + _HEDGE + r"\b[^\w\[]{1,3})?"
+    r"(?P<val>[^\s\[\]\"',;]{3,64})")
+_PROSE = frozenset("""
+varmaan kai luultavasti ehkä probably maybe nog kanske typ fortfarande nyt now nu
+the and for with that this those these your you our their his her its not none never wrong incorrect invalid
+expired changed correct right okay fine working broken locked blocked lost forgotten unknown new old same different
+too very still also just really should would could will can cannot must may might was were been being are has have
+had does did doesn didn isn aren wasn not reset link page screen details info information problem issue account
+service router modem network login logout user name username code number what which when where why how who from
+into onto over under about after before again because while until once only even such some any all each every both
+other another more most much many few less least own than then there here yes ok sure please thanks thank
+ei eikä oikea väärä vanha uusi sama eri liian tosi vielä myös vain hukassa lukossa voimassa vanhentunut vaihdettu
+unohtunut kadonnut estetty jotain mikä mitä tämä tuo sinun teidän minun hyvä huono ja tai mutta koska kun jos kaikille kaikki
+kaikissa kaikkiin palveluille palveluun tunnus tunnukset lukittu lukittuna toimi toimii sivu sivulla ongelma
+inte icke fel rätt gammal gamla ny nya samma annan fär mycket också bara glömt ändrat borta läst spärrat något vad
+detta det din ditt er bra dålig och eller men för
+""".split())
+
+
+def _credential_shaped(v: str) -> bool:
+    core = v.rstrip(".!?)")
+    if not core:
+        return False
+    has_l = any(c.isalpha() for c in core)
+    has_d = any(c.isdigit() for c in core)
+    inner_sym = any(c in "!#$%&*+=?@_~^/\\" for c in core)
+    mixed = any(c.isupper() for c in core[1:]) and any(c.islower() for c in core)
+    return has_d or (inner_sym and has_l) or mixed or (len(core) >= 20 and core.isalnum())
+
+
+def _cued_value_counts(m, *, alpha_without_copula: bool) -> bool:
+    v = m.group("val")
+    if _credential_shaped(v):
+        return True
+    core = v.rstrip(".!?)")
+    if core.lower() in _PROSE or not core.isalpha() or len(core) < 3:
+        return False
+    return m.group("sep") is not None or alpha_without_copula
+
+
 # --- usernames (cue + handle, or @handle not part of an email) ---------------------------------
 _USER = re.compile(
     r"(?i)\b(?:käyttäjätunnu(?:s|ksella|ksen|kseni)|käyttäjänimi|tunnukse(?:ni|lla|en)|username|user\s?name|"
-    r"login|user\s?id|användarnamn|användar-?id)\W{0,4}(?:on|is|är|:|=)?\W{0,4}([A-Za-z0-9][A-Za-z0-9._-]{2,31})")
+    r"login|user\s?id|användarnamn|användar-?id)"
+    + _COPULA_VALUE)
 _HANDLE = re.compile(r"(?<![\w.@])@([A-Za-z0-9_]{3,30})(?![\w@.]*\.[A-Za-z]{2,})")
 
 
 def usernames(s):
-    n = sum(1 for _ in _USER.finditer(s))  # the cue is required; the value may be purely alphabetic
+    # the cue is required; after a copula/colon a purely alphabetic value counts, without one only a
+    # credential-shaped or non-prose value does (the shape the redactor uses)
+    n = sum(1 for m in _USER.finditer(s) if _cued_value_counts(m, alpha_without_copula=True))
     n += len(_HANDLE.findall(s))
     return n, 0
 
@@ -213,12 +262,14 @@ _KEYSHAPES = re.compile(
 _SECRET_CUE = re.compile(
     r"(?i)\b(?:salasana(?:ni|na)?|password|passwd|pwd|lösenord(?:et)?|pin(?:-?koodi|-?kod|\s?code)?|puk(?:-?koodi|-?kod)?|"
     r"wi-?fi(?:-?avain|-?salasana|\s?key|\s?password)?|wlan(?:-?avain)?|wpa\d?)"
-    r"\W{0,4}(?:on|is|är|:|=)?\W{0,4}([^\s\[\]\"',;]{3,64})")
+    + _COPULA_VALUE)
 
 
 def secrets(s):
     n = len(_KEYSHAPES.findall(s))
-    n += sum(1 for _ in _SECRET_CUE.finditer(s))  # the cue is required; the value may be purely alphabetic
+    # cue + (copula|colon) + value, or cue + a credential-shaped token (digit, symbol, mixed case, long);
+    # cued everyday words ("password for the router", "password reset") are not values
+    n += sum(1 for m in _SECRET_CUE.finditer(s) if _cued_value_counts(m, alpha_without_copula=False))
     return n, 0
 
 

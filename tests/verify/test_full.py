@@ -251,6 +251,14 @@ def test_full_real_registry_producer_checks_fail_closed(bed, kit, tb):
     """Production registry, no 21 run context: every claimed producer check is not_run or unavailable -> fail."""
     rep = _full(tb, bed, kit)
     assert not rep.ok
-    claimed = {c["check"] for c in tb.load(bed)["gate"]["checks"] if c["scope"] == "producer"}
+    from pets_release.checks import all_checks
+    from pets_release.checks.registry import selector_declared
+
+    m = tb.load(bed)
+    # a check whose applies_to selectors the bed contract does not declare is not_applicable (ticket 23's
+    # turn-id-synthetic needs turns.csv/turn_id), which verify accepts; it is not a producer claim here
+    inapplicable = {c.name for c in all_checks()
+                    if c.applies_to and not any(selector_declared(m["contract"], s) for s in c.applies_to)}
+    claimed = {c["check"] for c in m["gate"]["checks"] if c["scope"] == "producer"} - inapplicable
     for name in claimed:
         assert any(name in x and ("not_run" in x or "unavailable" in x) for x in rep.lines), (name, rep.lines)
