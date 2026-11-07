@@ -26,7 +26,14 @@ You are the **Opus orchestrator** for `Kivaste/sinceai`. You dispatch implemente
 - **Recording hold LIFTED (D56, 17:50):** the demo is isolated on pin 5b260ec, in its own worktree. #106, #128 and #138 merge as soon as they are green. #127 starts after #106, and #139 after #138, with both deadlines at 23:00.
 - **Paused until after the 23:00 freeze (human, Sat 20:05):** #136, #141 and #142. Do NOT resume them at 21:00 or on a hand-over. They resume only in the quiet overnight phase, and only if still useful. On resume: #141 rebases onto #150 and adds the overflow-safe averaging (comment on #141); #136 rebases onto #151 and stays backend-only. Also held: #144 until #151 merges (re-check the flake first), #140 (UI redesign deferred), #155 until #151 has a reviewed head.
 - **Merge order (human, 19:32):** #148 jumps the queue the moment both axes approve (own train if needed; the planning session re-pushes the organiser CS eval files right after it merges, so report its merge SHA at once). Then batched trains (D62: about every 30 min, 3-5 tickets, fast and slow tiers concurrent per D61), then #149, then #151.
-- **Steers come only from the planning session.** Decisions live in docs/decisions.md (D33-D62); read them after every hand-over.
+- **Scope triage until the 23:00 freeze (D63, human 20:40):**
+  - **Must land:** #148 (still jumps the queue), #150, #151, #146, #149.
+  - **Should land:** #138 + #143, #147, #154, #153, #127 (#127 below the must tier).
+  - **Timebox:** if #139 isn't approved by 22:00 it becomes future work: stop its lane, keep its branch; #143 carries the story.
+  - **Rule:** anything not merged by 23:00 is future work. No extension.
+  - **No new tickets** except high findings from reviews. Mediums and lows get the `post-hackathon` label.
+  - **Merge as soon as approved:** no 30-min batching. Start a train when any ticket is approved; add others approved while it's being set up. Fast and slow tiers still run concurrently (D61).
+- **Steers come only from the planning session.** Decisions live in docs/decisions.md (D33-D63); read them after every hand-over.
 
 ### 2.1 Schedule the dependency graph, not a worker quota [D24, D29]
 Priority order. Keep independent work parallel within each tier, and sequence anything that edits the same files:
