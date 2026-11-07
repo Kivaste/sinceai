@@ -102,7 +102,7 @@ def test_scorecard_gets_explicit_row_maps_lineage_and_a_row_map_free_release(wor
 
 def test_unseen_labels_cover_every_column_in_the_unseen_format(world, tmp_path):
     res = build(world, tmp_path / "s")
-    df = pd.read_csv(res.out / "unseen_field_labels.csv", dtype=str, keep_default_na=False)
+    df = pd.read_csv(res.out / "unseen_field_labels.csv", dtype=str, keep_default_na=False, na_filter=False)
     assert list(df.columns) == ["column", "privacy_role", "subtype"]
     assert list(df["column"]) == ["c01", "c02", "c03"]
     assert (df["privacy_role"] != "").all() and (df["subtype"] != "").all()
@@ -110,7 +110,7 @@ def test_unseen_labels_cover_every_column_in_the_unseen_format(world, tmp_path):
 
 def test_cs_eval_outputs_cover_exactly_the_eval_turns(world, tmp_path):
     res = build(world, tmp_path / "s")
-    red = pd.read_csv(res.out / "customer_service_eval_redacted.csv", dtype=str, keep_default_na=False)
+    red = pd.read_csv(res.out / "customer_service_eval_redacted.csv", dtype=str, keep_default_na=False, na_filter=False)
     assert list(red.columns) == ["turn_id", "text"]
     assert list(red["turn_id"]) == ["t1", "t2", "t3", "t4"]  # eval split only (t5 is train), sorted
     lines = [json.loads(x) for x in (res.out / "customer_service_eval_spans.jsonl").read_text("utf-8").splitlines()]
@@ -227,7 +227,7 @@ def test_refuses_missing_row_map(fresh, tmp_path):
 def test_refuses_row_map_with_swapped_keys(fresh, tmp_path):
     _, rel = fresh
     p = rel.with_name("health.scoring") / "rowmap_ed_visits.csv"
-    df = pd.read_csv(p, dtype=str, keep_default_na=False)
+    df = pd.read_csv(p, dtype=str, keep_default_na=False, na_filter=False)
     df["original_record_id"] = list(df["original_record_id"][1:]) + [df["original_record_id"].iloc[0]]
     df.to_csv(p, index=False, lineterminator="\n")
     assert _refused(fresh, tmp_path / "s") == "rowmap_invalid"
