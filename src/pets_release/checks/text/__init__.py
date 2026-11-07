@@ -51,9 +51,8 @@ TEXT_CHECKS = {
 }
 # check name -> low-severity detector (counted as residual risk, never refused)
 LOW_SEVERITY = {"text.ip-addresses": ("IP_ADDRESS", _detectors.private_ip_addresses, "digit")}
-# export assertion -> text check name (healthInText included)
-ASSERTION_CHECKS = {a: name for name, (a, _l, _d, _v) in TEXT_CHECKS.items()}
-ASSERTION_CHECKS["healthInText"] = HEALTH_CHECK
+# The assertion -> check map is owned by the registry (``pets_release.checks.ASSERTION_CHECKS``);
+# the assertion names above only say which assertion each text check also backs.
 
 
 def _violations(name, label, severity, per_field):
