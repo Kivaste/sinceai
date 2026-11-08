@@ -132,7 +132,11 @@ zero inference or safety when diagnosis or test history is known.
   These are separate earlier feature artefacts, not a c52424c export. Legal basis
   and DPIA remain controller-supplied; a pack is not legal approval or verification.
 - Mistral front end: draft policies for human review, never row values; not
-  draft-to-search integration and not a new network proof from this measured run.
+  draft-to-search integration. Verified live on c52424c (Sun 8 Nov, separate from
+  the measured run): `draft-policy --dataset health --align-with HEALTH-S1` exit 0
+  in 8 s, alignment 5 of 5 required analyses, 12 fields requested, no direct
+  identifiers or free text requested. A shorter request recovering 3 of 5 was
+  refused (exit 1, nothing written). See docs/llm-front-end.md.
 - D46: HEALTH-S1 only; CS-S1 releases remain future work. CS evaluation uses typed,
   numbered placeholders and D37 masking, never realistic fake identities.
 - D55: video stays labelled demo pin `5b260ec` unless re-recorded with matching proof.

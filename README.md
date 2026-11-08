@@ -300,8 +300,11 @@ not a release. Feeding the draft into the search is future work (D51); `run`
 still uses packaged scenario policies. The optional sender requires explicit
 `--allow-network` and sees only screened request text and allowlisted field
 metadata, never row values. D47 permits the Mistral API; other OpenAI-compatible
-endpoints remain configurable. Keys stay in the sender's environment.
-See [docs/llm-front-end.md](docs/llm-front-end.md) for configuration and validation.
+endpoints remain configurable, including a fully local server (llama.cpp, Ollama, vLLM), so
+nothing leaves the machine. Keys stay in the sender's environment. Verified live with Mistral
+on the final release (5 of 5 HEALTH-S1 analyses, no direct identifiers requested); a future
+decision-model backend is tracked in [#158](https://github.com/Suhtetark-Kool/sinceai/issues/158).
+See [docs/llm-front-end.md](docs/llm-front-end.md) for configuration, validation and the live run.
 This help command makes no network request:
 
 <!-- docs-test: run -->

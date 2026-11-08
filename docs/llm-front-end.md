@@ -32,6 +32,40 @@ Suggested default: a local or self-hosted server (llama.cpp `llama-server`, Olla
 request text stays on your machine. Mistral's API is the second suggestion. The key is read from the
 environment only, passed to the sender child through its environment (not argv), and never printed.
 
+## Run fully local (nothing leaves the machine)
+
+For controllers that can't send even field names to an external API, point the endpoint at a local
+OpenAI-compatible server. No code change is needed, and the API key is optional:
+
+```
+# e.g. llama.cpp:  llama-server -m <model.gguf> --port 8080
+# or Ollama:       ollama serve   (OpenAI-compatible under /v1)
+$env:PETS_LLM_ENDPOINT = 'http://127.0.0.1:8080/v1'
+$env:PETS_LLM_MODEL    = '<local model name>'
+pets-release draft-policy --dataset health --align-with HEALTH-S1 --allow-network --request "..."
+```
+
+The same validation, alignment self-check and refusal rules apply. Servers that support grammar- or
+schema-constrained decoding (llama.cpp GBNF, vLLM or SGLang with XGrammar) can additionally guarantee
+that the reply matches the schema. Our closed-schema validation stays on either way.
+
+## Live verification (final release c52424c)
+
+Sun 8 Nov 2026, Mistral (`mistral-large-latest`), on the final release:
+`draft-policy --dataset health --align-with HEALTH-S1 --allow-network` exited 0 in 8 s. Alignment recovered
+5 of 5 required analyses. The draft requested 12 fields, each with a reason naming its analysis
+(e.g. birth date generalised to age bands for H-U6, arrival time generalised to hour of day for H-U8),
+and **no direct identifiers or free text**. A first, shorter request that described only crowding and
+revisits recovered 3 of 5 and was **refused** (exit 1, nothing written): the fail-closed path working.
+Only the request text and field names were sent.
+
+## Future: decision-model backend
+
+Choosing analysis types and per-field detail levels is a constrained decision problem. Decision models
+(typed choices with calibrated probabilities, e.g. TypeSafe's Jev, or open-weight models that run on-premises)
+could make drafts repeatable, attach a confidence to every field decision, and refuse below a threshold.
+Plan and options: [#158](https://github.com/Suhtetark-Kool/sinceai/issues/158).
+
 ## Offline guard
 
 The guard stays on. Without `--allow-network` the command exits 2 and sends nothing. With it, the single

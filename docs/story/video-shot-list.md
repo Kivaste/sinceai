@@ -42,8 +42,9 @@ Limited verification does not authenticate the controller's signature. Full
 verification checks it with the key. The scorecard's renamed-age-band blind spot
 is not evidence of absent risk. Mean utility is derived from five task scores,
 not an invented manifest summary field; no overall composite is supplied. The
-evidence-pack exporter exists (#147), and Mistral drafts policies for human review;
-neither is a fresh integration run in the measured proof. Legal basis/DPIA remain
+evidence-pack exporter exists (#147), and Mistral drafts policies for human review
+(verified live on c52424c: exit 0, 5 of 5 HEALTH-S1 analyses); neither is part of
+the measured proof run itself. Legal basis/DPIA remain
 controller-supplied. A fresh planted-violation refusal is not recorded there.
 
 ## Before you record
