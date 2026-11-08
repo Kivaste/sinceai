@@ -15,6 +15,35 @@ with diagnosis additionally known, 73.6% of persons are below k=5. See the
 [final numbers and limitations](docs/story/06-numbers-to-fill.md) and
 [recorded proof sources](docs/story/PRE-FILL-SOURCES.md).
 
+## Try it (about 10 minutes)
+
+With the challenge kit unpacked and Python 3.10+ installed, from the repo root
+(each step is explained in the sections below):
+
+<!-- docs-test: skip reason=pipeline-needs-real-kit-and-secret-store -->
+```powershell
+# 1. Install (see Quick start)
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -e ".[dev,eval]"
+$env:PYTHONUTF8 = "1"; $env:TZ = "UTC"
+$env:PETS_KIT = "<path to the kit root>"
+$env:PETS_HMAC_KEY = "<at least 32 characters, from your own secret store>"
+
+# 2. Build the protected HEALTH-S1 release (search, gate, signed manifest; ~5-8 min)
+.\.venv\Scripts\pets-release.exe run --scenario HEALTH-S1 --out ..\sinceai-out\health-s1 --created 2026-11-07T08:00:00Z --kit "$env:PETS_KIT"
+
+# 3. Verify as the recipient, then as the controller (exit 0 = verified)
+.\.venv\Scripts\pets-release.exe verify ..\sinceai-out\health-s1
+.\.venv\Scripts\pets-release.exe verify --full --kit "$env:PETS_KIT" ..\sinceai-out\health-s1
+
+# 4. Look at it: the dashboard (for a DPO, see the evidence pack section below)
+.\.venv\Scripts\pets-release.exe dashboard ..\sinceai-out\health-s1 --out ..\sinceai-out\health-s1-dashboard.html
+```
+
+Exit codes everywhere: `0` released/verified, `1` refused (a check failed: nothing is published),
+`2` bad input or unknown state. For the measured privacy scorecard and attacker rates, see
+[HEALTH-S1 release](#2-health-s1-release). For the approval console, see [Local web app](#local-web-app).
+
 ## Quick start (Windows, PowerShell)
 
 Requirements: Python 3.10 or newer on `PATH` as `python` (the project uses 3.14), and the challenge kit. The kit is never committed: it lives in `Briefs/` (gitignored) or wherever you unpacked it.
