@@ -17,6 +17,7 @@ sys.path.insert(0, str(ROOT / "tests" / "fixtures" / "manifest"))
 
 import build_fixture as fx
 
+from pets_release.detect.released import released_qis
 from pets_release.kit import Kit
 from pets_release.pseudonym import MasterKey
 from pets_release.run.context import person_normaliser
@@ -46,7 +47,8 @@ def make_candidate(**over) -> Candidate:
     full = fx.manifest(files)
     kw = {"scenario": fx.SCENARIO, "recipient": fx.RECIPIENT, "tables": tuple(tables), "contract": fx.contract(),
           "tool_revision": fx.TOOL_REVISION, "created": fx.CREATED,
-          "narrative": {k: full[k] for k in NARRATIVE_KEYS}, "lexicon_digests": {}}
+          "narrative": {k: full[k] for k in NARRATIVE_KEYS},
+          "lexicon_digests": dict(full["bindings"]["lexiconDigests"])}  # #132: text columns need the lexicon
     kw.update(over)
     return Candidate(**kw)
 
@@ -93,9 +95,13 @@ def producer_context(cand) -> dict:
                              "original_record_id": [k for _, k in pairs]}, dtype=str)
 
     src = source_tables(cand)
+    source = {"ed_visits": src["ed_visits"], "lab_results": src["lab_results"]}
+    released = {t.name[:-4]: t.frame for t in cand.tables}
     return {
         "k": 5,
-        "source": {"ed_visits": src["ed_visits"], "lab_results": src["lab_results"]},
+        "source": source,
+        # #106: the production detector's QIs among the released columns, as run/context builds them
+        "detected_qi": released_qis(source, released, cand.contract),
         "rowmaps": {"ed_visits": rowmap(by["ed_visits.csv"]), "lab_results": rowmap(by["lab_results.csv"])},
         "record_keys": {"ed_visits": "visit_key", "lab_results": "lab_key"},
         "person": {"table": "ed_visits", "column": "patient_id", "normalise": person_normaliser()},

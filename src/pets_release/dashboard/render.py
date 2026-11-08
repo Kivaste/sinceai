@@ -70,6 +70,9 @@ def _rate(r: Any) -> str:
     if r.get("status") == "measured":
         d = r.get("denominator") or {}
         return f"{fmt_num(r.get('value'))} (n={d.get('n')} {d.get('unit', '')})".strip()
+    if r.get("status") == "counted":
+        d = r.get("denominator") or {}
+        return f"{r.get('count')} low-severity hit(s) (n={d.get('n')} {d.get('unit', '')})".strip()
     return f"{str(r.get('status', '')).replace('_', ' ')}: {r.get('reason', '')}"
 
 
@@ -167,12 +170,39 @@ def _baselines(m: dict) -> dict:
     return {"blocks": [b], "names": names, "metrics": [(k, metrics[k]) for k in sorted(metrics)]}
 
 
+K_SET_TITLES = {"scenario": "Scenario QIs (the scenario's suggested set, as released)",
+                "keptCatalogued": "All kept catalogued QIs"}
+
+
+def _k_sets(m: dict) -> dict:
+    """#146: per-person k on both QI sets and the withheld catalogued QIs (``measured.kSets``)."""
+    b = Block("measured.kSets", _get(m, "measured", "kSets"))
+    out: dict[str, Any] = {"blocks": [b], "k": None, "sets": [], "withheld": [], "coincide": False}
+    if b.ok:
+        out["k"] = b.value.get("k")
+        out["sets"] = [{**s, "title": K_SET_TITLES.get(s["set"], s["set"]),
+                        "qi_text": ", ".join(f"{q['table']}.{q['column']}" for q in s.get("qi", []))}
+                       for s in b.value.get("sets", [])]
+        out["withheld"] = sorted(b.value.get("withheld", []), key=lambda w: (w["table"], w["column"]))
+        qsets = [tuple(sorted(s["qi_text"].split(", "))) for s in out["sets"] if s.get("status") == "measured"]
+        out["coincide"] = len(qsets) == 2 and qsets[0] == qsets[1]
+        for s in out["sets"]:  # a set that is not measured is never shown as complete
+            if s.get("status") != "measured":
+                out["blocks"].append(Block(f"measured.kSets.{s['set']}", {"status": "not_measured",
+                                                                           "reason": s.get("reason", "")}))
+    return out
+
+
 def _chart(m: dict) -> dict:
     b = Block("measured.search", _get(m, "measured", "search"))
     out: dict[str, Any] = {"blocks": [b], "svg": None}
     if not b.ok or not b.value.get("points"):
         return out
-    pts = sorted(b.value["points"], key=lambda p: p["step"])
+    # an unscored candidate (utility null, #133) has no y: it is counted in the caption, never plotted at 0
+    pts = sorted((p for p in b.value["points"] if p["utility"] is not None), key=lambda p: p["step"])
+    out["unscored"] = len(b.value["points"]) - len(pts)
+    if not pts:
+        return out
     w, h, pad = 480, 300, 44
     xmax = max(max(p["risk"] for p in pts), 1e-9)
     ymax = max(max(p["utility"] for p in pts), 1e-9)
@@ -201,7 +231,7 @@ def render_html(manifest: dict, files_base: str = ".") -> str:
     secs = {1: _s1(manifest), 2: _s2(manifest), 3: _s3(manifest, files_base), 4: _s4(manifest), 5: _s5(manifest)}
     for s in secs.values():
         s["status"] = _status(s["blocks"])
-    extra = {"baselines": _baselines(manifest), "chart": _chart(manifest)}
+    extra = {"baselines": _baselines(manifest), "chart": _chart(manifest), "ksets": _k_sets(manifest)}
     for s in extra.values():
         s["status"] = _status(s["blocks"])
     return _TEMPLATE.render(secs=secs, extra=extra, release=secs[5]["release"],

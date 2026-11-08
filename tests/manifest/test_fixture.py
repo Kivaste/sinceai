@@ -1,4 +1,4 @@
-"""The committed fixture release is coherent: regenerable, digest-bound, signed, contract-conformant, k >= 5."""
+﻿"""The committed fixture release is coherent: regenerable, digest-bound, signed, contract-conformant, k >= 5."""
 
 import hashlib
 import hmac
@@ -148,12 +148,13 @@ def test_signature_matches_fixture_signing_key(builder):
 def test_every_cell_matches_its_contract_form_and_required_columns_exist():
     m = manifest()
     for name, spec in m["contract"]["files"].items():
-        df = pd.read_csv(RELEASE_DIR / name, dtype=str, keep_default_na=False)
+        df = pd.read_csv(RELEASE_DIR / name, dtype=str, keep_default_na=False, na_filter=False)
         assert set(df.columns) <= set(spec["columns"]) and set(spec["required"]) <= set(df.columns)
         assert len(df) > 0
         for col in df.columns:
-            form = re.compile(spec["columns"][col]["form"])
-            assert all(form.fullmatch(v) for v in df[col]), (name, col)
+            form = spec["columns"][col]["form"]
+            ok = (lambda v: True) if form == "text" else re.compile(form).fullmatch  # text: any value
+            assert all(ok(v) for v in df[col]), (name, col)
 
 
 def test_per_row_k_at_least_5_on_released_qis():
@@ -162,7 +163,7 @@ def test_per_row_k_at_least_5_on_released_qis():
     for q in m["contract"]["qi"]:
         by_table.setdefault(q["table"], []).append(q["column"])
     for table, cols in by_table.items():
-        df = pd.read_csv(RELEASE_DIR / f"{table}.csv", dtype=str, keep_default_na=False)
+        df = pd.read_csv(RELEASE_DIR / f"{table}.csv", dtype=str, keep_default_na=False, na_filter=False)
         assert df.groupby(cols).size().min() >= 5
 
 

@@ -98,12 +98,20 @@ def _as_cs(m):
           "denominator": {"unit": "turns", "n": 40}, "hits": 0}
     m["exportAssertions"]["healthInText"] = False
     m["assertionEvidence"]["healthInText"] = ev
-    m["gate"]["checks"] = sorted([c for c in m["gate"]["checks"] if c["check"] != old] + [dict(ev)],
+    m["gate"]["checks"] = sorted([c for c in m["gate"]["checks"] if c["check"] not in (old, ev["check"])] + [dict(ev)],
                                  key=lambda c: c["check"])
     m["bindings"]["checkVersions"] = {c["check"]: c["version"] for c in m["gate"]["checks"]}
     m["bindings"]["lexiconDigests"] = {"health-lexicon": "a" * 64}
     m["release"]["releaseScopeId"] = _scope_id(m)
-    m["contract"].pop("k", None)
+    # a CS-S1 contract: its provenance must resolve in the CS-S1 policy's source schema (#62 round 3), so the
+    # HEALTH-S1 tables are replaced by one synthetic conversations column justified from its CS-S1 source.
+    m["contract"] = {"files": {"conversations.csv": {"columns": {"intent": {"form": "text", "params": {"rung": "keep"}}},
+                                                      "required": ["intent"]}},
+                     "qi": [], "tokens": []}
+    m["fieldJustifications"] = [{"table": "conversations", "column": "intent", "outputColumn": "intent",
+                                 "decision": "released", "rung": "keep", "floor": "keep", "reason": "CS-U1",
+                                 "source": "hand"}]
+    m["bindings"]["files"] = {"conversations.csv": "a" * 64}
     _rebind_contract(m)
     return m
 
@@ -145,10 +153,18 @@ def test_invalid_k_is_invalid(m, value, code):
     assert f"$.contract.k: {code}" in validate_manifest(m)
 
 
-def test_k_2_is_the_smallest_valid_target(m):
+def test_health_k_below_policy_target_is_invalid(m):
+    """#62: HEALTH-S1's schema minimum is the pinned policy's k (5), not 2."""
     m["contract"]["k"] = 2
     _rebind_contract(m)
-    assert validate_manifest(m) == []
+    assert validate_manifest(m) == ["$.contract.k: minimum"]
+
+
+def test_health_k_above_policy_target_is_invalid(m):
+    """#62: a k other than the policy's is a mismatch (the policy, not the manifest, sets the target)."""
+    m["contract"]["k"] = 6
+    _rebind_contract(m)
+    assert validate_manifest(m) == ["$.contract.k: policy-mismatch"]
 
 
 def test_changed_k_without_rebinding_digest_is_invalid(m):
@@ -480,7 +496,8 @@ def test_cs_manifest_without_lexicon_digest_is_invalid(m):
 
 
 def test_health_manifest_may_bind_no_lexicon(m):
-    assert m["bindings"]["lexiconDigests"] == {} and validate_manifest(m) == []
+    m["bindings"]["lexiconDigests"] = {}
+    assert validate_manifest(m) == []
 
 
 # --- assertion maps are closed even when no scenario rule applies ------------------------------------------------

@@ -98,7 +98,10 @@ def test_health_hand_plan_matches_spec_table():
     assert ix[("ed_visits", "visit_id")]["rung"] == "id.pseudonym"
     assert ix[("lab_results", "visit_id")]["rung"] == "id.pseudonym"
     assert ix[("lab_results", "visit_id")]["params"] == ix[("ed_visits", "visit_id")]["params"]
-    assert ix[("ed_visits", "arrival_ts")]["rung"] == "ts.hour_of_day"
+    # spec: expected HEALTH-S1 arrival rung is month+hour; hour_of_day only as the measured rung sacrifice (#89)
+    assert ix[("ed_visits", "arrival_ts")]["rung"] == "ts.month_hour"
+    assert [(r["column"], r["from"], r["to"]) for r in get_policy("HEALTH-S1").rung_sacrifices] == [
+        ("arrival_ts", "ts.month_hour", "ts.hour_of_day")]
     assert ix[("ed_visits", "municipality")]["rung"] == "geo.topn"
     assert ix[("ed_visits", "municipality")]["params"]["n"] >= 8
     assert ix[("ed_visits", "readmit_30d")]["rung"] == "keep"
@@ -499,6 +502,14 @@ def test_policy_subrecords_are_closed():
     _bad("HEALTH-S1", joint_qi_moves=((dict(m0[0], rung="nope"),) + m0[1:],))
     _bad("HEALTH-S1", suppression=dict(h.suppression, extra=1))
     _bad("HEALTH-S1", residual_notes=({"id": "x"},))
+    al = h.attribute_lift  # D64 (#157): closed record
+    _bad("HEALTH-S1", attribute_lift=dict(al, extra=1))
+    _bad("HEALTH-S1", attribute_lift={k: v for k, v in al.items() if k != "reason"})
+    _bad("HEALTH-S1", attribute_lift=dict(al, attributes=[dict(al["attributes"][0], extra=1)]))
+    _bad("HEALTH-S1", attribute_lift=dict(al, attributes=[dict(al["attributes"][1], max_lift=0.5)]))
+    _bad("HEALTH-S1", attribute_lift=dict(al, attributes=[{k: v for k, v in al["attributes"][1].items()
+                                                           if k != "max_lift"}]))
+    _bad("HEALTH-S1", attribute_lift=dict(al, max_lift=2.25))
     c = get_policy("CS-S1")
     _bad("CS-S1", privacy_targets=(dict(c.privacy_targets[0], extra=1),) + c.privacy_targets[1:])
 

@@ -28,7 +28,7 @@ _ROWS = [
     _r(E, "municipality", "geo", "exact", False, "QI; H-U4 needs the eight largest municipalities",
        "top_n", {"n": 8}, "H-U4 needs the top 8; rest grouped as other to help k"),
     _r(E, "arrival_ts", "timestamp", "exact", False, "QI; H-U8 hour-of-day vs k on arrival week",
-       "hour_of_day", {}, "hour of day only: H-U8 needs the hour-of-day curve; no date raises per-person k"),
+       "month_hour", {}, "month and hour: H-U8 needs the hour-of-day curve; the date is dropped to raise per-person k"),
     _r(E, "arrival_mode", "categorical", "exact", False, "QI (kit dictionary role); no required check", "withheld", {}, "no check needs it; withheld to raise per-person k"),
     _r(E, "ambulance_unit", "identifier", "pseudonym", False, "technical identifier", "withheld", {}, "no check needs it"),
     _r(E, "triage", "categorical", "exact", False, "H-U2", "exact"),
@@ -45,12 +45,15 @@ _ROWS = [
     _r(E, "attending_physician_id", "identifier", "pseudonym", False, "technical identifier", "withheld", {}, "no check needs it"),
     _r(E, "discharge_ts", "timestamp", "exact", False, "no required check", "withheld", {}, "no check needs it; los_minutes carries H-U2"),
     _r(E, "los_minutes", "numeric", "exact", False, "H-U2", "exact"),
-    _r(E, "disposition", "categorical", "exact", False, "no required check", "exact"),
+    _r(E, "disposition", "categorical", "exact", False,
+       "sensitive attribute; all HEALTH-S1 purpose checks exclude cancelled duplicates via kit derive()", "exact"),
     _r(E, "readmit_30d", "categorical", "exact", False, "H-U6", "exact"),
     _r(L, "visit_id", "identifier", "pseudonym", False, "same pseudonym as ed_visits (H-U7 join)", "pseudonym", REL),
     _r(L, "lab_id", "identifier", "pseudonym", False, "record key", "pseudonym", REL),
     _r(L, "test_code", "categorical", "exact", False, "H-U7 (CRP)"),
-    _r(L, "test_name", "categorical", "exact", False, "H-U7 (CRP)"),
+    _r(L, "test_name", "lab_test", "exact", False, "QI (detector; D33): a person's set of lab tests can single them out",
+       "withheld", {}, "no check needs it (H-U7 selects CRP by test_code); as a QI, even its CRP-vs-other rung needs "
+       "more local suppression than the cap (measured, #106)"),
     _r(L, "value", "numeric", "exact", False, "H-U7 (CRP)"),
     _r(L, "unit", "categorical", "exact", False, "H-U7 (CRP)"),
     _r(L, "ref_range", "categorical", "exact", False, "no required check", "withheld", {}, "no check needs it"),
@@ -70,6 +73,30 @@ _ROWS += withheld_table("published_weekly_stats", [
 ], "table withheld: " + _NOTE + "; unsuppressed, a differencing aid")
 
 FLOORS, DIRECT, _PLAN = build(_ROWS)
+
+# D64 (#157): bounded attribute-inference lift. Content-free; stated in the manifest via the residual note below.
+LOS_MAX_LIFT = 2.0  # human decision D64 option (b), 23:00: los_minutes bounded, icd10_primary disclosed only
+LOS_BIN_MIN = 30
+LIFT_ATTACKER = ("the #139 red-team attribute-inference attacker: knows a released visit's quasi-identifiers and "
+                 "guesses the most common released value among the visits that match them; compared with always "
+                 "guessing the release's most common value (base rate); seeded sample of at most 3000 targets")
+LIFT_REASON = (f"lift = attacker accuracy / base-rate accuracy. los_minutes at most {LOS_MAX_LIFT}: binned at "
+               f"least {LOS_BIN_MIN} minutes wide (10-minute bins measure 2.92 on the kit, #157); a plan over it is "
+               f"refused, never relaxed. icd10_primary is measured and disclosed, not bounded: chapter-level coding "
+               f"scores H-U4 0.0, so it stays at 3 characters with every QI at its coarsest accepted rung, where its "
+               f"lift measures about 2.1")
+# The manifest note; the run appends the measured lift per attribute (run.narrative, from the search's final step).
+LIFT_NOTE = (f"D64: lift = accuracy guessing from the QIs / base rate. los_minutes bound {LOS_MAX_LIFT}, else "
+             f"refused; {LOS_BIN_MIN}-min bins cost H-U2 0.967 -> 0.920 (kit). icd10_primary: no bound, a disclosed "
+             f"residual risk (lift about 2.1); it cannot be reduced: chapter-level coding makes H-U4 0.0. Lifts are "
+             f"the producer population estimator (exact QI classes, all released rows), distinct from #139's "
+             f"sampled attacker, whose rates are the attribute-inference-redteam entries.")
+ATTRIBUTE_LIFT = {"attacker": LIFT_ATTACKER, "reason": LIFT_REASON,
+                  "attributes": [{"table": "ed_visits", "column": "icd10_primary", "max_lift": None},
+                                 {"table": "ed_visits", "column": "los_minutes", "max_lift": LOS_MAX_LIFT,
+                                  # #157 r3: recorded as a manifest sacrifice liftStep (H-U2 before/after the
+                                  # wider bins); a record only, H-U2's 0.9 floor is unchanged
+                                  "tradeoff": {"check": "H-U2", "rung": "num.bin", "from_params": {"width": 10}}}]}
 # clinical_notes.author_name is a staff direct identifier (floor withheld)
 DIRECT = tuple(sorted(set(DIRECT) | {("clinical_notes", "author_name")}))
 
@@ -88,6 +115,18 @@ POLICY = ScenarioPolicy(
          "note": "sex is a QI withheld in the hand plan because no purpose check needs it; if a later plan releases it, it counts in per-person k like any released QI"},
         {"id": "renamed-age-band-scorecard-blind-spot", "status": "open",
          "note": "D22: age_band is released as a renamed derived column, which the kit scorecard does not recognise as a QI; our per-person k over every released QI is authoritative"},
+        {"id": "lab-test-name-qi", "status": "open",
+         "note": "D33 branch A taken: lab_results.test_name is a QI (ladder full, CRP vs other, withheld), counted in "
+                 "per-person k if released. Measured on the real kit with the search plan (#106; below-k share before "
+                 "suppression / suppression share needed, cap 0.10): full 0.536 / 0.663, CRP vs other 0.372 / 0.507, "
+                 "withheld 0.043 / 0.099. The search withholds it and the cap holds, so the justified non-QI "
+                 "fallback is not taken; H-U7 0.983 either way (it selects CRP by test_code)"},
+        {"id": "attribute-lift-bound", "status": "open",
+         "note": LIFT_NOTE},
+        {"id": "lab-test-code-identity", "status": "open",
+         "note": "test_code is released exact for H-U7 and is not a detector QI, yet carries the same test identity "
+                 "as test_name: a person's set of lab tests could single them out to someone who knows their test "
+                 "history"},
     ),
     suppression={
         "method": "local_suppression", "unit": "persons", "k": 5, "max_share": 0.10,
@@ -111,12 +150,21 @@ POLICY = ScenarioPolicy(
         {"table": "lab_results", "column": "sampled_ts", "derived": "sampled_ts",
          "join_via": ["ed_visits", "visit_id"],
          "note": "conditional QI: counted as a join-derived QI if released (arrival-date leak via visit join)"},
+        {"table": "lab_results", "column": "test_name", "derived": "test_name",
+         "join_via": ["ed_visits", "visit_id"],
+         "note": "D33: the detector classifies it as a QI; counted as a join-derived QI if released"},
     ),
     risk_vector=("qi_k_shortfall", "qi_unique_rate", "join_derived_qi", "direct_identifier_leak", "attribute_inference"),
     sacrifices=(
         {"check": "H-U4", "floor_score": 0.6, "reason": "municipality grouping to top-N to reach k", "via": [{"table": "ed_visits", "column": "municipality"}]},
         {"check": "H-U6", "floor_score": 0.6, "reason": "coarser age band to reach k", "via": [{"table": "ed_visits", "column": "date_of_birth"}]},
         {"check": "H-U8", "floor_score": 0.6, "reason": "coarser arrival time to reach k", "via": [{"table": "ed_visits", "column": "arrival_ts"}]},
+    ),
+    rung_sacrifices=(
+        {"check": "H-U8", "table": "ed_visits", "column": "arrival_ts", "from": "ts.month_hour",
+         "to": "ts.hour_of_day",
+         "reason": "hour of day only (drops all date meaning): taken only if per-person k at month+hour needs more "
+                   "suppression than the budget and H-U8 still passes at hour of day"},
     ),
     joint_qi_moves=(
         ({"table": "ed_visits", "column": "date_of_birth", "rung": "age.band10"},
@@ -132,7 +180,10 @@ POLICY = ScenarioPolicy(
     linked=((("ed_visits", "visit_id"), ("lab_results", "visit_id")),),
     alt_floors={("ed_visits", "patient_hetu"): "id.pseudonym"},
     alt_floor_conditions={("ed_visits", "patient_hetu"): {"check": "H-U6", "outcome": "fail_without"}},
-    param_minimums={("ed_visits", "municipality"): {"rung": "geo.topn", "param": "n", "min": 8}},
+    param_minimums={("ed_visits", "municipality"): {"rung": "geo.topn", "param": "n", "min": 8},
+                    # D64 (#157): 30-minute stay bands, the width that brings the los_minutes lift under the bound
+                    ("ed_visits", "los_minutes"): {"rung": "num.bin", "param": "width", "min": LOS_BIN_MIN}},
+    attribute_lift=ATTRIBUTE_LIFT,
 )
 
 

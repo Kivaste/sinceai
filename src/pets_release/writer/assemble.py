@@ -8,6 +8,9 @@ the whole assertion set, which the writer turns into a refusal.
 """
 from __future__ import annotations
 
+import base64
+import re
+
 from pets_release.manifest import (
     ASSERTION_EVIDENCE,
     SCHEMA_VERSION,
@@ -16,6 +19,7 @@ from pets_release.manifest import (
     release_scope_id,
     required_assertions,
 )
+from pets_release.manifest.schema import SPAN_LABELS
 
 NARRATIVE_KEYS = ("fieldJustifications", "fitFor", "inventory", "measured", "notFitFor", "pets", "residualRisks",
                   "sacrifices")
@@ -29,34 +33,80 @@ def gate_entry(record) -> dict:
             "hits": record.hits}
 
 
+def assertion_reason(name: str, rec) -> str | None:
+    """The one assertion-evidence rule (writer and verify): None when ``rec`` (a CheckRecord or None) can back
+    export assertion ``name``; otherwise a content-free reason code."""
+    want = ASSERTION_EVIDENCE[name]
+    if rec is None or rec.check != want["check"]:
+        return f"assertion:{name}:missing"
+    if rec.status != "pass":
+        return f"assertion:{name}:status:{rec.status}"
+    if rec.scope != want["scope"] or rec.denominator.get("unit") != want["unit"]:
+        return f"assertion:{name}:shape"
+    if type(rec.hits) is not int or rec.hits != 0 or rec.violations:
+        return f"assertion:{name}:hits"
+    n = rec.denominator.get("n")
+    if type(n) is not int or n < 1:
+        return f"assertion:{name}:denominator"
+    return None
+
+
 def evidence_for(records, scenario: str):
     """``(assertions, evidence, reasons)``. ``assertions``/``evidence`` are None unless ``reasons`` is empty."""
     by_check = {r.check: r for r in records}
     reasons: list[str] = []
     evidence: dict = {}
     for name in required_assertions(scenario):
-        want = ASSERTION_EVIDENCE[name]
-        rec = by_check.get(want["check"])
-        if rec is None:
-            reasons.append(f"assertion:{name}:missing")
-            continue
-        if rec.status != "pass":
-            reasons.append(f"assertion:{name}:status:{rec.status}")
-            continue
-        if rec.scope != want["scope"] or rec.denominator.get("unit") != want["unit"]:
-            reasons.append(f"assertion:{name}:shape")
-            continue
-        if type(rec.hits) is not int or rec.hits != 0 or rec.violations:
-            reasons.append(f"assertion:{name}:hits")
-            continue
-        n = rec.denominator.get("n")
-        if type(n) is not int or n < 1:
-            reasons.append(f"assertion:{name}:denominator")
+        rec = by_check.get(ASSERTION_EVIDENCE[name]["check"])
+        reason = assertion_reason(name, rec)
+        if reason is not None:
+            reasons.append(reason)
             continue
         evidence[name] = gate_entry(rec)
     if reasons:
         return None, None, sorted(reasons)
     return {name: False for name in sorted(evidence)}, evidence, []
+
+
+LOW_SEVERITY_KIND = "gate_low_severity"
+
+
+def low_severity_source(check: str, version: str, scope: str) -> str:
+    """Exact check provenance for a counted residual risk; independent of its opaque ID."""
+    return f"gate check {check} {version} ({scope} scope)"
+
+
+def _low_severity_risk_id(check: str, label: str) -> str:
+    risk = f"gate:{check}:{label}"
+    if len(risk) <= 64 and re.fullmatch(r"[A-Za-z0-9._:+-]+", risk):
+        return risk
+    # Hash the complete, unmodified pair, not its truncated or sanitised display.
+    # URL-safe base64 preserves all 256 bits within the schema's 64-character limit.
+    digest = bytes.fromhex(canonical_digest([check, label]))
+    return "gate-sha256:" + base64.urlsafe_b64encode(digest).decode("ascii").rstrip("=")
+
+
+def low_severity_risks(records) -> list[dict]:
+    """``residualRisks`` entries for low-severity gate hits: one per (check, label), with the hit count and the
+    check's denominator. Counts and schema names only. Writer and verify both derive them with this function."""
+    counts: dict = {}
+    for r in records:
+        for v in r.violations:
+            if v.severity == "low":
+                key = (r.check, v.label)
+                counts[key] = (r, counts.get(key, (r, 0))[1] + v.count)
+    out = []
+    for (check, label), (r, count) in sorted(counts.items()):
+        d = {"unit": r.denominator["unit"], "n": r.denominator["n"]}
+        out.append({
+            "risk": _low_severity_risk_id(check, label), "kind": LOW_SEVERITY_KIND,
+            "label": label if label in SPAN_LABELS else None,
+            "rate": {"status": "counted", "count": count, "denominator": d,
+                      "source": low_severity_source(check, r.version, r.scope)},
+            "description": (f"{count} low-severity {label} hit(s) over {d['n']} {d['unit']} scanned by {check}; "
+                            "below the refusal threshold, so released and disclosed here")[:500],
+        })
+    return out
 
 
 def justification_reasons(contract: dict, field_justifications: list) -> list[str]:
@@ -99,6 +149,7 @@ def assemble_manifest(candidate, records, file_digests: dict, input_digests: dic
         "temporaryState": dict(TEMPORARY_STATE),
         **{k: candidate.narrative[k] for k in NARRATIVE_KEYS},
     }
+    m["residualRisks"] = sorted([*m["residualRisks"], *low_severity_risks(records)], key=lambda r: r["risk"])
     m["signature"] = {"alg": "HMAC-SHA256", "keyId": signing_key.key_id(),
                       "value": compute_signature(m, signing_key)}
     return m, []

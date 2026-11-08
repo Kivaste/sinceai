@@ -13,7 +13,9 @@ VALIDATOR_FORMS = frozenset({"hex64", "text", "integer", "decimal", "enum"})
 
 # Ladders, finest first, `withheld` always last. Order follows the spec.
 LADDERS: dict[str, tuple[str, ...]] = {
-    "timestamp": ("ts.exact", "ts.hour", "ts.month_hour", "ts.hour_of_day", "ts.day", "ts.week", "ts.month", WITHHELD),
+    # ts.hour_of_day (date-free HH:00) is coarser than ts.month on the privacy order (#89): for linkage it drops
+    # all date meaning. It is in SACRIFICE_ONLY_RUNGS: never an ordinary coarsening step.
+    "timestamp": ("ts.exact", "ts.hour", "ts.month_hour", "ts.day", "ts.week", "ts.month", "ts.hour_of_day", WITHHELD),
     "age": ("age.band5", "age.band10", WITHHELD),
     "geo": ("geo.full", "geo.topn", WITHHELD),
     "icd10": ("icd.full", "icd.3", "icd.chapter", WITHHELD),
@@ -21,6 +23,8 @@ LADDERS: dict[str, tuple[str, ...]] = {
     "identifier": ("id.pseudonym", WITHHELD),
     "text": ("text.redacted", WITHHELD),
     "categorical": ("keep", WITHHELD),
+    # D33 (#106): a lab test name is a QI; "CRP vs other" keeps only what H-U7 needs (CRP identified)
+    "lab_test": ("lab.full", "lab.crp_other", WITHHELD),
 }
 
 _NUM = r"-?\d+(?:\.\d+)?"
@@ -48,6 +52,8 @@ CONTRACT_FORMS: dict[str, str] = {
     "id.pseudonym": "hex64",
     "text.redacted": "text",
     "keep": "text",
+    "lab.full": "text",
+    "lab.crp_other": r"^(?:CRP|other)$",
 }
 
 # Every rung emits an empty cell for a null or malformed source value, so every contract entry
@@ -79,6 +85,11 @@ def contract_form(rung: str) -> str:
         raise LadderError(f"no contract form for rung {rung!r}") from None
 
 
+# Rungs a plan may hold only as a policy-enumerated rung sacrifice with measured scores (#89): no ordinary
+# coarsening step, score-sacrifice walk or joint move ever lands on one.
+SACRIFICE_ONLY_RUNGS = frozenset({"ts.hour_of_day"})
+
+
 def coarseness(rung: str) -> tuple[str, int]:
     """(kind, position on its ladder) for a rung; `withheld` is kind '*'."""
     if rung == WITHHELD:
@@ -87,3 +98,18 @@ def coarseness(rung: str) -> tuple[str, int]:
     if kind is None:
         raise LadderError(f"unknown rung {rung!r}")
     return kind, LADDERS[kind].index(rung)
+
+
+def at_least_as_coarse(rung: str, floor: str) -> bool:
+    """True iff ``rung`` releases no more than ``floor`` (same ladder kind, ladder position). Fail closed: unknown
+    rungs and rungs of different kinds are False; `withheld` is coarser than everything."""
+    if rung not in KNOWN_RUNGS or floor not in KNOWN_RUNGS:
+        return False
+    if rung == WITHHELD:
+        return True
+    if floor == WITHHELD:
+        return False
+    if RUNG_KIND[rung] != RUNG_KIND[floor]:
+        return False
+    lad = LADDERS[RUNG_KIND[rung]]
+    return lad.index(rung) >= lad.index(floor)

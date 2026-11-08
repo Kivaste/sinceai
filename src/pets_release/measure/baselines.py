@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import json
 import math
 import re
 from numbers import Real
 from pathlib import Path
 
+from pets_release.manifest.canonical import loads_strict
 from pets_release.measure.errors import MeasureRejected
 
 BASELINES = (("B0", "B0"), ("B2", "B2"), ("B2-k", "B2K"))  # (manifest id, key prefix in benchmark.json)
@@ -36,7 +36,7 @@ def composite(privacy: float, utility: float) -> float:
 
 def _load(path: Path, what: str):
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        return loads_strict(path.read_bytes())  # #131: duplicate keys / NaN refuse, never last-wins
     except OSError:
         raise MeasureRejected("baseline_missing") from None
     except ValueError:
@@ -54,7 +54,10 @@ def baseline_rows(root, scenario: str, dataset: str) -> list[dict]:
         scenarios, list) else []
     if len(match) != 1 or match[0].get("dataset") != dataset:
         raise MeasureRejected("baseline_scenario")
-    required = list(match[0].get("utility_requirements") or [])
+    required = match[0].get("utility_requirements")
+    if (not isinstance(required, list) or not required
+            or not all(isinstance(t, str) and t for t in required)):
+        raise MeasureRejected("baseline_structure")  # missing is not "no tasks"
     bench = _load(root / "results" / "benchmark.json", "baseline_structure")
     published = bench.get("baselines") if isinstance(bench, dict) else None
     if not isinstance(published, dict):

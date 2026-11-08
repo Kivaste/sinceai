@@ -13,6 +13,15 @@ Phases, each in fixed (table, column) order; linked columns move as one unit:
                kind is unsupported and refuses the plan, as do a raising, refused or incomplete check run.
                A policy declaring no target records privacy ``not_applicable``, never ``pass``
 
+Feasibility (#128): a candidate that releases any column of a table but not that table's record key as its
+``id.pseudonym`` token is never evaluated or adopted, and the final plan is refused if it does.
+Feasibility (D64, #157): for each attribute with a policy ``attribute_lift`` bound (``attr_lift``, a producer
+population estimator), every adoption path applies one repair rule (``lift_regress``): a candidate whose bounded
+lift is unmeasured is rejected; an attribute under its bound must stay at or under it; an attribute over its bound
+must not rise (a move that lowers it is allowed, so the search can repair it). The final plan is refused if any
+released bounded attribute is over its bound (or unmeasured) after suppression. Attributes without a bound are
+measured and disclosed only. Neither a bound nor a purpose floor is relaxed.
+
 Acceptance: every purpose check status ``ok`` with score >= 0.9. A check below 0.9 is waived only if it is an
 enumerated sacrifice, scored (status ok) at or above its floor score, and the candidate differs from the
 strict-phase plan only in sacrifice ``via`` columns, at least one of them that check's own. In the final
@@ -33,9 +42,10 @@ from pathlib import Path
 
 import pandas as pd
 
-from pets_release.ladders import LADDERS, WITHHELD, apply, output_column
+from pets_release.ladders import LADDERS, SACRIFICE_ONLY_RUNGS, WITHHELD, apply, output_column
 from pets_release.policy.model import validate_plan
 
+from . import attr_lift as AL
 from . import risk as R
 from .readsets import input_digest, series_digest
 
@@ -84,6 +94,44 @@ def apply_suppression(tables: Mapping[str, pd.DataFrame], suppressed: Mapping[st
     return {t: (df.drop(index=list(suppressed.get(t, ()))) if suppressed.get(t) else df) for t, df in tables.items()}
 
 
+def rung_params(policy, params, key, rung):
+    """The search's params for ``rung`` on ``key`` (``params``: ``kit.params_from_plan`` of the hand plan), or
+    None if the rung cannot be parameterised. One function for the search and for ``rebuild_plan``."""
+    given = (params or {}).get(key, {}).get(rung)
+    if given is not None:
+        return dict(given)
+    if rung in ("age.band5", "age.band10"):
+        return None
+    if rung == "id.pseudonym":
+        return {"label": "RECORD_KEY"}
+    if rung == "geo.topn":
+        pm = policy.param_minimums.get(key)
+        return {"n": pm["min"] if pm and pm["rung"] == rung else 8}
+    if rung == "num.round":
+        return {"unit": 1}
+    if rung == "num.bin":  # D64 (#157): a policy minimum width (e.g. stay bands that bound attribute lift)
+        pm = policy.param_minimums.get(key)
+        return {"width": pm["min"] if pm and pm["rung"] == rung and pm["param"] == "width" else 10}
+    return {}
+
+
+def rebuild_plan(policy, params, fields: Mapping) -> list:
+    """A search plan from ``{(table, column): (rung, floor)}`` with the search's own params (withheld: ``{}``),
+    in plan order, ``source: "search"``. Raises ValueError (content-free) for a field the policy does not name
+    or a rung the search could not parameterise."""
+    out = []
+    for key in sorted(fields):
+        if key not in policy.floors:
+            raise ValueError("rebuild: field not in the policy")
+        rung, floor = fields[key]
+        pr = {} if rung == WITHHELD else rung_params(policy, params, key, rung)
+        if pr is None:
+            raise ValueError("rebuild: rung has no search params")
+        out.append({"table": key[0], "column": key[1], "rung": rung, "params": json.loads(canonical(pr)),
+                    "floor": floor, "reason": policy.floors[key].reason, "source": "search"})
+    return out
+
+
 def _norm(res) -> dict:
     """Purpose result -> {score, status}; anything but a finite score with status ok is not a pass."""
     if not isinstance(res, Mapping):
@@ -118,6 +166,10 @@ def _call(fn, task, original, protected) -> dict:
         return {"score": None, "status": "error"}
 
 
+def _num(x) -> bool:
+    return isinstance(x, (int, float)) and not isinstance(x, bool) and math.isfinite(x)
+
+
 def _strict(r) -> bool:
     return r["status"] == "ok" and r["score"] is not None and r["score"] >= PASS
 
@@ -146,6 +198,8 @@ class _Search:
         self.sacr = {s["check"]: s for s in policy.sacrifices}
         self.via_all = {(v["table"], v["column"]) for s in policy.sacrifices for v in s["via"]}
         self.floor_rung = {key: f.rung for key, f in policy.floors.items()}
+        self.rung_sacr = {(rs["table"], rs["column"]): rs for rs in policy.rung_sacrifices}
+        self.rung_steps: dict = {}  # key -> measured record of an adopted enumerated rung sacrifice (#89)
         self.start_ev = self.base_ev = None  # set by run() once the start and the strict phases are adopted
         self._units()
         self._check_inputs()
@@ -161,6 +215,10 @@ class _Search:
             raise MinimiserRefused("k target needs a person/record-key spec")
         if not self.checks:
             raise MinimiserRefused("policy names no purpose checks")
+        if self.p.attribute_lift is not None:  # D64: bounded attributes are measured on the person table only
+            pt = (self.kspec or {}).get("person", {}).get("table")
+            if pt is None or any(a["table"] != pt for a in self.p.attribute_lift["attributes"]):
+                raise MinimiserRefused("attribute lift bound needs its attributes on the person table")
         for t, df in self.src.items():
             for c in df.columns:
                 if (t, c) not in self.p.floors:
@@ -191,25 +249,12 @@ class _Search:
         lad = LADDERS[self.family(key)]
         if floor not in lad:  # alternative floor: that rung or withheld only
             return (floor, WITHHELD)
-        return lad[lad.index(floor):]
+        # sacrifice-only rungs (#89) are never an ordinary step; only an enumerated rung sacrifice adopts one
+        return tuple(r for r in lad[lad.index(floor):] if r == floor or r not in SACRIFICE_ONLY_RUNGS)
 
     def rung_params(self, key, rung):
         """Params for ``rung`` on ``key``, or None if the rung cannot be parameterised (skipped)."""
-        given = self.params.get(key, {}).get(rung)
-        if given is not None:
-            return dict(given)
-        if rung in ("age.band5", "age.band10"):
-            return None
-        if rung == "id.pseudonym":
-            return {"label": "RECORD_KEY"}
-        if rung == "geo.topn":
-            pm = self.p.param_minimums.get(key)
-            return {"n": pm["min"] if pm and pm["rung"] == rung else 8}
-        if rung == "num.round":
-            return {"unit": 1}
-        if rung == "num.bin":
-            return {"width": 10}
-        return {}
+        return rung_params(self.p, self.params, key, rung)
 
     # ---------------------------------------------------------------- candidates
     def entry_state(self, cand, key):
@@ -229,7 +274,8 @@ class _Search:
     def coarseness(self, cand) -> float:
         tot = 0.0
         for key, (rung, _, floor) in cand.items():
-            lad = self.ladder(key, floor)
+            full = LADDERS[self.family(key)]  # privacy order incl. sacrifice-only rungs
+            lad = full[full.index(floor):] if floor in full else self.ladder(key, floor)
             tot += lad.index(rung) / max(1, len(lad) - 1)
         return tot
 
@@ -313,6 +359,10 @@ class _Search:
                 self.stats["cache_misses"] += 1
         plan = self.plan_of(cand)
         rv, pk = R.risk_vector(self.p, plan, self.k_view(prot), self.src, self.kspec, self.k)
+        if self.k is not None and pk is None:  # #118: under a k target every candidate carries a measured PersonK
+            pk, _ = R.person_k(self.k_view(prot), plan, self.p, self.src, self.kspec, self.k)
+            if pk is None:
+                raise R.PersonKMissing("PersonK missing: per-person k not measured")
         if self.risk_extra is not None:
             extra = self.risk_extra(plan, prot)
             for c in self.p.risk_vector:
@@ -321,7 +371,69 @@ class _Search:
                         raise MinimiserRefused(f"risk component {c} not measured")
                     rv[c] = float(extra[c])
         rv = {c: rv[c] for c in self.p.risk_vector}
-        return {"results": results, "risk": rv, "cached": hits == len(self.checks), "pk": pk}
+        return {"results": results, "risk": rv, "cached": hits == len(self.checks), "pk": pk,
+                "lift": self.lifts(plan, prot)}
+
+    # ---------------------------------------------------------------- attribute-inference lift (D64, #157)
+    def lifts(self, plan, prot) -> dict:
+        """``{"table.column": attr_lift.measure(...)}`` for each released bounded attribute, the attacker knowing
+        every released QI of its table. Empty without a bound; a withheld attribute carries no lift."""
+        if self.p.attribute_lift is None:
+            return {}
+        by_key = {(e["table"], e["column"]): e for e in plan}
+        out = {}
+        for a in self.p.attribute_lift["attributes"]:
+            t, c = a["table"], a["column"]
+            e = by_key[(t, c)]
+            if e["rung"] == WITHHELD:
+                continue
+            if t not in prot:
+                raise MinimiserRefused(f"attribute lift: table {t} missing from the candidate")
+            out[f"{t}.{c}"] = AL.measure(prot[t], AL.released_qcols(self.p, plan, t), output_column(e))
+        return out
+
+    def bounds(self) -> dict:
+        """``{"table.column": max_lift}`` of the bounded attributes (``max_lift`` None: measured, not bounded)."""
+        al = self.p.attribute_lift or {"attributes": []}
+        return {f"{a['table']}.{a['column']}": a["max_lift"] for a in al["attributes"] if a["max_lift"] is not None}
+
+    def lift_over(self, lifts) -> list:
+        """Bounded attributes over their ``max_lift``; an unmeasured lift counts as over (fail closed)."""
+        b = self.bounds()
+        return sorted(n for n, m in lifts.items() if n in b and (not _num(m.get("lift")) or m["lift"] > b[n]))
+
+    def lift_regress(self, ev, cur_ev) -> list:
+        """Feasibility (D64), the one rule every adoption path uses: bounded attributes that make the candidate
+        inadmissible. Unmeasured in the candidate: always. Under the bound (or not released) in the current plan:
+        the candidate must stay at or under the bound. Over the bound in the current plan: the candidate must not
+        raise it (a move that lowers it is allowed, so the search can still repair it). Schema names only."""
+        bs = self.bounds()
+        cur = cur_ev["lift"]
+        out = []
+        for n, m in sorted(ev["lift"].items()):
+            if n not in bs:
+                continue
+            bound = bs[n]
+            v = m.get("lift")
+            if not _num(v):
+                out.append(n)
+                continue
+            c = cur[n].get("lift") if n in cur else None
+            if n not in cur or (_num(c) and c <= bound):
+                if v > bound:
+                    out.append(n)
+            elif _num(c) and v > c:
+                out.append(n)
+        return out
+
+    def lift_text(self, lifts) -> str:
+        if self.p.attribute_lift is None:
+            return ""
+        b = self.bounds()
+        parts = ", ".join((f"{n} {m['lift']:.3f}" if _num(m.get("lift")) else f"{n} not measured")
+                          + (f" (bound {b[n]})" if n in b else " (disclosed, not bounded)")
+                          for n, m in sorted(lifts.items()))
+        return f"; attribute lift: {parts or 'no bounded attribute released'}"
 
     def objective(self, ev, cand):
         vals = list(ev["risk"].values()) or [0.0]
@@ -353,7 +465,7 @@ class _Search:
         above its floor, and either waived for the adopted candidate in the search (the move rule) or caused by
         suppression: it passed strictly on the unsuppressed candidate and one of its via columns is coarser than
         its floor (the sacrifice is in effect). Errors and unknowns are never waived."""
-        diff = {k for k in cand if cand[k][:2] != base[k][:2]}
+        diff = {k for k in cand if cand[k][:2] != base[k][:2]} - set(self.rung_steps)
         if diff and not diff <= self.via_all:
             return False
         for c in self.failing(results):
@@ -448,12 +560,16 @@ class _Search:
 
         def try_strict(cand, desc, strictly_better=False):
             nonlocal cur, cur_ev
+            if self._dropped_record_keys(cand):
+                return False, None  # infeasible (#128): never evaluated, never adopted
             ev = self.evaluate(cand)
             fails = self.failing(ev["results"])
             o_new, o_cur = self.objective(ev, cand), self.objective(cur_ev, cur)
             better = o_new < o_cur if strictly_better else o_new[:2] <= o_cur[:2]
-            ok = not fails and better
+            over = self.lift_regress(ev, cur_ev)  # D64: never adopt a move over the attribute-lift bound
+            ok = not fails and better and not over
             why = "adopted" if ok else ("rejected (" + ",".join(fails) + " below 0.9 or not ok)" if fails
+                                        else "rejected (attribute lift over the bound, raised or unmeasured: " + ",".join(over) + ")" if over
                                         else "rejected (objective not improved)")
             step = self.record(cand, cur, ev, ok, f"{desc}: {why}")
             if ok:
@@ -503,7 +619,38 @@ class _Search:
         base = cur
         self.base_ev = cur_ev
         # sacrifice phase
-        if self.p.sacrifices and self._needs_more(cur_ev):
+        if (self.p.sacrifices or self.rung_sacr) and self._needs_more(cur_ev):
+            # enumerated rung sacrifices first (#89): only from `from`, only while k measurably fails
+            for key in sorted(self.rung_sacr):
+                if not self._needs_more(cur_ev) or self.out_of_budget():
+                    break
+                rs = self.rung_sacr[key]
+                if cur[key][0] != rs["from"]:
+                    continue
+                pr = self.rung_params(key, rs["to"])
+                if pr is None:
+                    continue
+                at_from = self._shortfall_of(cur_ev)
+                cand = dict(cur)
+                for k2 in self.unit_of[key]:
+                    cand[k2] = (rs["to"], canonical(pr), cur[k2][2])
+                ev = self.evaluate(cand)
+                fails = self.failing(ev["results"])
+                over = self.lift_regress(ev, cur_ev)
+                ok = not fails and not over and self.objective(ev, cand) < self.objective(cur_ev, cur)
+                why = "adopted" if ok else ("rejected (" + ",".join(fails) + " below 0.9 or not ok)" if fails
+                                            else "rejected (attribute lift over the bound, raised or unmeasured: " + ",".join(over) + ")"
+                                            if over else "rejected (objective not improved)")
+                step = self.record(cand, cur, ev, ok, f"sacrifice: rung step {self._name(self.unit_of[key])} "
+                                   f"{rs['from']} -> {rs['to']} (k shortfall {at_from:.6f} above budget): {why}")
+                if ok:
+                    cur, cur_ev = cand, ev
+                    self.rung_steps[key] = {
+                        "check": rs["check"], "table": key[0], "column": key[1], "from": rs["from"],
+                        "to": rs["to"], "k_shortfall_at_from": at_from,
+                        "max_share": (self.p.suppression or {}).get("max_share", 0.0),
+                        "check_score_at_to": ev["results"][rs["check"]]["score"]}
+                    step_reason(key, f"{rs['to']}: enumerated rung sacrifice, k fails at {rs['from']}", step)
             for u in self.units:
                 if not set(u) <= self.via_all:
                     continue
@@ -533,29 +680,46 @@ class _Search:
                         step_reason((m["table"], m["column"]), f"{m['rung']}: joint QI move {i + 1}, enumerated sacrifice", step)
         return self.finish(cur, base, reasons, cur_ev)
 
+    def _dropped_record_keys(self, cand) -> list:
+        """Record keys a candidate fails to keep (#128): a table with any released column must release its record
+        key (``kspec["record_keys"]``) as ``id.pseudonym``, the release-scope keyed token every row map is
+        recomputed from. Such a candidate is infeasible. Returns ``table.column`` names (schema only)."""
+        out = []
+        for t, rk in sorted(((self.kspec or {}).get("record_keys") or {}).items()):
+            if not any(r != WITHHELD for (tt, _), (r, _, _) in cand.items() if tt == t):
+                continue
+            if cand.get((t, rk), (WITHHELD,))[0] != "id.pseudonym":
+                out.append(f"{t}.{rk}")
+        return out
+
     def _try_sacrifice(self, cand, cur, cur_ev, base, desc):
+        if self._dropped_record_keys(cand):
+            return None, None  # infeasible (#128): never evaluated, never adopted
         ev = self.evaluate(cand)
-        ok = self.sacrifice_ok(ev["results"], cand, base) and self.objective(ev, cand) < self.objective(cur_ev, cur)
+        over = self.lift_regress(ev, cur_ev)
+        ok = self.sacrifice_ok(ev["results"], cand, base) and not over and \
+            self.objective(ev, cand) < self.objective(cur_ev, cur)
         fails = self.failing(ev["results"])
         why = "adopted" + (" (sacrificing " + ",".join(fails) + ")" if fails else "") if ok else (
             "rejected (" + ",".join(fails) + " not a waivable sacrifice)" if fails and not self.sacrifice_ok(
-                ev["results"], cand, base) else "rejected (objective not improved)")
+                ev["results"], cand, base) else "rejected (attribute lift over the bound, raised or unmeasured: " + ",".join(over) + ")"
+            if over else "rejected (objective not improved)")
         step = self.record(cand, cur, ev, ok, f"{desc}: {why}")
         return (ev if ok else None), step
 
     def _needs_more(self, ev):
-        sh = ev["risk"].get("qi_k_shortfall")
-        if sh is None:
-            if self.k is None:
-                return False
-            sh = self._shortfall(ev)
+        sh = self._shortfall_of(ev)
         budget = (self.p.suppression or {}).get("max_share", 0.0)
-        return sh > budget
+        return sh is not None and sh > budget
 
-    def _shortfall(self, ev):
+    def _shortfall_of(self, ev):
+        """Share of persons (plus unidentified records) below k, from the candidate's measured PersonK; None
+        only without a k target. A missing PersonK under a k target refuses (#118): never a 0.0 shortfall."""
+        if self.k is None:
+            return None
         pk = ev["pk"]
         if pk is None:
-            return 0.0
+            raise R.PersonKMissing("PersonK missing: per-person k not measured")
         n = len(pk.per_person) + pk.unidentified
         return (sum(1 for v in pk.per_person.values() if v < self.k) + pk.unidentified) / n if n else 1.0
 
@@ -566,6 +730,8 @@ class _Search:
         key = u[0]
         rung, _, floor = cur[key]
         lad = self.ladder(key, floor)
+        if rung not in lad:  # a sacrifice-only rung: nothing ordinary lies beyond it but withheld
+            return None
         i = lad.index(rung) + 1
         while i < len(lad) and lad[i] != WITHHELD:
             pr = self.rung_params(key, lad[i])
@@ -610,6 +776,9 @@ class _Search:
             rv.update({c: float(ex[c]) for c in self.p.risk_vector if c not in rv and c in ex})
         rv = {c: rv.get(c) for c in self.p.risk_vector}
         problems = []
+        unmeasured = sorted(c for c, v in rv.items() if v is None)
+        if unmeasured:  # #118: an unmeasured component refuses; it is logged as null, never as 0.0
+            problems.append("re-check risk components not measured: " + ",".join(unmeasured))
         share = sup_persons / persons if persons else 0.0
         if self.k is not None and sup_persons and budget is None:
             problems.append("k not reached and the policy allows no suppression")
@@ -623,12 +792,17 @@ class _Search:
             problems.append("re-check fails: " + ",".join(sorted(fails)))
         problems += [f"re-check privacy target {t['id']} ({t['kind']}): {t['status']}" for t in targets
                      if t["status"] != "pass"]
+        problems += self._rung_step_problems(cur, results)
+        problems += [f"record key {n} not released as a token" for n in self._dropped_record_keys(cur)]
+        # D64 (#157): the released (suppressed) plan must hold every bounded attribute at or under the lift bound
+        lifts = self.lifts(plan, prot)
+        problems += [f"attribute lift above bound: {n}" for n in self.lift_over(lifts)]
         ok = not problems
         ev = {"results": {c: results.get(c, {"score": None, "status": "missing"}) for c in self.checks},
-              "risk": {c: (0.0 if v is None else v) for c, v in rv.items()}, "cached": False}
+              "risk": dict(rv), "cached": False}
         reason = (f"final: local suppression of {sup_persons} of {persons} persons, then full uncached re-check of "
                   f"every purpose check and every privacy target (privacy {pstatus}): "
-                  + ("passed" if ok else "; ".join(problems)) + bound)
+                  + ("passed" if ok else "; ".join(problems)) + bound + self.lift_text(lifts))
         self.record(cur, cur, ev, ok, reason, step="final")
         if not ok:
             raise MinimiserRefused("; ".join(problems), self.log, self.stats)
@@ -643,6 +817,15 @@ class _Search:
                                "via": [dict(v) for v in s["via"]],
                                "score_before": before,
                                "score_after": results[c]["score"]})
+        for key in sorted(self.rung_steps):  # every adopted rung sacrifice, with its measured scores
+            st = self.rung_steps[key]
+            s = self.sacr.get(st["check"])
+            sacrifices.append({"check": st["check"], "floor_score": s["floor_score"] if s else None,
+                               "reason": self.rung_sacr[key]["reason"],
+                               "via": [{"table": key[0], "column": key[1]}],
+                               "score_before": self.base_ev["results"][st["check"]]["score"],
+                               "score_after": results[st["check"]]["score"], "rung_step": dict(st)})
+        sacrifices.sort(key=lambda s: (s["check"], "rung_step" in s))
         final = {
             "purpose": [{"id": c, **results[c]} for c in sorted(results)],
             "privacy": priv,
@@ -652,11 +835,29 @@ class _Search:
             "persons": persons,
             "suppressed_persons": sup_persons,
             "suppressed_rows": {t: len(v) for t, v in sorted(suppressed.items())},
+            "attribute_lift": ({"bounds": self.bounds(), "measured": lifts,
+                                "start": dict(self.start_ev["lift"])} if self.p.attribute_lift is not None else None),
         }
         summary = {"start_scores": {c: self.start_ev["results"][c]["score"] for c in self.checks},
                    "start_risk": dict(self.start_ev["risk"]), "final_risk": rv}
         return SearchResult(plan=plan, log=self.log, suppressed=suppressed, final=final, sacrifices=sacrifices,
                             stats=dict(self.stats), summary=summary)
+
+    def _rung_step_problems(self, cur, results) -> list:
+        """Fail closed (#89): a sacrifice-only rung in the final plan needs an adopted, enumerated rung step with
+        measured scores, and the step's check must still pass strictly on the final re-check."""
+        out = []
+        for key in sorted(cur):
+            rung, _, floor = cur[key]
+            if rung not in SACRIFICE_ONLY_RUNGS or rung == floor:
+                continue
+            st = self.rung_steps.get(key)
+            if st is None or st["to"] != rung or not _num(st["k_shortfall_at_from"]) or not \
+                    _num(st["check_score_at_to"]) or not st["k_shortfall_at_from"] > st["max_share"]:
+                out.append(f"{key[0]}.{key[1]} at {rung} without a measured enumerated rung sacrifice")
+            elif not _strict(results.get(st["check"], {"status": "missing", "score": None})):
+                out.append(f"re-check: rung sacrifice check {st['check']} not passing at {rung}")
+        return out
 
     def _final_privacy(self, kprot, plan):
         """Re-check every privacy target the policy declares, failing closed.
@@ -709,9 +910,11 @@ class _Search:
         # Same rule as ticket 21 (run/suppress.py): unit persons, k from the policy, every below-k unit (and
         # every unidentified unit) dropped per round with its joined rows, to a fixpoint (<= 50 rounds); the
         # share is units suppressed / units in the unsuppressed candidate.
-        pt = self.kspec["person"]["table"] if self.kspec else None
-        if self.k is None or pt not in full:
+        if self.k is None:
             return {}, 0, 0
+        pt = self.kspec["person"]["table"]
+        if pt not in full:  # k_view always adds it; without it no person is measured, never "nobody below k"
+            raise R.PersonKMissing("PersonK missing: person table not in the candidate")
         sup_cfg = self.p.suppression
         if sup_cfg is not None:
             if sup_cfg["unit"] != "persons" or sup_cfg["method"] != "local_suppression":
@@ -725,8 +928,8 @@ class _Search:
         while True:
             cur = apply_suppression(full, self._expand(dropped_p))
             pk, _ = R.person_k(cur, plan, self.p, self.src, self.kspec, self.k)
-            if pk is None:
-                break
+            if pk is None:  # #118: never a success-shaped break (0 of 0 persons suppressed)
+                raise R.PersonKMissing("PersonK missing: per-person k not measured")
             if units_before is None:
                 units_before = len(pk.per_person) + pk.unidentified
             rows = sorted(set(pk.below_rows) | set(pk.unidentified_rows))
@@ -741,7 +944,7 @@ class _Search:
             idx = cur[pt].index
             dropped_p |= {idx[i] for i in rows}
         sup = self._expand(dropped_p)
-        return sup, _units(person_of, dropped_p), int(units_before or 0)
+        return sup, _units(person_of, dropped_p), int(units_before)  # set by the first measured round
 
     def _expand(self, person_rows: set) -> dict:
         """Suppressed person-table rows -> {table: sorted index labels}, incl. rows joined to them."""
@@ -772,4 +975,7 @@ def search(policy, tables: Mapping[str, pd.DataFrame], keys, *, purpose: Callabl
         raise ValueError("budget must be a positive integer")
     s = _Search(policy, tables, keys, purpose=purpose, purpose_all=purpose_all, kspec=kspec, budget=budget,
                 read_sets=dict(read_sets or {}), params=params, redactor=redactor, risk_extra=risk_extra)
-    return s.run()
+    try:
+        return s.run()
+    except R.PersonKMissing as e:  # fail closed (#112, #118): a missing PersonK refuses; it is never scored
+        raise MinimiserRefused(str(e), s.log, s.stats) from None

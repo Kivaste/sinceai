@@ -19,8 +19,25 @@ def test_block_validates_against_the_manifest_measured_schema(args):
     assert measured_errors(block) == []
     Draft202012Validator({"$defs": MANIFEST_SCHEMA["$defs"], **MANIFEST_SCHEMA["properties"]["measured"]}
                          ).validate(block)
-    assert set(block) == {"utility", "privacy", "search", "baselines", "redaction"}
+    # #146 (D58): kSets is a closed, required member; the scorecard measurer leaves it not_measured (the run fills it)
+    assert set(block) == {"utility", "privacy", "search", "baselines", "redaction", "kSets"}
     assert block["search"]["status"] == "not_measured" and block["redaction"]["status"] == "not_measured"
+    assert block["kSets"]["status"] == "not_measured" and block["kSets"]["reason"]
+
+
+def test_measured_block_stays_closed_with_k_sets(args):
+    """Closed records (#146): next to kSets, an unknown measured key still fails, kSets cannot be dropped, and
+    kSets itself is closed; through the production validator and the manifest schema."""
+    block = measure(SCENARIO, **args)
+    schema = Draft202012Validator({"$defs": MANIFEST_SCHEMA["$defs"], **MANIFEST_SCHEMA["properties"]["measured"]})
+    assert measured_errors(block) == [] and schema.is_valid(block)
+    unknown = {**copy.deepcopy(block), "kSetsExtra": {"status": "not_measured", "reason": "x"}}
+    missing = {k: v for k, v in copy.deepcopy(block).items() if k != "kSets"}
+    inner = copy.deepcopy(block)
+    inner["kSets"]["extra"] = 1
+    for bad in (unknown, missing, inner):
+        assert measured_errors(bad)
+        assert not schema.is_valid(bad)
 
 
 def test_validator_is_real_not_vacuous(args):

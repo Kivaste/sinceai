@@ -65,6 +65,7 @@ SAMPLES = [
 PARAMS = {
     "geo.topn": {"n": 2}, "num.round": {"unit": 0.5}, "num.bin": {"width": 10},
     "age.band5": {"ref_date": "2025-12-31"}, "age.band10": {"ref_date": "2025-12-31"}, "id.pseudonym": {},
+    "lab.crp_other": {"ref_column": "x"},  # single-column table: the lab code is read from the column itself
 }
 FORM_CHECK = {
     "hex64": lambda v: re.fullmatch(r"[0-9a-f]{64}", v),

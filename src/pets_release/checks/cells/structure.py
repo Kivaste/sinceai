@@ -128,6 +128,37 @@ def contract_forms_check(release, contract, context):
     return Outcome(n=n, violations=tuple(out))
 
 
+@register(name="release.manifest-values", version="1.0.0", scope="release", unit="files")
+def manifest_values_check(release, contract, context):
+    """#61: the identifier detectors over the manifest (every string, map key and number; only the pattern-locked
+    digest values are exempt, see ``manifest.value_scan``). Verify phase (default): the manifest must exist and is
+    scanned whole. Gate phase: the manifest is not assembled yet, so the contract it will carry is scanned (plus a
+    manifest file if one is present: stricter, never looser); the writer's post-assembly validation and its
+    verify-phase self-scan cover the assembled manifest. One violation per detector label, counted in JSON paths."""
+    from pets_release.manifest.value_scan import identifier_shape_counts
+
+    phase = context.get("phase", "verify")
+    p = release.path / MANIFEST
+    if phase != "gate" and not p.is_file():
+        return Outcome(n=1, violations=(
+            Violation("release.manifest-values", "manifestMissing", "high", MANIFEST, None, 1),))
+    counts: dict = {}
+    if phase == "gate":
+        for label, n in identifier_shape_counts(contract, ("contract",)).items():
+            counts[label] = counts.get(label, 0) + n
+    if p.is_file():
+        try:
+            manifest = release.manifest()
+        except ValueError:  # #114: duplicate key, NaN/Infinity, bad JSON or bytes: a high violation, never a pass
+            return Outcome(n=1, violations=(
+                Violation("release.manifest-values", "manifestUnparseable", "high", MANIFEST, None, 1),))
+        for label, n in identifier_shape_counts(manifest).items():
+            counts[label] = counts.get(label, 0) + n
+    out = tuple(Violation("release.manifest-values", label, "high", MANIFEST, None, n)
+                for label, n in sorted(counts.items()))
+    return Outcome(n=1, violations=out)
+
+
 @register(name="release.file-digests", version="1.0.0", scope="release", unit="files")
 def file_digests_check(release, contract, context):
     """Gate phase: every release file must be readable and digestible (manifest not yet written).

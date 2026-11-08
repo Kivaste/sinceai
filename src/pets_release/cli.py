@@ -15,20 +15,25 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from pets_release.kit import Kit, KitError
+from pets_release.offline import entry_point
 
 COMMAND_PACKAGES: dict[str, str] = {
     "run": "pets_release.run",
     "verify": "pets_release.verify",
     "detect": "pets_release.detect",
     "dashboard": "pets_release.dashboard",
+    "evidence-pack": "pets_release.evidence_pack",
     "submission": "pets_release.submission",
+    "draft-policy": "pets_release.llm",
 }
 HELP = {
     "run": "produce a protected release for a scenario",
     "verify": "re-run checks on a release folder",
     "detect": "detect personal-data types in a dataset",
     "dashboard": "render the judge dashboard",
+    "evidence-pack": "render a DPO / Findata evidence pack from the signed manifest",
     "submission": "build the submission bundle",
+    "draft-policy": "optional: draft a scenario policy from a plain-language request (needs --allow-network)",
 }
 MIN_KEY_LEN = 32
 
@@ -127,6 +132,7 @@ def _kit_info(argv: list[str]) -> int:
     return 0
 
 
+@entry_point
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     top = _Parser(prog="pets-release", description="Purpose-first PETs release tool.")

@@ -1,12 +1,13 @@
 """Manifest narrative sections built from the policy, the final plan and the suppression report.
 
 Schema names, rung IDs, policy reasons and aggregate counts only; never a row value. ``measured.*`` is the
-schema's ``not_measured`` value until the measurer is wired (ticket 22).
+schema's ``not_measured`` value here; the measured run (``pets_release.measure.wire``) fills them.
 """
 from __future__ import annotations
 
 from pets_release.ladders import WITHHELD, output_column
 from pets_release.manifest import not_measured
+from pets_release.run.ksets import k_sets_block
 
 _RECORD_KEYS = {("ed_visits", "visit_id"), ("lab_results", "lab_id"), ("lab_results", "visit_id"),
                 ("clinical_notes", "note_id"), ("clinical_notes", "visit_id"),
@@ -43,12 +44,41 @@ def _pet(entry) -> tuple[str, dict]:
         return "rounding", {"rung": rung}
     if rung == "num.bin":
         return "binning", {"rung": rung}
-    if rung in ("keep", "num.exact", "geo.full", "icd.full", "ts.exact"):
+    if rung in ("keep", "lab.full", "num.exact", "geo.full", "icd.full", "ts.exact"):
         return "none", {}
     return "generalisation", {"rung": rung}
 
 
-def build_narrative(*, policy, plan, scenario_ids, suppression: dict, k: int) -> dict:
+LIFT_NOTE_ID = "attribute-lift-bound"  # D64 (#157)
+# #157 r3: the producer lift WAS measured, but it is a ratio (accuracy from the QIs / base rate), which the closed
+# residualRisks rate form (a value in [0, 1] over a denominator) cannot carry; the measured lifts are in the
+# description. Reason code first, then plain words.
+LIFT_RATE_REASON = ("lift-is-a-ratio: measured by the producer on every released row, but a lift is a ratio, not a "
+                    "rate in [0, 1]; the measured lifts per attribute are in this entry's description")
+
+
+def _lift_text(search) -> str:
+    """The enforced producer lift per bounded attribute (aggregates, 4 decimals) from the search's final step."""
+    al = (search or {}).get("attribute_lift")
+    if not al:
+        return " Measured lift: not measured (no search run)."
+    parts = [f"{n.split('.', 1)[-1]} {m['lift']:.4f}" if isinstance(m.get("lift"), (int, float)) else
+             f"{n.split('.', 1)[-1]} not measured" for n, m in sorted(al["measured"].items())]
+    return " Measured lift: " + (", ".join(parts) or "no bounded attribute released") + "."
+
+
+def build_narrative(*, policy, plan, scenario_ids, suppression: dict, k: int, purpose=None, search=None,
+                    rung_steps=(), k_sets=None, lift_steps=()) -> dict:
+    """``purpose``: the accepted ``run.purpose.PurposeResult``; fills ``measured.utility`` and the sacrifices'
+    before/after scores (None leaves them not measured / null).
+    ``search`` (ticket 25): {"justifications", "summary", "sacrifices"} from ``run.justify`` and the search
+    result; None for the hand plan. Its sacrifice scores are used only when no ``purpose`` result is given.
+    ``rung_steps``: adopted enumerated rung sacrifices (``run.pipeline.rung_step``), each recorded as
+    ``rungStep`` on its check's sacrifice entry.
+    ``k_sets``: the two k-set records (``run.ksets.measure_sets``, #146); None leaves ``measured.kSets`` not measured.
+    The withheld catalogued QIs come from this narrative's own field justifications.
+    ``lift_steps`` (#157 r3): ``run.pipeline.lift_steps`` records, each a sacrifice entry of its own with
+    ``liftStep``, floor = the strict threshold (a recorded cost, never a waiver)."""
     by_key = sorted(plan, key=lambda e: (e["table"], e["column"]))
     inventory = [{"dataset": policy.dataset, "table": e["table"], "column": e["column"],
                   "role": _role(policy, e["table"], e["column"]),
@@ -72,15 +102,29 @@ def build_narrative(*, policy, plan, scenario_ids, suppression: dict, k: int) ->
                    "outputColumn": output_column(e) if released else None,
                    "decision": "released" if released else "withheld",
                    "rung": e["rung"], "floor": e["floor"], "reason": e["reason"][:500], "source": e["source"]})
-    pending = "not measured yet: the measurer is wired in the story-kit ticket"
+    if search is not None:
+        fj = list(search["justifications"])
+    pending = ("not measured in this run: measured values come from the measured run "
+               "(python -m pets_release.measure.wire)")
     measured = {"utility": not_measured(pending), "privacy": not_measured(pending),
-                "search": not_measured("hand-picked plan; no search run"),
-                "baselines": not_measured(pending), "redaction": not_measured("no free text released")}
+                "search": (dict(search["summary"]) if search is not None
+                           else not_measured("hand-picked plan; no search run")),
+                "baselines": not_measured(pending), "redaction": not_measured("no free text released"),
+                "kSets": k_sets_block(policy, {"k": k}, fj, k_sets)}
+    scored = {}
+    if purpose is not None:
+        from pets_release.run.purpose import measured_utility, scores
+
+        measured["utility"] = measured_utility(purpose)
+        scored = scores(purpose)
     risks = []
     for n in policy.residual_notes:
-        rate = not_measured(n["note"][:500]) if n["status"] == "open" else {"status": "not_applicable",
-                                                                            "reason": "no free text released"}
-        risks.append({"risk": n["id"], "kind": "note", "label": None, "rate": rate, "description": n["note"][:500]})
+        text = n["note"] + (_lift_text(search) if n["id"] == LIFT_NOTE_ID else "")
+        rate = not_measured(text[:500]) if n["status"] == "open" else {"status": "not_applicable",
+                                                                       "reason": "no free text released"}
+        if n["id"] == LIFT_NOTE_ID and (search or {}).get("attribute_lift"):
+            rate = not_measured(LIFT_RATE_REASON)  # measured, but a ratio: the closed rate form holds [0, 1] only
+        risks.append({"risk": n["id"], "kind": "note", "label": None, "rate": rate, "description": text[:500]})
     risks += [
         {"risk": "recipient-verify-tamper-limitation", "kind": "tamper_limitation", "label": None,
          "rate": {"status": "not_applicable", "reason": "structural property of recipient-mode verify"},
@@ -95,8 +139,32 @@ def build_narrative(*, policy, plan, scenario_ids, suppression: dict, k: int) ->
          "rate": not_measured(pending), "description": "attribute inference from released quasi-identifiers"},
     ]
     risks.sort(key=lambda r: r["risk"])
-    sacrifices = sorted(({"check": s["check"], "floor": s["floor_score"], "before": None, "after": None,
+    if not scored:
+        scored = {s["check"]: (s["score_before"], s["score_after"]) for s in (search or {}).get("sacrifices", [])}
+    sacrifices = sorted(({"check": s["check"], "floor": s["floor_score"],
+                          "before": scored.get(s["check"], (None, None))[0],
+                          "after": scored.get(s["check"], (None, None))[1],
                           "reason": s["reason"][:500]} for s in policy.sacrifices), key=lambda s: s["check"])
+    by_check = {s["check"]: s for s in sacrifices}
+    for st in rung_steps:
+        entry = by_check[st["check"]]  # policy validation: a rung sacrifice's check has a sacrifice entry
+        if "rungStep" in entry:
+            raise ValueError("two rung steps for one sacrifice")
+        entry["rungStep"] = {k: v for k, v in st.items() if k != "check"}
+    from pets_release.run.purpose import THRESHOLD
+
+    for ls in lift_steps:  # #157 r3: a record of a purpose cost above the strict floor; never a waiver
+        if ls["check"] in by_check:
+            raise ValueError("lift step for a check that already has a sacrifice entry")
+        sacrifices.append({"check": ls["check"], "floor": THRESHOLD,
+                           "before": scored.get(ls["check"], (None, None))[0],
+                           "after": scored.get(ls["check"], (None, None))[1],
+                           "reason": (f"trade-off, not a waiver: {ls['table']}.{ls['column']} coarsened to hold the "
+                                      f"attribute-lift bound {ls['maxLift']}; the strict floor {THRESHOLD} is "
+                                      f"unchanged; liftStep.atFrom is the check at the finer params"),
+                           "liftStep": {k: v for k, v in ls.items() if k != "check"}})
+        by_check[ls["check"]] = sacrifices[-1]
+    sacrifices.sort(key=lambda s: s["check"])
     checks = ", ".join(policy.purpose_checks)
     fit = [{"scenario": policy.scenario,
             "reason": f"built and gated for {policy.scenario} purpose checks {checks}; per-person k >= {k}"}]

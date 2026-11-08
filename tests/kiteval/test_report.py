@@ -4,10 +4,24 @@ import json
 
 import pytest
 
-from pets_release.kiteval.report import ScorecardRejected, validate_report
+from pets_release.kiteval.report import ScorecardRejected
+from pets_release.kiteval.report import validate_report as _production_validate_report
+
+# #110: every released table's expectation names the catalogued QIs it keeps; the fixture's k result below
+# was computed on this one. Tests that give their own ed_visits expectation still get it unless they set it.
+K_EXPECTED = {"quasi_identifiers": ["municipality"]}
+
+
+def validate_report(report, *, expected_sections=None, **kw):
+    """The production gate, with the fixture's QI derivation added to ed_visits."""
+    exp = dict(expected_sections or {})
+    exp["ed_visits"] = {**K_EXPECTED, **exp.get("ed_visits", {})}
+    return _production_validate_report(report, expected_sections=exp, **kw)
+
 
 REQUIRED = ("H-U2", "H-U4")
-TABLES = ("ed_visits", "lab_results")
+TABLES = {"ed_visits": 4, "lab_results": 3}  # original table -> original rows, as the adapter read them
+RELEASED = {"ed_visits": 4}  # protected table really in the release -> protected rows
 
 
 def _passing_report() -> dict:
@@ -23,7 +37,7 @@ def _passing_report() -> dict:
                 "status": "released",
                 "rows_original": 4,
                 "rows_protected": 4,
-                "k_anonymity": {"n": 4, "min_k": 2, "share_below": {"k<5": 0.5}},
+                "k_anonymity": {"qis": ["municipality"], "n": 4, "min_k": 2, "share_below": {"k<5": 0.5}},
                 "free_text": {
                     "chief_complaint": {
                         "evaluated": True,
@@ -85,7 +99,7 @@ def _validate(report: dict) -> dict:
         report,
         scenario="HEALTH-S1",
         required_tasks=REQUIRED,
-        tables=TABLES,
+        tables=TABLES, released=RELEASED,
     )
 
 
@@ -194,6 +208,16 @@ def test_exported_summary_is_allowlisted_and_drops_raw_fields():
     assert "examples" not in blob
     assert "regex_residuals" not in blob
     assert "detail" not in blob
+
+
+def test_exported_risks_are_ordered_by_key_whatever_order_the_kit_wrote_them():
+    report = _passing_report()
+    unsorted = {"records with k<5": 0.5, "direct identifiers retained": 0.25}  # kit order: not sorted by key
+    assert list(unsorted) != sorted(unsorted)
+    report["tables"]["ed_visits"]["risks"] = dict(unsorted)
+    report["risk_components"] = {f"ed_visits: {k}": v for k, v in unsorted.items()}
+    exported = list(_validate(report)["risks"])
+    assert exported == ["ed_visits: direct identifiers retained", "ed_visits: records with k<5"]
 
 
 def test_missing_summary_is_a_fail_not_zeros():
@@ -320,7 +344,7 @@ EXPECTED = {"ed_visits": {"free_text": ["chief_complaint"], "linkage": {"attacks
 
 
 def _validate_expecting(report):
-    return validate_report(report, scenario="HEALTH-S1", required_tasks=REQUIRED, tables=TABLES,
+    return validate_report(report, scenario="HEALTH-S1", required_tasks=REQUIRED, tables=TABLES, released=RELEASED,
                            expected_sections=EXPECTED)
 
 
@@ -402,7 +426,7 @@ def test_complete_report_passes_with_expected_sections():
 
 
 def _expecting(report, expected):
-    return validate_report(report, scenario="HEALTH-S1", required_tasks=REQUIRED, tables=TABLES,
+    return validate_report(report, scenario="HEALTH-S1", required_tasks=REQUIRED, tables=TABLES, released=RELEASED,
                            expected_sections={"ed_visits": expected})
 
 
@@ -617,3 +641,129 @@ def test_l_diversity_and_synthetic_need_a_positive_denominator(section, part, go
 
 def test_synthetic_section_must_be_an_object():
     _rejected(_extra(_passing_report(), "synthetic", [1]), {}, "structure")
+
+
+# ---- must-fix #64: the report's table status and counts must match the real release ----
+
+
+def _validate_against(report, *, tables=TABLES, released=RELEASED, expected=None):
+    return validate_report(report, scenario="HEALTH-S1", required_tasks=REQUIRED, tables=tables,
+                           released=released, expected_sections=expected)
+
+
+def _withheld_ed(report):
+    report["tables"]["ed_visits"] = {"table": "ed_visits", "status": "withheld", "rows_original": 4}
+    report["risk_components"] = {}
+
+
+def test_released_table_reported_as_withheld_is_a_fail():
+    """The H7 reproduction: scored H-U2, ed_visits marked withheld although it is in the release."""
+    report = _passing_report()
+    _withheld_ed(report)
+    with pytest.raises(ScorecardRejected) as caught:
+        _validate_against(report, expected={"ed_visits": {"columns": ["arrival_ts", "triage"]}})
+    assert caught.value.reason == "status_mismatch"
+
+
+def test_withheld_table_reported_as_released_is_a_fail():
+    report = _passing_report()
+    lab = dict(_ed(report), table="lab_results", rows_original=3)
+    report["tables"]["lab_results"] = lab
+    report["risk_components"]["lab_results: records with k<5"] = 0.5
+    _rejected_for(report, "status_mismatch")
+
+
+def _rejected_for(report, reason, **kw):
+    with pytest.raises(ScorecardRejected) as caught:
+        _validate_against(report, **kw)
+    assert caught.value.reason == reason
+
+
+def test_protected_row_count_must_match_the_release():
+    _rejected_for(_passing_report(), "row_count_mismatch", released={"ed_visits": 5})
+
+
+def test_original_row_count_must_match_the_original_tables():
+    _rejected_for(_passing_report(), "row_count_mismatch", tables={"ed_visits": 4, "lab_results": 9})
+    _rejected_for(_passing_report(), "row_count_mismatch", tables={"ed_visits": 7, "lab_results": 3})
+
+
+def test_report_table_the_original_does_not_have_is_a_fail():
+    report = _passing_report()
+    report["tables"]["ghost"] = {"table": "ghost", "status": "withheld", "rows_original": 1}
+    _rejected_for(report, "unknown_table")
+
+
+def test_released_table_the_original_does_not_have_is_a_fail():
+    _rejected_for(_passing_report(), "unknown_table", released={"ed_visits": 4, "ghost": 1})
+
+
+def test_a_release_with_no_released_table_is_a_fail_not_privacy_one():
+    report = _passing_report()
+    _withheld_ed(report)
+    report["summary"]["privacy"] = 1.0
+    _rejected_for(report, "no_released_table", released={})
+
+
+def test_empty_risk_components_are_not_proof_for_a_released_table():
+    report = _passing_report()
+    report["risk_components"] = {}
+    _rejected_for(report, "missing_section")
+
+
+def test_released_table_with_empty_risks_is_a_fail():
+    report = _passing_report()
+    _ed(report)["risks"] = {}
+    report["risk_components"] = {}
+    _rejected_for(report, "missing_section")
+
+
+def test_risk_components_must_be_exactly_the_released_tables_risks():
+    report = _passing_report()
+    report["risk_components"]["ed_visits: records with k<5"] = 0.1  # disagrees with the table record
+    _rejected_for(report, "risk_mismatch")
+    report = _passing_report()
+    report["risk_components"]["lab_results: records with k<5"] = 0.0  # a withheld table has no risks
+    _rejected_for(report, "risk_mismatch")
+
+
+@pytest.mark.parametrize("bad", [None, ("ed_visits",), {"ed_visits": "4"}, {"ed_visits": True}, {"ed_visits": -1}])
+def test_released_and_tables_must_be_name_to_row_count_maps(bad):
+    _rejected_for(_passing_report(), "structure", released=bad)
+    _rejected_for(_passing_report(), "structure", tables=bad)
+
+
+# --- determinism (follow-up #83): exports sorted, independent of the report's dict / list order ---
+
+def test_exported_lists_are_sorted_whatever_the_input_order():
+    report = _passing_report()
+    report["tables"] = dict(reversed(list(report["tables"].items())))
+    report["utility"] = list(reversed(report["utility"]))
+    out = _validate(report)
+    assert [t["table"] for t in out["tables"]] == sorted(t["table"] for t in out["tables"])
+    assert [t["id"] for t in out["tasks"]] == ["H-U2", "H-U4"]
+
+
+def test_released_table_without_a_qi_derivation_is_a_fail_not_a_skipped_k_check():
+    """#110: no expectation for the k evaluation is never read as "nothing to check"."""
+    with pytest.raises(ScorecardRejected) as caught:
+        _production_validate_report(_passing_report(), scenario="HEALTH-S1", required_tasks=REQUIRED,
+                                    tables=TABLES, released=RELEASED, expected_sections=None)
+    assert caught.value.reason == "structure"
+
+
+def test_not_applicable_is_sorted(monkeypatch):
+    from pets_release.kiteval import report as mod
+
+    real = mod._check_table
+
+    def check(name, tr, expected, found, **kw):
+        res = real(name, tr, expected, found, **kw)
+        found.append({"table": name, "section": "linkage", "key": "z", "code": "no_data"})
+        found.append({"table": name, "section": "linkage", "key": "a", "code": "no_data"})
+        return res
+
+    monkeypatch.setattr(mod, "_check_table", check)
+    out = _validate(_passing_report())
+    keys = [(i["table"], i["section"], i["key"], i["code"]) for i in out["not_applicable"]]
+    assert keys == sorted(keys) and len(keys) >= 4

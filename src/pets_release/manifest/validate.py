@@ -60,16 +60,29 @@ def compute_signature(manifest: dict, signing_key: Any) -> str:
     return digest.hex()
 
 
+def _flagged(part: str) -> bool:
+    from pets_release.checks.cells._shape import flagged
+
+    return flagged(part)
+
+
+def _safe(part: str) -> str:
+    """``part`` if it looks like a plain name, else ``<key>``: identifier-shaped names never reach a diagnostic."""
+    # a key the identifier detectors flag is masked in every diagnostic (round-2 review, #61)
+    ok = isinstance(part, str) and _SAFE_KEY.match(part) and not _DIGIT_RUN.search(part) and not _flagged(part)
+    return part if ok else "<key>"
+
+
 def _fmt(path) -> str:
     out = "$"
     for part in path:
-        if isinstance(part, int):
-            out += f"[{part}]"
-        elif _SAFE_KEY.match(part) and not _DIGIT_RUN.search(part):
-            out += "." + part
-        else:
-            out += ".<key>"
+        out += f"[{part}]" if isinstance(part, int) else "." + _safe(part)
     return out
+
+
+def _field(t: str, c: str) -> str:
+    """Content-free ``$.fieldJustifications: <table>.<column>`` prefix (#109 round 2)."""
+    return f"{_fmt(['fieldJustifications'])}: {_safe(t)}.{_safe(c)}"
 
 
 def _schema_errors(obj: Any) -> list[str]:
@@ -84,6 +97,126 @@ def _order(errs: list[str], path: str, items: list, key) -> None:
     keys = [key(i) for i in items]
     if any(a >= b for a, b in itertools.pairwise(keys)):
         errs.append(f"{path}: order")
+
+
+# #132: anchored regexes proven (by inspection, under the ``fullmatch`` the contract.forms check applies) to
+# accept only strings the validator ID already accepts. Regex inclusion is not checked in general: any regex
+# not listed here must equal the rung's form exactly. ``text`` has no entry on purpose (#132 r2): the text
+# checks scan only ``text``-form columns, so a regex substitute would hide the column from them.
+_NARROWING_REGEXES: dict[str, frozenset[str]] = {
+    "hex64": frozenset({"^[0-9a-f]{64}$"}),  # the hex64 validator's own pattern
+    "decimal": frozenset({"^[0-9]+$"}),  # [0-9]+ is within -?\d+(?:\.\d+)?
+}
+
+
+def _narrows(form: str, validator: str) -> bool:
+    """True only if ``form`` provably accepts no string the validator ID ``validator`` rejects and the swap
+    leaves every check's scope unchanged."""
+    return form in _NARROWING_REGEXES.get(validator, frozenset())
+
+
+def _applied_rungs(m: dict, errs: list[str]) -> dict:
+    """#109: ``{(table, source column): rung}`` as the bound contract applies it to each released field
+    (``contract.files[<table>.csv].columns[<outputColumn>].params.rung``). Fail closed (no rung, no sacrifice
+    decision): the contract rung must exist and equal the justification's, lie on the ladder the pinned policy
+    gives that source column (its default family, or exactly its ``alt_floors`` rung), and the column's form must
+    be the rung's form. A rung whose form is a validator ID may declare an anchored regex instead only if that
+    regex provably narrows the validator (#132, ``_narrows``); every regex-form rung (all timestamp rungs) must
+    carry exactly its own form. A contract column no released justification backs is an error too."""
+    from pets_release.ladders import CONTRACT_FORMS, RUNG_KIND
+    from pets_release.policy import get_policy
+
+    try:
+        policy = get_policy(m["release"]["scenario"])
+    except KeyError:
+        errs.append("$.release.scenario: no-policy")
+        return {}
+    floors, alt_floors = policy.floors, policy.alt_floors or {}
+    files = m["contract"]["files"]
+    applied, backed = {}, set()
+    for f in m["fieldJustifications"]:
+        if f["decision"] != "released":
+            continue
+        t, c, out = f["table"], f["column"], f["outputColumn"]
+        backed.add((f"{t}.csv", out))
+        col = files.get(f"{t}.csv", {}).get("columns", {}).get(out)
+        rung = col["params"].get("rung") if col is not None else None
+        where = _field(t, c)
+        if not isinstance(rung, str):
+            errs.append(f"{where}: rung-contract-missing")
+            continue
+        if rung != f["rung"]:
+            errs.append(f"{where}: rung-contract-mismatch")
+        floor = floors.get((t, c))
+        # on the default family's ladder, or exactly the policy-enumerated alternative floor (CS-S1 turn_id)
+        on_ladder = floor is not None and (RUNG_KIND.get(rung) == floor.family or alt_floors.get((t, c)) == rung)
+        if not on_ladder:
+            errs.append(f"{where}: rung-not-on-ladder")
+        want = CONTRACT_FORMS.get(rung)
+        if want is None or (col["form"] != want and not _narrows(col["form"], want)):
+            errs.append(f"{where}: rung-form-mismatch")
+        applied[(t, c)] = rung
+    for file, spec in sorted(files.items()):
+        for col in sorted(spec["columns"]):
+            if (file, col) not in backed:
+                errs.append(f"{_fmt(['contract', 'files', file, 'columns', col])}: rung-unjustified")
+    return applied
+
+
+def _rung_step_errors(m: dict) -> list[str]:
+    """#89/#109: a sacrifice-only rung the contract applies needs exactly one sacrifice ``rungStep`` for that
+    column and rung, whose measured k at ``from`` exceeds the budget and whose check still scores >= 0.9 (fail
+    closed); every ``rungStep`` must match a released field at its ``to`` rung. Rungs are read from the bound
+    contract, never from the justification alone."""
+    from pets_release.ladders import SACRIFICE_ONLY_RUNGS
+    from pets_release.run.purpose import THRESHOLD
+
+    errs: list[str] = []
+    steps = [(i, s) for i, s in enumerate(m["sacrifices"]) if "rungStep" in s]
+    released = _applied_rungs(m, errs)
+    for (t, c), rung in sorted(released.items()):
+        if rung not in SACRIFICE_ONLY_RUNGS:
+            continue
+        match = [s for _, s in steps if (s["rungStep"]["table"], s["rungStep"]["column"], s["rungStep"]["to"])
+                 == (t, c, rung)]
+        if len(match) != 1:
+            errs.append(f"{_field(t, c)}: rung-sacrifice-missing")
+    for i, s in steps:
+        st = s["rungStep"]
+        at = st["atFrom"]
+        if released.get((st["table"], st["column"])) != st["to"] or st["from"] == st["to"]:
+            errs.append(f"{_fmt(['sacrifices', i, 'rungStep'])}: field-mismatch")
+        if not at["share"] > at["maxShare"] or at["unitsSuppressed"] > at["unitsBefore"]:
+            errs.append(f"{_fmt(['sacrifices', i, 'rungStep', 'atFrom'])}: budget-not-exceeded")
+        if not isinstance(s["after"], (int, float)) or isinstance(s["after"], bool) or not s["after"] >= THRESHOLD:
+            errs.append(f"{_fmt(['sacrifices', i, 'after'])}: rung-sacrifice-check-not-strict")
+    errs += _lift_step_errors(m, released, THRESHOLD)
+    return errs
+
+
+def _lift_step_errors(m: dict, released: dict, threshold: float) -> list[str]:
+    """#157 r3: a ``liftStep`` sacrifice entry records a purpose cost that stays above the strict floor; it can never
+    lower a floor. Its floor must be exactly the strict threshold, its check must still score >= it, it carries no
+    rungStep, its field must be released at its rung, and the lift must exceed the bound at ``from`` and hold it at
+    ``to`` (fail closed)."""
+    errs: list[str] = []
+    for i, s in enumerate(m["sacrifices"]):
+        st = s.get("liftStep")
+        if st is None:
+            continue
+        p = ["sacrifices", i]
+        after = s["after"]
+        if isinstance(s["floor"], bool) or s["floor"] != threshold:
+            errs.append(f"{_fmt([*p, 'floor'])}: lift-step-floor-not-strict")
+        if not isinstance(after, (int, float)) or isinstance(after, bool) or not after >= threshold:
+            errs.append(f"{_fmt([*p, 'after'])}: lift-step-check-not-strict")
+        if "rungStep" in s:
+            errs.append(f"{_fmt(p)}: lift-step-with-rung-step")
+        if released.get((st["table"], st["column"])) != st["rung"] or st["fromParams"] == st["toParams"]:
+            errs.append(f"{_fmt([*p, 'liftStep'])}: field-mismatch")
+        if not st["atFrom"]["lift"] > st["maxLift"] >= st["atTo"]["lift"]:
+            errs.append(f"{_fmt([*p, 'liftStep'])}: bound-not-shown")
+    return errs
 
 
 def _cross_field_errors(m: dict) -> list[str]:
@@ -130,6 +263,7 @@ def _cross_field_errors(m: dict) -> list[str]:
             errs.append(f"{_fmt(['contract', 'files', f, 'required'])}: not-in-columns")
     _order(errs, "$.gate.checks", m["gate"]["checks"], tk("check"))
     _order(errs, "$.sacrifices", m["sacrifices"], tk("check"))
+    errs += _rung_step_errors(m)
     _order(errs, "$.residualRisks", m["residualRisks"], tk("risk"))
     _order(errs, "$.fitFor", m["fitFor"], tk("scenario"))
     _order(errs, "$.notFitFor", m["notFitFor"], tk("scenario"))
@@ -137,6 +271,17 @@ def _cross_field_errors(m: dict) -> list[str]:
         errs.append("$.notFitFor: overlaps-fitFor")
     if m["release"]["scenario"] not in {f["scenario"] for f in m["fitFor"]}:
         errs.append("$.fitFor: missing-release-scenario")
+
+    # the pinned scenario policy fixes the k target and the released QI set (#62)
+    from pets_release.policy import contract_policy_problems
+
+    errs += [f"$.{p}" for p in contract_policy_problems(m["release"]["scenario"], m["contract"],
+                                                                   m["fieldJustifications"])]
+
+    # identifier-shaped text anywhere outside the pinned digest/signature metadata (#61)
+    from pets_release.manifest.value_scan import identifier_shape_errors
+
+    errs += identifier_shape_errors(m, _fmt)
 
     meas = m["measured"]
     lists = {"utility": ("tasks", tk("task")), "privacy": ("components", tk("component")),

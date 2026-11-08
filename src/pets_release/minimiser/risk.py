@@ -16,7 +16,9 @@ import pandas as pd
 
 from pets_release.checks import all_checks, run_checks
 from pets_release.checks.producer.kanon import PERSON_K, ROW_K, person_k_values
+from pets_release.detect.released import released_qis
 from pets_release.ladders import WITHHELD, output_column
+from pets_release.policy.contract_rules import k_target  # noqa: F401  (the one k-target rule; search uses R.k_target)
 from pets_release.pseudonym import RECORD_KEY, normalise
 
 BUILTIN_COMPONENTS = frozenset(
@@ -25,11 +27,8 @@ BUILTIN_COMPONENTS = frozenset(
 K_COMPONENTS = frozenset({"qi_k_shortfall", "qi_unique_rate"})
 
 
-def k_target(policy) -> int | None:
-    ks = [t["k"] for t in policy.privacy_targets if t["kind"] == "k_anonymity"]
-    if len(ks) > 1:
-        raise ValueError("more than one k target")
-    return ks[0] if ks else None
+class PersonKMissing(RuntimeError):
+    """Per-person k was not measured (content-free). The search turns it into a refusal (#112, #118)."""
 
 
 def contract_for(policy, plan: list, k: int | None) -> dict:
@@ -89,6 +88,8 @@ def person_k(prot, plan, policy, source, kspec, k):
     with tempfile.TemporaryDirectory(prefix="pets-min-") as d:
         rowmaps = _write(Path(d), prot, contract, source, kspec)
         res = person_k_values(d, contract, _context(source, rowmaps, kspec, k))
+    if res is None:  # fail closed (#112): a missing PersonK is never scored, least of all as perfect privacy
+        raise PersonKMissing("PersonK missing: per-person k not measured")
     return res, contract
 
 
@@ -102,7 +103,12 @@ def gate_k(prot, plan, policy, source, kspec, k) -> dict:
         raise RuntimeError("k checks not registered")
     with tempfile.TemporaryDirectory(prefix="pets-min-") as d:
         rowmaps = _write(Path(d), prot, contract, source, kspec)
-        res = run_checks(d, contract, _context(source, rowmaps, kspec, k), checks=checks)
+        ctx = _context(source, rowmaps, kspec, k)
+        # #106: person-k needs the detector's QIs among what is written here (QI columns only)
+        written = {p.stem: pd.read_csv(p, dtype=str, keep_default_na=False, na_filter=False)
+                   for p in sorted(Path(d).glob("*.csv"))}
+        ctx["detected_qi"] = released_qis(source, written, contract)
+        res = run_checks(d, contract, ctx, checks=checks)
     return res.summary()
 
 
@@ -118,15 +124,14 @@ def risk_vector(policy, plan, prot, source, kspec, k) -> tuple[dict, object]:
     pk = None
     wanted = set(policy.risk_vector)
     if wanted & K_COMPONENTS:
-        pk, _ = person_k(prot, plan, policy, source, kspec, k)
-        if pk is None:
-            out["qi_k_shortfall"] = out["qi_unique_rate"] = 0.0
-        else:
-            n = len(pk.per_person) + pk.unidentified
-            below = sum(1 for v in pk.per_person.values() if v < k) + pk.unidentified
-            uniq = sum(1 for v in pk.per_person.values() if v == 1) + pk.unidentified
-            out["qi_k_shortfall"] = below / n if n else 1.0
-            out["qi_unique_rate"] = uniq / n if n else 1.0
+        pk, _ = person_k(prot, plan, policy, source, kspec, k)  # raises on a missing PersonK
+        if pk is None:  # #118: no caller may score a missing PersonK
+            raise PersonKMissing("PersonK missing: per-person k not measured")
+        n = len(pk.per_person) + pk.unidentified
+        below = sum(1 for v in pk.per_person.values() if v < k) + pk.unidentified
+        uniq = sum(1 for v in pk.per_person.values() if v == 1) + pk.unidentified
+        out["qi_k_shortfall"] = below / n if n else 1.0
+        out["qi_unique_rate"] = uniq / n if n else 1.0
     if "join_derived_qi" in wanted:
         jq = [(q["table"], q["column"]) for q in policy.qi if q.get("join_via")]
         out["join_derived_qi"] = (sum(1 for x in jq if x in released) / len(jq)) if jq else 0.0
@@ -142,7 +147,9 @@ def _homogeneity(policy, by_key, prot, kspec) -> float:
     """Proxy: share of person-table rows whose released-QI class has a single released diagnosis value."""
     t = kspec["person"]["table"]
     df = prot.get(t)
-    if df is None or len(df) == 0:
+    if df is None:  # the search always passes the person table (k_view); its absence is never "no risk"
+        raise RuntimeError("attribute inference: person table missing from the candidate")
+    if len(df) == 0:
         return 0.0
     sens = [output_column(e) for (tt, _), e in sorted(by_key.items())
             if tt == t and e["rung"] != WITHHELD and policy.floors[(tt, e["column"])].family == "icd10"]

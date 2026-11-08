@@ -1,4 +1,4 @@
-"""Run both personas on a HEALTH-S1 release folder and print aggregate rates.
+﻿"""Run both personas on a HEALTH-S1 release folder and print aggregate rates.
 
 python -m pets_attacker --kit <kit root> --release <folder with ed_visits.csv + rowmap_ed_visits.csv> --label b2k --out out.json
 """
@@ -12,15 +12,19 @@ from pathlib import Path
 
 import pandas as pd
 
+from pets_release.manifest.canonical import loads_strict
+from pets_release.offline import entry_point
+
 from .linkage import RungError, qis_from_spec
-from .personas import broker_attack, insider_attack
+from . import redteam
+from .personas import _World, broker_attack, insider_attack
 from .truth import load_adversary_truth, load_identity, load_rowmap
 
 DOMAIN, TABLE, RECORD_KEY = "health", "ed_visits", "visit_id"
 
 
 def _csv(path: Path) -> pd.DataFrame:
-    return pd.read_csv(path, dtype=str, keep_default_na=False)
+    return pd.read_csv(path, dtype=str, keep_default_na=False, na_filter=False)
 
 
 def _rowmap_path(release: Path, scoring_dir: Path | None, rowmaps: dict) -> Path:
@@ -34,7 +38,9 @@ def run(kit: Path, release: Path, label: str, scoring_dir: Path | None = None, r
         rungs_path: Path | None = None) -> dict:
     if rungs_path is None:
         raise RungError("--rungs is required: rungs are never inferred from cell shape")
-    rungs = json.loads(Path(rungs_path).read_text(encoding="utf-8-sig")).get(TABLE)
+    # #114: strict (duplicate keys, NaN/Infinity refuse); the rung record is never partially parsed
+    all_rungs = loads_strict(Path(rungs_path).read_text(encoding="utf-8-sig"))
+    rungs = all_rungs.get(TABLE) if isinstance(all_rungs, dict) else None
     if not isinstance(rungs, dict):
         raise RungError("rung metadata has no entry for the table")
     rowmap_path = _rowmap_path(release, scoring_dir, rowmaps or {})
@@ -44,21 +50,53 @@ def run(kit: Path, release: Path, label: str, scoring_dir: Path | None = None, r
     protected, rowmap = _csv(prot_path), load_rowmap(rowmap_path)
     original = _csv(kit / "data" / DOMAIN / f"{TABLE}.csv")
     identity = load_identity(kit, DOMAIN, TABLE)
-    specs = json.loads((kit / "metadata" / "attack_specs.json").read_text(encoding="utf-8"))["attacks"]
-    broker = {}
+    specs = loads_strict((kit / "metadata" / "attack_specs.json").read_bytes())["attacks"]  # #131: strict
+    broker, used_specs, adv_frames, adv_truths = {}, [], {}, {}
     for spec in specs:
         if spec["dataset"] != DOMAIN or spec["table"] != TABLE:
             continue
         adv = _csv(kit / "adversary" / f"{spec['adversary']}.csv")
+        adv_truth = load_adversary_truth(kit, spec["adversary"])
         qis = qis_from_spec(spec["qis"], protected.columns)
         broker[spec["adversary"]] = broker_attack(
-            adv, load_adversary_truth(kit, spec["adversary"]), protected, rowmap, identity, qis,
+            adv, adv_truth, protected, rowmap, identity, qis,
             original=original, record_key=RECORD_KEY, sensitive=spec.get("sensitive"), rungs=rungs)
+        used_specs.append(spec)
+        adv_frames[spec["adversary"]], adv_truths[spec["adversary"]] = adv, adv_truth
     insider = insider_attack(original, protected, rowmap, identity, date_col="arrival_ts", place_col="municipality",
                              record_key=RECORD_KEY, sensitive="icd10_primary", rungs=rungs)
-    return {"label": label, "broker": broker, "insider": insider}
+    world = _World(protected, rowmap, identity, original, RECORD_KEY, None)
+    red = {}
+    for name, enrich in (("cross_dataset", True), ("range_aware", False)):
+        try:
+            red[name] = redteam.linkage(kit, used_specs, world, protected, rungs, adv_frames, adv_truths,
+                                        enrich=enrich)
+        except (ValueError, KeyError, IndexError) as e:  # RedTeamError, RungError, MappingError included
+            red[name] = redteam.failed(e)
+    others, others_error = None, None
+    try:  # #139 r2: every other table the release contract names (rungs) is read from the release by that name
+        others = {t: _csv(release / f"{t}.csv") for t in sorted(all_rungs) if t != TABLE and isinstance(all_rungs[t], dict)}
+    except (OSError, ValueError) as e:  # never a silently smaller table set
+        others_error = e
+    try:
+        if others_error is not None:
+            raise others_error
+        red["release_join"] = redteam.release_join(kit, TABLE, world, protected, original, RECORD_KEY, all_rungs,
+                                                   others)
+    except (ValueError, KeyError, IndexError, OSError) as e:
+        red["release_join"] = redteam.failed(e, redteam.JOIN_KEYS)
+    try:
+        if others_error is not None:
+            raise others_error
+        red["attribute_inference"] = redteam.attribute_inference(kit, DOMAIN, TABLE, world, protected, original,
+                                                                 RECORD_KEY, all_rungs, others)
+    except (ValueError, KeyError, IndexError, OSError) as e:
+        red["attribute_inference"] = {**{k: v for k, v in redteam.failed(e).items() if k in ("evaluated", "reason")},
+                                      "columns": {}}
+    return {"label": label, "broker": broker, "insider": insider, "red_team": red}
 
 
+@entry_point
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="pets_attacker")
     ap.add_argument("--kit", required=True, type=Path)

@@ -127,6 +127,26 @@ def _measured(props: dict) -> dict:
     return {"oneOf": [_ref("notMeasured"), _obj({"status": _status("measured"), "source": _ref("text"), **props})]}
 
 
+_K_SUMMARY = _obj({
+    "persons": {"type": "integer", "minimum": 1},
+    "unidentifiedUnits": {"type": "integer", "minimum": 0},
+    "minK": {"oneOf": [{"type": "integer", "minimum": 1}, {"type": "null"}]},
+    "medianK": {"oneOf": [{"type": "integer", "minimum": 1}, {"type": "null"}]},
+    "belowK": {"type": "integer", "minimum": 0},
+    "belowKShare": {"type": "number", "minimum": 0, "maximum": 1},
+})
+
+
+def _k_set(name: str) -> dict:
+    sid = {"const": name}
+    return {"oneOf": [
+        _obj({"set": sid, "status": _status("not_measured"), "reason": {"$ref": "#/$defs/text"}}),
+        _obj({"set": sid, "status": _status("measured"),
+              "qi": _arr(_obj({"table": {"$ref": "#/$defs/name"}, "column": {"$ref": "#/$defs/name"},
+                               "derived_from": {"$ref": "#/$defs/name"}})),
+              "beforeSuppression": _K_SUMMARY, "released": _K_SUMMARY}),
+    ]}
+
 _MEASURED = _obj({
     "utility": _measured({"tasks": _arr(_obj({
         "task": _ref("id"), "status": {"enum": ["error", "not_answerable", "ok"]}, "before": _SCORE, "after": _SCORE,
@@ -139,7 +159,7 @@ _MEASURED = _obj({
         "accepted": {"type": "integer", "minimum": 0},
         "boundReached": {"type": "boolean"},
         "points": _arr(_obj({"step": {"type": "integer", "minimum": 0}, "risk": {"type": "number"},
-                             "utility": {"type": "number"}, "accepted": {"type": "boolean"}})),
+                             "utility": _SCORE, "accepted": {"type": "boolean"}})),  # null: unscored (#133)
     }),
     "baselines": _measured({"rows": _arr(_obj({
         "baseline": _ref("id"), "metric": _ref("id"), "value": _SCORE,
@@ -157,6 +177,16 @@ _MEASURED = _obj({
             "precision": _SCORE, "recall": _SCORE,
         }), 1),
         "summary": _arr(_obj({"metric": _ref("id"), "value": _SCORE})),
+    }),
+    # #146 (D58): per-person k on (a) the scenario's suggested QIs and (b) every kept catalogued QI, before local
+    # suppression and on the release; each set measured or not_measured with a reason. Plus every withheld
+    # catalogued QI with its field justification.
+    "kSets": _measured({
+        "k": {"type": "integer", "minimum": 2},
+        # exactly two, in this order: (a) scenario, (b) keptCatalogued
+        "sets": {"type": "array", "prefixItems": [_k_set("scenario"), _k_set("keptCatalogued")],
+                 "items": False, "minItems": 2},
+        "withheld": _arr(_obj({"table": _ref("name"), "column": _ref("name"), "reason": _ref("text")})),
     }),
 })
 
@@ -177,12 +207,15 @@ _FIELD_JUSTIFICATION = {
 
 _RESIDUAL_RISK = _obj({
     "risk": _ref("id"),
-    "kind": {"enum": ["attribute_inference", "linkage", "note", "scorecard_defect", "tamper_limitation",
-                      "text_recall"]},
+    "kind": {"enum": ["attribute_inference", "gate_low_severity", "linkage", "note", "scorecard_defect",
+                      "tamper_limitation", "text_recall"]},
     "label": {"oneOf": [{"enum": list(SPAN_LABELS)}, {"type": "null"}]},
     "rate": {"oneOf": [
         _ref("notMeasured"), _ref("notApplicable"),
         _obj({"status": _status("measured"), "value": {"type": "number", "minimum": 0, "maximum": 1},
+              "denominator": _ref("denominator"), "source": _ref("text")}),
+        # gate_low_severity: low-severity hits a gate check counted (released; never an assertion)
+        _obj({"status": _status("counted"), "count": {"type": "integer", "minimum": 1},
               "denominator": _ref("denominator"), "source": _ref("text")}),
     ]},
     "description": _ref("text"),
@@ -204,13 +237,23 @@ def _assertion_maps(names) -> dict:
     }
 
 
+def _policy_k(scenario: str) -> int:
+    from pets_release.policy import get_policy, k_target
+
+    k = k_target(get_policy(scenario))
+    if k is None:
+        raise ImportError("scenario carries quasiIdentifiersBelowK but its policy has no k target")
+    return k
+
+
 def _scenario_rule(scenario: str) -> dict:
     then = {"properties": _assertion_maps(required_assertions(scenario))}
     if scenario == "CS-S1":  # healthInText is checked against the lexicon version bound in the manifest
         then["properties"]["bindings"] = {"properties": {"lexiconDigests": {"minProperties": 1}}}
     # contract.k (k-anonymity target) exactly when the scenario carries quasiIdentifiersBelowK
     if "quasiIdentifiersBelowK" in required_assertions(scenario):
-        then["properties"]["contract"] = {"required": ["k"]}
+        # the target is the pinned policy's, never the manifest's own (#62); the cross-field rule pins equality
+        then["properties"]["contract"] = {"required": ["k"], "properties": {"k": {"minimum": _policy_k(scenario)}}}
     else:
         then["properties"]["contract"] = {"not": {"required": ["k"]}}
     return {
@@ -273,7 +316,29 @@ MANIFEST_SCHEMA: dict = {
         "sacrifices": _arr(_obj({
             "check": _ref("id"), "floor": {"type": "number"}, "before": _SCORE, "after": _SCORE,
             "reason": _ref("text"),
-        })),
+            # #89: an adopted enumerated rung sacrifice (e.g. arrival_ts month+hour -> hour of day), with the
+            # measured k result at `from` that triggered it; present exactly when the plan holds that rung
+            "rungStep": _obj({
+                "table": _ref("name"), "column": _ref("name"), "from": _ref("id"), "to": _ref("id"),
+                "privacyTarget": _ref("id"), "k": {"type": "integer", "minimum": 2},
+                "atFrom": _obj({
+                    "unitsBefore": {"type": "integer", "minimum": 1},
+                    "unitsSuppressed": {"type": "integer", "minimum": 0},
+                    "share": {"type": "number", "minimum": 0, "maximum": 1},
+                    "maxShare": {"type": "number", "minimum": 0, "maximum": 1},
+                    "withinBound": {"const": False},
+                }),
+            }),
+            # #157 r3: the purpose cost of holding an attribute-lift bound, a record only (floor = the strict
+            # threshold, never a waiver): the check's score at the finer params and the lift at both
+            "liftStep": _obj({
+                "cause": {"const": "attribute-lift-bound"}, "table": _ref("name"), "column": _ref("name"),
+                "rung": _ref("id"), "fromParams": _ref("params"), "toParams": _ref("params"),
+                "maxLift": {"type": "number", "minimum": 1},
+                "atFrom": _obj({"score": _SCORE, "lift": {"type": "number", "minimum": 0}}),
+                "atTo": _obj({"lift": {"type": "number", "minimum": 0}}),
+            }),
+        }, required=["after", "before", "check", "floor", "reason"])),
         "residualRisks": _arr(_RESIDUAL_RISK, 1),
         "fitFor": _arr(_ref("fit"), 1),
         "notFitFor": _arr(_ref("fit")),

@@ -15,6 +15,8 @@ from pathlib import Path
 import pandas as pd
 
 from pets_release.checks import RegistryError, all_checks, run_checks
+from pets_release.checks.producer.manifest_values import CHECK as MANIFEST_VALUE_CHECK  # #149: one scan
+from pets_release.checks.producer.manifest_values import SCAN_MIN_LEN, usable_source  # noqa: F401  (re-export)
 from pets_release.kit import Kit, KitError
 from pets_release.kiteval import Lineage
 from pets_release.manifest import (
@@ -24,6 +26,7 @@ from pets_release.manifest import (
     validate_manifest,
     validate_manifest_file,
 )
+from pets_release.policy import contract_policy_problems
 from pets_release.pseudonym import manifest_signing_key
 from pets_release.writer.assemble import (
     NARRATIVE_KEYS,
@@ -34,7 +37,6 @@ from pets_release.writer.assemble import (
 
 FILE_NAME = re.compile(r"^[A-Za-z0-9_]{1,64}\.csv$")
 SCORING_NAME = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.\-]{0,99}$")
-SCAN_MIN_LEN = 6  # released cell values at least this long must not appear in manifest text (outside `contract`)
 REFUSAL_REPORT = "refusal_report.json"
 GATE_REPORT = "gate_report.json"
 LINEAGE_FILE = "lineage.json"
@@ -135,12 +137,21 @@ def _csv_bytes(header, rows) -> bytes:
     return buf.getvalue().encode("utf-8")
 
 
+def _sorted_pairs(t: ProtectedTable) -> list:
+    return sorted(zip(t.frame.itertuples(index=False, name=None), t.final, strict=True))
+
+
+def table_bytes(t: ProtectedTable) -> bytes:
+    """The exact bytes ``write_release`` publishes for ``t`` (rows sorted; the run measures its k sets on them)."""
+    return _csv_bytes(list(t.frame.columns), [list(r) for r, _ in _sorted_pairs(t)])
+
+
 def _write_tables(build: Path, c: Candidate) -> tuple[dict, dict]:
     """Write sorted tables. Returns (file digests, {stem: Lineage}) with lineage in written row order."""
     digests, lineage = {}, {}
     for t in sorted(c.tables, key=lambda t: t.name):
-        pairs = sorted(zip(t.frame.itertuples(index=False, name=None), t.final, strict=True))
-        data = _csv_bytes(list(t.frame.columns), [list(r) for r, _ in pairs])
+        pairs = _sorted_pairs(t)
+        data = table_bytes(t)
         (build / t.name).write_bytes(data)
         digests[t.name] = hashlib.sha256(data).hexdigest()
         lineage[t.name[:-4]] = Lineage(final=tuple(k for _, k in pairs), suppressed=frozenset(t.suppressed))
@@ -158,19 +169,13 @@ def _gate_reasons(result, prefix: str) -> list[str]:
     return out
 
 
-def _strings(obj, acc: list) -> list:
-    if isinstance(obj, str):
-        acc.append(obj)
-    elif isinstance(obj, dict):
-        for v in obj.values():
-            _strings(v, acc)
-    elif isinstance(obj, (list, tuple)):
-        for v in obj:
-            _strings(v, acc)
-    return acc
+def _source_missing(context: Mapping) -> list[str]:
+    """#149: the source-value scan needs the source tables. Absent, empty or malformed is unknown, and unknown
+    refuses (fail closed) instead of scanning nothing."""
+    return [] if usable_source(context) else ["selfscan:source-missing"]
 
 
-def _self_scan(build: Path, c: Candidate, manifest: dict, context: dict) -> list[str]:
+def _self_scan(build: Path, c: Candidate, context: dict) -> list[str]:
     reasons = []
     expected = sorted([t.name for t in c.tables] + [MANIFEST_FILENAME])
     if sorted(p.name for p in build.iterdir()) != expected or not all(p.is_file() for p in build.iterdir()):
@@ -179,11 +184,11 @@ def _self_scan(build: Path, c: Candidate, manifest: dict, context: dict) -> list
     verify = run_checks(build, c.contract, {**context, "phase": "verify"})
     reasons += _gate_reasons(verify, "selfscan")
     reasons += [r.replace("gate:", "selfscan:") for r in _registry_reasons(verify.records)]
-    text = "\x00".join(_strings({k: v for k, v in manifest.items() if k != "contract"}, []))
-    values = set()
-    for t in c.tables:
-        values.update(v for v in pd.unique(t.frame.to_numpy(dtype=object).ravel()) if len(v) >= SCAN_MIN_LEN)
-    if any(v in text for v in values):
+    reasons += _source_missing(context)
+    # #80/#149: the manifest source/released-value scan (every key and string, contract included, folded) is the
+    # registered check, run above in the verify phase over the written manifest; anything but a pass refuses.
+    rec = [r for r in verify.records if r.check == MANIFEST_VALUE_CHECK]
+    if len(rec) != 1 or rec[0].status != "pass":
         reasons.append("selfscan:manifest-value")
     return reasons
 
@@ -221,8 +226,13 @@ def write_release(candidate: Candidate, out, master_key, kit: Kit, *, context: M
     build = Path(tempfile.mkdtemp(prefix=f".{out.name}.build-", dir=out.parent))
     try:
         digests, lineage = _write_tables(build, candidate)
+        # the pinned scenario policy, not the candidate, fixes the k target and the QI set (#62)
+        reasons = [f"policy:{p}" for p in contract_policy_problems(candidate.scenario, candidate.contract,
+                                                                         candidate.narrative.get("fieldJustifications"))]
+        # the self-scan's source precondition is evaluated up front, so a sourceless write names it (#149)
+        reasons += _source_missing(context)
         gate = run_checks(build, candidate.contract, {**context, "phase": "gate"})
-        reasons = _gate_reasons(gate, "gate") + _registry_reasons(gate.records)
+        reasons += _gate_reasons(gate, "gate") + _registry_reasons(gate.records)
         reasons += evidence_for(gate.records, candidate.scenario)[2]
         reasons += justification_reasons(candidate.contract, list(candidate.narrative["fieldJustifications"]))
         manifest = None
@@ -233,7 +243,7 @@ def write_release(candidate: Candidate, out, master_key, kit: Kit, *, context: M
             reasons += [f"manifest:{e}" for e in validate_manifest(manifest)]
         if not reasons:
             (build / MANIFEST_FILENAME).write_bytes(canonical_bytes(manifest))
-            reasons += _self_scan(build, candidate, manifest, context)
+            reasons += _self_scan(build, candidate, context)
         reasons = tuple(sorted(set(reasons)))
         if reasons:
             shutil.rmtree(build)

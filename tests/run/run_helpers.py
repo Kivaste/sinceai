@@ -30,19 +30,82 @@ def build_kit(root: Path, edit=None) -> Path:
 
 
 QI_COLUMNS = ("date_of_birth", "municipality", "arrival_ts")
-UNIQUE_TAIL = 4  # last visits keep their own QI values: below k, so local suppression has work to do
+SHARED_QIS = ("date_of_birth", "municipality")  # same for every visit, so the purpose checks keep their groups
+UNIQUE_TAIL = 4  # last visits keep their own arrival time: below k, so local suppression has work to do
 
 
 def coarse_qis(folder: Path) -> None:
-    """Edit the synthetic copy: every visit but the last UNIQUE_TAIL copies row 0's QI cells (format-preserving),
-    so the hand plan reaches k on the small minikit."""
+    """Edit the synthetic copy so the hand plan reaches k on the small minikit and every purpose check still
+    passes (format-preserving): every visit copies row 0's date of birth and municipality, and every visit but
+    the last UNIQUE_TAIL copies row 0's arrival time."""
     import pandas as pd
 
     p = folder / "ed_visits.csv"
     df = pd.read_csv(p, dtype=str, keep_default_na=False, na_filter=False)
     head = len(df) - UNIQUE_TAIL
-    for c in QI_COLUMNS:
-        df.loc[: head - 1, c] = df.at[0, c]
+    for c in SHARED_QIS:
+        df.loc[:, c] = df.at[0, c]
+    df.loc[: head - 1, "arrival_ts"] = df.at[0, "arrival_ts"]
+    df.to_csv(p, index=False, encoding="utf-8", lineterminator="\n")
+
+
+def blank_columns(folder: Path, table: str, columns) -> None:
+    """Edit the synthetic copy: blank every cell of ``columns`` in ``table``."""
+    import pandas as pd
+
+    p = folder / f"{table}.csv"
+    df = pd.read_csv(p, dtype=str, keep_default_na=False, na_filter=False)
+    for c in columns:
+        df[c] = ""
+    df.to_csv(p, index=False, encoding="utf-8", lineterminator="\n")
+
+
+GROUPS = 4
+
+
+def grouped_qis(folder):
+    """Edit the synthetic copy so the search can reach k: each person gets one of GROUPS QI profiles (the
+    birth date, municipality and arrival hour of a representative row), consistent across that person's visits;
+    arrival dates are left as they are, and ``dominant_sensitive`` then gives 3 of every 5 visits one diagnosis
+    and one stay (D64: the lift bound); every other column is left as it is."""
+    import pandas as pd
+
+    p = folder / "ed_visits.csv"
+    df = pd.read_csv(p, dtype=str, keep_default_na=False, na_filter=False)
+    persons = sorted(set(df["patient_hetu"]))
+    group = {h: i % GROUPS for i, h in enumerate(persons)}
+    reps = [df.index[df["patient_hetu"] == persons[g]][0] for g in range(GROUPS)]
+    for i in df.index:
+        r = reps[group[df.at[i, "patient_hetu"]]]
+        df.at[i, "date_of_birth"] = df.at[r, "date_of_birth"]
+        df.at[i, "municipality"] = df.at[r, "municipality"]
+        ts, rep = df.at[i, "arrival_ts"], df.at[r, "arrival_ts"]
+        df.at[i, "arrival_ts"] = ts[:11] + rep[11:13] + ts[13:]
+    dominant_sensitive(df)
+    df.to_csv(p, index=False, encoding="utf-8", lineterminator="\n")
+
+
+DOMINANT_SHARE = 3  # of every 5 visits
+
+
+def dominant_sensitive(df) -> None:
+    """D64 (#157): 3 of every 5 visits share one diagnosis and one stay, so on the small minikit the most common
+    value of a QI class is the release's most common value and the attribute-inference lift stays under the
+    HEALTH-S1 bound; the other visits keep their own values (the purpose checks still see variety)."""
+    dom = [i for i in df.index if i % 5 < DOMINANT_SHARE]
+    df.loc[dom, "icd10_primary"] = df.at[0, "icd10_primary"]
+    df.loc[dom, "los_minutes"] = "120"
+
+
+def grouped_spread_arrivals(folder):
+    """``grouped_qis``, then each visit's arrival spread over 12 months x 24 hours: per-person k fails at
+    month+hour beyond the suppression budget, so the search takes the enumerated hour-of-day rung sacrifice."""
+    import pandas as pd
+
+    grouped_qis(folder)
+    p = folder / "ed_visits.csv"
+    df = pd.read_csv(p, dtype=str, keep_default_na=False, na_filter=False)
+    df["arrival_ts"] = [f"2025-{i % 12 + 1:02d}-15 {(i // 12) % 24:02d}:30:00" for i in range(len(df))]
     df.to_csv(p, index=False, encoding="utf-8", lineterminator="\n")
 
 

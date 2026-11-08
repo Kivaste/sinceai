@@ -125,12 +125,26 @@ Scope <span class="scope-release">release</span> = checked on the released files
 {% for metric, vals in s.metrics %}<tr><td>{{ metric }}</td>{% for n in s.names %}<td>{{ vals[n]|fmt if n in vals else '-' }}</td>{% endfor %}</tr>
 {% endfor %}</table>{% endif %}</section>
 
+{% set s = extra.ksets %}
+<section id="k-sets" data-status="{{ s.status }}"><h2>Per-person k on both QI sets {{ badge(s) }}</h2>
+<p>Source: <code>measured.kSets</code>. Target k = {{ s.k if s.k is not none else '-' }}. Before suppression: the plan applied; released: the published tables.</p>
+{{ notes(s.blocks) }}
+{% if s.sets %}<table><tr><th>Set</th><th>QIs</th><th>Stage</th><th>Persons</th><th>Min k</th><th>Median k</th><th>Below k</th><th>Below-k share</th></tr>
+{% for x in s.sets %}{% if x.status == 'measured' %}{% for stage, v in (('before suppression', x.beforeSuppression), ('released', x.released)) %}<tr data-set="{{ x.set }}"><td>{{ x.title }}</td><td>{{ x.qi_text }}</td><td>{{ stage }}</td><td>{{ v.persons }}</td><td>{{ v.minK if v.minK is not none else '-' }}</td><td>{{ v.medianK if v.medianK is not none else '-' }}</td><td>{{ v.belowK }}</td><td>{{ v.belowKShare|fmt }}</td></tr>
+{% endfor %}{% else %}<tr data-set="{{ x.set }}"><td>{{ x.title }}</td><td colspan="7" class="unmeasured">not measured: {{ x.reason }}</td></tr>
+{% endif %}{% endfor %}</table>{% endif %}
+{% if s.coincide %}<p class="k-sets-coincide">Sets (a) and (b) coincide: every catalogued QI outside the scenario's set is withheld (listed below).</p>{% endif %}
+{% if s.blocks[0].ok %}<h3>Withheld catalogued QIs and why</h3>
+{% if s.withheld %}<table><tr><th>Field</th><th>Justification</th></tr>
+{% for w in s.withheld %}<tr><td>{{ w.table }}.{{ w.column }}</td><td>{{ w.reason }}</td></tr>
+{% endfor %}</table>{% else %}<p>No catalogued QI withheld.</p>{% endif %}{% endif %}</section>
+
 {% set s = extra.chart %}
 <section id="chart" data-status="{{ s.status }}"><h2>Privacy versus utility {{ badge(s) }}</h2>
 <p>Source: <code>measured.search</code>.</p>
 {{ notes(s.blocks) }}
 {% if s.svg %}{% set g = s.svg %}
-<p>Candidates {{ s.summary.candidates }}, accepted {{ s.summary.accepted }}, bound reached {{ s.summary.boundReached|lower }}. Filled points were accepted by the search.</p>
+<p>Candidates {{ s.summary.candidates }}, accepted {{ s.summary.accepted }}, bound reached {{ s.summary.boundReached|lower }}. Filled points were accepted by the search.{% if s.unscored %} {{ s.unscored }} rejected candidates had a purpose check that could not be scored; they are not plotted.{% endif %}</p>
 <svg viewBox="0 0 {{ g.w }} {{ g.h }}" width="{{ g.w }}" height="{{ g.h }}" role="img" aria-label="Privacy risk versus utility">
 <line x1="{{ g.pad }}" y1="{{ g.h - g.pad }}" x2="{{ g.w - g.pad }}" y2="{{ g.h - g.pad }}" stroke="#555"/>
 <line x1="{{ g.pad }}" y1="{{ g.pad }}" x2="{{ g.pad }}" y2="{{ g.h - g.pad }}" stroke="#555"/>

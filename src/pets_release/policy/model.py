@@ -7,7 +7,13 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 
-from pets_release.ladders import CONTRACT_FORMS, LADDERS, WITHHELD  # single source of rung IDs (ticket 07)
+from pets_release.ladders import (  # single source of rung IDs (ticket 07)
+    CONTRACT_FORMS,
+    LADDERS,
+    SACRIFICE_ONLY_RUNGS,
+    WITHHELD,
+    at_least_as_coarse,
+)
 
 PLAN_KEYS = frozenset({"table", "column", "rung", "params", "floor", "reason", "source"})
 
@@ -29,10 +35,12 @@ _TARGETS = {
 _QI_REQ = {"table", "column", "derived"}
 _QI_OPT = {"note", "join_via"}
 _SACRIFICE = {"check", "floor_score", "reason", "via"}
+_RUNG_SACRIFICE = {"check", "table", "column", "from", "to", "reason"}
 _MOVE = {"table", "column", "rung"}
 _SUPPRESSION = {"method", "unit", "k", "max_share", "order", "then"}
 _NOTE = {"id", "status", "note"}
 _NOTE_STATUS = {"not_applicable", "open"}
+_ATTR_LIFT = {"attributes", "attacker", "reason"}  # D64 (#157); per-attribute max_lift
 
 
 def _exact(rec, keys, what, optional=frozenset()):
@@ -70,6 +78,14 @@ class ScenarioPolicy:
     alt_floor_conditions: dict = field(default_factory=dict)
     residual_notes: tuple[dict, ...] = ()  # {id, status, note}: e.g. a target that is not applicable
     suppression: dict | None = None  # last-step local suppression of below-k persons (applied by ticket 21)
+    # {check, table, column, from, to, reason} (#89): the only way a plan holds a sacrifice-only rung `to`.
+    # Adopted only when k measured at `from` needs more suppression than the budget and `check` still passes
+    # strictly at `to`; the release records the measured scores under the check's sacrifice entry.
+    rung_sacrifices: tuple[dict, ...] = ()
+    # D64 (#157): {attributes: [{table, column, max_lift}], attacker, reason}. A plan is feasible only if every
+    # released attribute with a max_lift has its attribute-inference lift (minimiser.attr_lift) at or under it;
+    # max_lift None: measured and disclosed, not bounded.
+    attribute_lift: dict | None = None
 
     def __post_init__(self):
         cols = set(self.floors)
@@ -101,6 +117,23 @@ class ScenarioPolicy:
                 _exact(v, {"table", "column"}, "sacrifice via")
                 if (v["table"], v["column"]) not in cols:
                     raise PolicyError("sacrifice via names an unknown column")
+        score_sacrifices = {s["check"] for s in self.sacrifices}
+        seen_rs = set()
+        for rs in self.rung_sacrifices:
+            _exact(rs, _RUNG_SACRIFICE, "rung sacrifice")
+            key = (rs["table"], rs["column"])
+            if key not in cols or key in seen_rs:
+                raise PolicyError("rung sacrifice names an unknown or repeated column")
+            seen_rs.add(key)
+            if rs["check"] not in score_sacrifices:
+                raise PolicyError("rung sacrifice check needs an enumerated sacrifice entry")
+            fl = self.floors[key]
+            lad = LADDERS[fl.family]
+            if rs["to"] not in SACRIFICE_ONLY_RUNGS or rs["to"] not in lad or rs["from"] not in lad:
+                raise PolicyError("rung sacrifice must move to a sacrifice-only rung on the column's ladder")
+            if rs["from"] in SACRIFICE_ONLY_RUNGS or not at_least_as_coarse(rs["from"], fl.rung) or \
+                    not at_least_as_coarse(rs["to"], rs["from"]) or rs["from"] == rs["to"]:
+                raise PolicyError("rung sacrifice must go from an ordinary rung at or above the floor to a coarser one")
         for mv in self.joint_qi_moves:
             for m in mv:
                 _exact(m, _MOVE, "joint QI move")
@@ -120,7 +153,7 @@ class ScenarioPolicy:
                     raise PolicyError("joint QI move column is not a QI")
                 if m["rung"] not in ladder:
                     raise PolicyError("joint QI move rung is not on the column's ladder")
-                if ladder.index(m["rung"]) < ladder.index(fl.rung):
+                if not at_least_as_coarse(m["rung"], fl.rung):
                     raise PolicyError("joint QI move rung is finer than the column's floor")
         for key, rung in (self.alt_floors or {}).items():
             if key not in cols or (rung not in CONTRACT_FORMS and rung != WITHHELD):
@@ -135,6 +168,30 @@ class ScenarioPolicy:
             _exact(n, _NOTE, "residual note")
             if n["status"] not in _NOTE_STATUS:
                 raise PolicyError("residual note status invalid")
+        if self.attribute_lift is not None:
+            al = self.attribute_lift
+            _exact(al, _ATTR_LIFT, "attribute lift bound")
+            if not isinstance(al["attributes"], list) or not al["attributes"]:
+                raise PolicyError("attribute lift bound needs attributes")
+            for a in al["attributes"]:
+                _exact(a, {"table", "column", "max_lift"}, "attribute lift attribute", {"tradeoff"})
+                to = a.get("tradeoff")
+                if to is not None:  # #157 r3: the purpose cost of holding the bound, recorded (never a waiver)
+                    _exact(to, {"check", "rung", "from_params"}, "attribute lift tradeoff")
+                    fl = self.floors.get((a["table"], a["column"]))
+                    # (its check is resolved at run time: lift_steps fails closed when it is not scored)
+                    if a["max_lift"] is None or not isinstance(to["check"], str) or fl is None or \
+                            to["rung"] not in LADDERS[fl.family] or not isinstance(to["from_params"], dict):
+                        raise PolicyError("attribute lift tradeoff needs a bound, a check, a ladder rung "
+                                          "and from_params")
+                if (a["table"], a["column"]) not in cols:
+                    raise PolicyError("attribute lift names an unknown column")
+                ml = a["max_lift"]  # None: measured and disclosed, not bounded (D64 option b)
+                if ml is not None and (not isinstance(ml, (int, float)) or isinstance(ml, bool)
+                                       or not 1.0 <= ml < float("inf")):
+                    raise PolicyError("attribute lift max_lift must be null or a finite number >= 1")
+            if not all(isinstance(al[k], str) and al[k].strip() for k in ("attacker", "reason")):
+                raise PolicyError("attribute lift needs an attacker and a reason")
         if self.suppression is not None:
             _exact(self.suppression, _SUPPRESSION, "suppression")
             if not 0 < self.suppression["max_share"] <= 1:
@@ -154,6 +211,7 @@ class ScenarioPolicy:
             "qi": [dict(q) for q in self.qi],
             "riskVector": list(self.risk_vector),
             "sacrifices": [dict(s) for s in self.sacrifices],
+            "rungSacrifices": [dict(s) for s in self.rung_sacrifices],
             "jointQiMoves": [[dict(m) for m in mv] for mv in self.joint_qi_moves],
             "altFloors": [
                 {"table": t, "column": c, "floor": r} for (t, c), r in sorted((self.alt_floors or {}).items())
@@ -163,6 +221,9 @@ class ScenarioPolicy:
             ],
             "residualNotes": [dict(n) for n in self.residual_notes],
             "suppression": dict(self.suppression) if self.suppression else None,
+            **({"attributeLift": {**self.attribute_lift,
+                                  "attributes": [dict(a) for a in self.attribute_lift["attributes"]]}}
+               if self.attribute_lift is not None else {}),
             "linked": [[{"table": t, "column": c} for t, c in g] for g in self.linked],
             "paramMinimums": [
                 {"table": t, "column": c, **v} for (t, c), v in sorted(self.param_minimums.items())
@@ -209,8 +270,11 @@ def validate_plan(plan: list, policy: ScenarioPolicy) -> None:
             ladder = LADDERS[fl.family]
             if e["rung"] not in ladder:
                 raise PlanError(f"rung {e['rung']!r} not on the {fl.family} ladder for {key}")
-            if ladder.index(e["rung"]) < ladder.index(fl.rung):
+            if not at_least_as_coarse(e["rung"], fl.rung):
                 raise PlanError(f"rung for {key} is finer than its floor")
+            if e["rung"] in SACRIFICE_ONLY_RUNGS and e["rung"] != fl.rung and not any(
+                    (rs["table"], rs["column"], rs["to"]) == (*key, e["rung"]) for rs in policy.rung_sacrifices):
+                raise PlanError(f"rung for {key} is sacrifice-only and not an enumerated rung sacrifice")
         elif alt and e["floor"] == alt:  # conditional-keep fallback: only the alt rung or withheld
             if e["rung"] not in (alt, WITHHELD):
                 raise PlanError(f"rung for {key} is finer than its alternative floor")

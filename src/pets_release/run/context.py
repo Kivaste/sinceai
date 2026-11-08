@@ -1,7 +1,8 @@
-﻿"""Producer context for the gate and for ``verify --full``: one function, both paths.
+"""Producer context for the gate and for ``verify --full``: one function, both paths.
 
 The context ticket 11's producer checks read (``source``, ``rowmaps``, ``record_keys``, ``person``, ``joins``,
-``identifiers``, ``keys``, ``k``) is derived only from the kit, the master key and the released tables:
+``identifiers``, ``keys``, ``k``, ``detected_qi``) is derived only from the kit, the master key and the released
+tables (``detected_qi``: the detector's QIs among the released columns, #106):
 
 * row maps are never read from a file. Every released table of a scenario carries its record key as a
   release-scope keyed pseudonym, so each released row is mapped back to its source record by recomputing
@@ -21,7 +22,10 @@ from pathlib import Path
 
 import pandas as pd
 
+from pets_release.detect.released import released_qis
 from pets_release.ladders import PseudonymKeys
+from pets_release.policy import k_target
+from pets_release.run.provenance import unreproduced
 from pets_release.pseudonym import (
     RECORD_KEY,
     MasterKey,
@@ -88,6 +92,35 @@ def _rowmap(stem: str, src: pd.DataFrame, key_col: str, released: pd.DataFrame, 
                         dtype=str)
 
 
+def released_rowmaps(*, scenario_id: str, source: Mapping[str, pd.DataFrame], released: Mapping[str, pd.DataFrame],
+                     master: MasterKey, scope_id: str, recipient: str, contract: Mapping) -> dict:
+    """Row maps for ``released`` tables, derived by inverting their record-key tokens against the source (never read
+    from a file). A table whose map cannot be derived is left out (person-k then refuses on it)."""
+    spec = SCENARIO_SPEC.get(scenario_id)
+    if spec is None:
+        raise ContextError("no producer-context spec for this scenario")
+    keys = token_keys(master, scope_id, recipient)
+    rowmaps = {}
+    for stem, df in sorted(released.items()):
+        key_col = spec["record_keys"].get(stem)
+        rm = _rowmap(stem, source[stem], key_col, df, keys, contract) if key_col and stem in source else None
+        if rm is not None:
+            rowmaps[stem] = rm
+    return rowmaps
+
+
+def read_released(release_dir, contract: Mapping) -> dict[str, pd.DataFrame]:
+    """The contract's published tables in ``release_dir`` (``dtype=str``, no NA inference); a missing file is left
+    out."""
+    release = Path(release_dir)
+    out = {}
+    for name in sorted(contract["files"]):
+        p = release / name
+        if p.is_file():
+            out[name[:-4]] = pd.read_csv(p, dtype=str, keep_default_na=False, na_filter=False, encoding="utf-8")
+    return out
+
+
 def producer_context(*, scenario_id: str, policy, source: Mapping[str, pd.DataFrame], master: MasterKey,
                      scope_id: str, recipient: str, contract: Mapping,
                      released: Mapping[str, pd.DataFrame] | None) -> dict:
@@ -102,22 +135,28 @@ def producer_context(*, scenario_id: str, policy, source: Mapping[str, pd.DataFr
         "person": {**spec["person"], "normalise": person_normaliser(spec["person"].get("label", RECORD_KEY))},
         "joins": [dict(j) for j in spec["joins"]],
         "identifiers": [{"table": t, "column": c} for t, c in idents if t in source and c in source[t].columns],
-        # master and manifest-signing key material (bytes; scanned in every encoding by producer.key-material)
-        "keys": [master._k, manifest_signing_key(master)._k],
+        # every key the release could leak, as opaque key objects (producer.key-material scans their forms):
+        # master, manifest-signing and, for a non-default recipient, the derived recipient key (#84)
+        "keys": [master, manifest_signing_key(master),
+                 *([recipient_key(master, recipient)] if recipient != DEFAULT_RECIPIENT else [])],
     }
-    if recipient != DEFAULT_RECIPIENT:  # the recipient-derived token key is key material too
-        ctx["keys"].append(recipient_key(master, recipient)._k)
-    if "k" in contract:
-        ctx["k"] = contract["k"]
+    # the k target is the pinned policy's, never copied from the (self-declared) contract (#62); person-k
+    # errors if the contract's k differs
+    k = k_target(policy)
+    if k is not None:
+        ctx["k"] = k
     if released is not None:
         keys = token_keys(master, scope_id, recipient)
-        rowmaps = {}
-        for stem, df in sorted(released.items()):
-            key_col = spec["record_keys"].get(stem)
-            rm = _rowmap(stem, source[stem], key_col, df, keys, contract) if key_col and stem in source else None
-            if rm is not None:
-                rowmaps[stem] = rm
+        rowmaps = released_rowmaps(scenario_id=scenario_id, source=source, released=released, master=master,
+                                   scope_id=scope_id, recipient=recipient, contract=contract)
         ctx["rowmaps"] = rowmaps
+        # #106 / D33: the detector's QI classification of what is released (values and source columns); person-k
+        # refuses on one missing from contract.qi. Computed from the kit and the released tables, never declared.
+        # round 2: a released column its declared mapping does not reproduce from the source has no trusted source,
+        # so it counts as a QI too (run.provenance)
+        unver = unreproduced(policy=policy, source=source, released=released, contract=contract, rowmaps=rowmaps,
+                             keys=keys, spec=spec)
+        ctx["detected_qi"] = released_qis(source, released, contract, unverified=unver)
     return ctx
 
 
@@ -131,12 +170,7 @@ def verify_context(kit, master: MasterKey, release_dir) -> dict:
     scenario_id = m["release"]["scenario"]
     policy = get_policy(scenario_id)
     source = kit.load_dataset(policy.dataset)
-    released = {}
-    for name in sorted(m["contract"]["files"]):
-        p = release / name
-        if p.is_file():
-            released[name[:-4]] = pd.read_csv(p, dtype=str, keep_default_na=False, na_filter=False,
-                                              encoding="utf-8")
+    released = read_released(release, m["contract"])
     return producer_context(scenario_id=scenario_id, policy=policy, source=source, master=master,
                             scope_id=m["release"]["releaseScopeId"], recipient=m["release"]["recipient"],
                             contract=m["contract"], released=released)

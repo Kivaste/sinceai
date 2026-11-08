@@ -10,7 +10,7 @@ from typing import Any, Protocol
 import pandas as pd
 
 from . import transforms as T
-from .rungs import CONTRACT_FORMS, KNOWN_RUNGS, WITHHELD, LadderError, coarseness
+from .rungs import CONTRACT_FORMS, KNOWN_RUNGS, WITHHELD, LadderError, at_least_as_coarse
 
 
 class KeyMaterial(Protocol):
@@ -40,6 +40,7 @@ _SIMPLE: dict[str, Callable[[pd.Series, dict], pd.Series]] = {
     "num.round": T.num_round,
     "num.bin": T.num_bin,
     "keep": T.identity,
+    "lab.full": T.identity,
 }
 _AGE = {"age.band5": T.age_band5, "age.band10": T.age_band10}
 
@@ -81,8 +82,7 @@ def _validate(plan: list[Mapping[str, Any]], tables: Mapping[str, pd.DataFrame])
         elif rung == WITHHELD:
             ok = True
         else:
-            (rk, rp), (fk, fp) = coarseness(rung), coarseness(floor)
-            ok = rk == fk and rp >= fp
+            ok = at_least_as_coarse(rung, floor)
         if not ok:
             raise LadderError(f"rung {rung!r} is finer than its floor {floor!r} for {key[0]}.{key[1]}")
         by_key[key] = e
@@ -136,6 +136,11 @@ def apply(
                         raise LadderError(f"age ref_column unknown in table {tname}")
                     ref = src[rc]  # original values, not the generalised column
                 res = _AGE[rung](s, params, ref)
+            elif rung == "lab.crp_other":
+                rc = params.get("ref_column", T.LAB_REF_COLUMN)
+                if not isinstance(rc, str) or rc not in src.columns:
+                    raise LadderError(f"lab.crp_other ref_column unknown in table {tname}")
+                res = T.lab_crp_other(s, params, src[rc])  # original codes, not the generalised column
             elif rung == "id.pseudonym":
                 label = params.get("label", "RECORD_KEY")
                 res = s.map(lambda v, label=label: v if _null(v) or v == "" else _token(keys, str(v), label))
@@ -158,4 +163,4 @@ def apply(
     return out
 
 
-assert set(_SIMPLE) | set(_AGE) | {"id.pseudonym", "text.redacted"} == set(CONTRACT_FORMS)
+assert set(_SIMPLE) | set(_AGE) | {"id.pseudonym", "text.redacted", "lab.crp_other"} == set(CONTRACT_FORMS)

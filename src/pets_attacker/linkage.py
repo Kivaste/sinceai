@@ -195,6 +195,8 @@ def _age_interval(s: pd.Series, rung: str):
             if not re.fullmatch(form, raw):
                 raise RungError("cell does not fit its declared rung")
             cache[raw] = _age_one(raw, rung)
+            if cache[raw][1] <= 0.0 or cache[raw][0] > AGE_MAX:  # wholly outside [0, AGE_MAX], as for adversary ages
+                raise RungError("protected age value outside a plausible age range")
         lo[i], hi[i] = cache[raw]
     return lo, hi
 
@@ -234,6 +236,8 @@ def _hod_keys(col: pd.Series) -> np.ndarray:
     out = np.full(len(col), -1, dtype=np.int64)
     for i, raw in enumerate(col.fillna("").astype(str).str.strip().tolist()):
         if raw:
+            if not re.fullmatch(_TIME_FORMS["ts.hour_of_day"], raw):
+                raise RungError("cell does not fit its declared rung")
             out[i] = int(raw[:2])
     return out
 
@@ -306,14 +310,25 @@ class Matcher:
         return mask | ~has
 
     def candidates(self, row: dict):
+        """Rows compatible with every QI the record states (hard filter), and how many informative QIs it used."""
         mask = np.ones(self.n, bool)
         used = 0
+        for i, m in self.qi_masks(row):
+            mask &= m
+            if self.inf[i]:
+                used += 1
+        return np.flatnonzero(mask), used
+
+    def qi_masks(self, row: dict) -> list:
+        """``[(QI index, compatible-rows mask)]`` for each QI the record states a value for (#139: the red team
+        scores these separately instead of intersecting them)."""
+        out = []
         for i, q in enumerate(self.qis):
             if q.kind == "name":
                 m = self._name_mask(i, " ".join(str(row.get(c, "")) for c in q.adv if not _blank(row.get(c))))
                 if m is None:
                     continue
-                mask &= m
+                mask = m
             elif q.kind in ("exact", "sex"):
                 v = row.get(q.adv[0])
                 a = _norm(v) if q.kind == "exact" else ("" if _blank(v) else _SEX.get(str(v).strip().lower(), ""))
@@ -326,13 +341,13 @@ class Matcher:
                         ok |= (vals == "other") & (a not in known)
                 else:
                     ok = (self.d[i] == a) | (self.d[i] == "")
-                mask &= ok
+                mask = ok
             elif q.kind == "postcode":
                 v = row.get(q.adv[0])
                 a = re.sub(r"\D", "", "" if _blank(v) else str(v))
                 if not a:
                     continue
-                mask &= np.fromiter((p == "" or a.startswith(p) or p.startswith(a) for p in self.d[i]), bool, self.n)
+                mask = np.fromiter((p == "" or a.startswith(p) or p.startswith(a) for p in self.d[i]), bool, self.n)
             elif q.kind == "age":
                 v = next((row.get(c) for c in q.adv if not _blank(row.get(c))), None)
                 if v is None:
@@ -345,7 +360,7 @@ class Matcher:
                     raise RungError("adversary age value outside a plausible age range")
                 tol = 1.0 if q.tol is None else q.tol
                 lo, hi = self.d[i]
-                mask &= (lo < a + 1 + tol) & (hi > a - tol)
+                mask = (lo < a + 1 + tol) & (hi > a - tol)
             elif q.kind == "time":
                 parts = [str(row.get(c)).strip() for c in q.adv if not _blank(row.get(c))]
                 if not parts:
@@ -373,10 +388,9 @@ class Matcher:
                 if is_hod.any():  # hour of day only, any date; blank cells stay compatible
                     hrs = pd.date_range(pd.Timestamp(a0).floor("h"), pd.Timestamp(a1), freq="h").hour
                     ok[is_hod] = np.isin(hod[is_hod], np.unique(hrs))
-                mask &= ok
-            if self.inf[i]:
-                used += 1
-        return np.flatnonzero(mask), used
+                mask = ok
+            out.append((i, mask))
+        return out
 
 
 

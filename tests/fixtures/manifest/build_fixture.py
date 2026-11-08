@@ -21,6 +21,8 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parents[2] / "src"))
 
+from pets_release.checks.text import LEXICON_NAME, lexicon_digest  # #132: text columns bind it
+from pets_release.ladders import CONTRACT_FORMS  # #109: every released column carries its rung's form
 from pets_release.manifest import (
     MANIFEST_FILENAME,
     canonical_bytes,
@@ -141,8 +143,12 @@ EXTRA_GATE = [
     _ev("release.token-hex64", "release", "cells", 130),
     _ev("producer.row-k", "release", "rows", 10),
     _ev("producer.original-values", "producer", "cells", 130),
+    _ev("text.health", "release", "turns", 60),  # #132: 6 text-form columns x 10 rows
 ]
 
+# Rungs whose contract form is hex64 (id.pseudonym) or decimal (num.round) may declare a narrower regex the manifest
+# validator lists as proven; text-backed rungs (keep, geo.topn) carry exactly ``text`` (#132), and regex-form rungs
+# (timestamp, age, icd) exactly their rung's form (#109).
 SHA = "^[0-9a-f]{64}$"
 
 
@@ -153,24 +159,24 @@ def contract() -> dict:
             "ed_visits.csv": {
                 "required": ["age_band", "arrival_ts", "visit_id"],
                 "columns": {
-                    "age_band": {"form": "^([0-9]{1,2}-[0-9]{1,2}|90\\+)$", "params": {"bandYears": 5}},
-                    "arrival_ts": {"form": "^[0-9]{4}-[0-9]{2}-01T[0-9]{2}:00$", "params": {"rung": "month_hour"}},
-                    "icd10_primary": {"form": "^[A-Z][0-9]{2}$", "params": {}},
-                    "municipality": {"form": "^(Municipality-[A-Z]|other)$", "params": {"topN": 8}},
-                    "readmit_30d": {"form": "^[01]$", "params": {}},
-                    "sex": {"form": "^[FMX]$", "params": {}},
-                    "triage": {"form": "^[1-5]$", "params": {}},
-                    "visit_id": {"form": SHA, "params": {}},
+                    "age_band": {"form": CONTRACT_FORMS["age.band5"], "params": {"bandYears": 5, "rung": "age.band5"}},
+                    "arrival_ts": {"form": CONTRACT_FORMS["ts.month_hour"], "params": {"rung": "ts.month_hour"}},
+                    "icd10_primary": {"form": CONTRACT_FORMS["icd.3"], "params": {"rung": "icd.3"}},
+                    "municipality": {"form": "text", "params": {"rung": "geo.topn", "topN": 8}},
+                    "readmit_30d": {"form": "text", "params": {"rung": "keep"}},
+                    "sex": {"form": "text", "params": {"rung": "keep"}},
+                    "triage": {"form": "text", "params": {"rung": "keep"}},
+                    "visit_id": {"form": SHA, "params": {"rung": "id.pseudonym"}},
                 },
             },
             "lab_results.csv": {
                 "required": ["visit_id"],
                 "columns": {
-                    "lab_id": {"form": SHA, "params": {}},
-                    "test_code": {"form": "^[A-Z]{2,8}$", "params": {}},
-                    "unit": {"form": "^[A-Za-z/]{1,8}$", "params": {}},
-                    "value": {"form": "^[0-9]+$", "params": {"roundTo": 1}},
-                    "visit_id": {"form": SHA, "params": {}},
+                    "lab_id": {"form": SHA, "params": {"rung": "id.pseudonym"}},
+                    "test_code": {"form": "text", "params": {"rung": "keep"}},
+                    "unit": {"form": "text", "params": {"rung": "keep"}},
+                    "value": {"form": "^[0-9]+$", "params": {"roundTo": 1, "rung": "num.round"}},
+                    "visit_id": {"form": SHA, "params": {"rung": "id.pseudonym"}},
                 },
             },
         },
@@ -191,6 +197,11 @@ def contract() -> dict:
 def _inv(table: str, column: str, role: str, subtype: str, evidence: str) -> dict:
     return {"dataset": "health", "table": table, "column": column, "role": role, "subtype": subtype,
             "evidence": [evidence]}
+
+
+def _k_summary() -> dict:
+    # two classes of five persons (invented counts, consistent with tables())
+    return {"persons": 10, "unidentifiedUnits": 0, "minK": 5, "medianK": 5, "belowK": 0, "belowKShare": 0.0}
 
 
 def _fj(table, column, output, rung, floor, reason) -> dict:
@@ -221,7 +232,7 @@ def manifest(files: dict[str, bytes]) -> dict:
             "inputs": dict(INPUTS),
             "toolRevision": TOOL_REVISION,
             "checkVersions": {c["check"]: c["version"] for c in gate_checks},
-            "lexiconDigests": {},
+            "lexiconDigests": {LEXICON_NAME: lexicon_digest()},
             "contractDigest": canonical_digest(con),
         },
         "inventory": sorted([
@@ -249,20 +260,20 @@ def manifest(files: dict[str, bytes]) -> dict:
         ],
         "fieldJustifications": [
             _fj("clinical_notes", "note_text", None, "withheld", "withheld", "no purpose check needs it"),
-            _fj("ed_visits", "arrival_ts", "arrival_ts", "month_hour", "exact", "H-U8 needs hour of day"),
-            _fj("ed_visits", "date_of_birth", "age_band", "age_band_5y", "age_band_5y", "H-U6; quasi-identifier"),
-            _fj("ed_visits", "icd10_primary", "icd10_primary", "icd10_3char", "full", "H-U4, H-U7"),
-            _fj("ed_visits", "municipality", "municipality", "top_n", "full", "H-U4; quasi-identifier"),
+            _fj("ed_visits", "arrival_ts", "arrival_ts", "ts.month_hour", "ts.exact", "H-U8 needs hour of day"),
+            _fj("ed_visits", "date_of_birth", "age_band", "age.band5", "age.band5", "H-U6; quasi-identifier"),
+            _fj("ed_visits", "icd10_primary", "icd10_primary", "icd.3", "icd.full", "H-U4, H-U7"),
+            _fj("ed_visits", "municipality", "municipality", "geo.topn", "geo.full", "H-U4; quasi-identifier"),
             _fj("ed_visits", "patient_name", None, "withheld", "withheld", "direct identifier"),
-            _fj("ed_visits", "readmit_30d", "readmit_30d", "exact", "exact", "H-U6"),
-            _fj("ed_visits", "sex", "sex", "exact", "exact", "quasi-identifier; search keeps it"),
-            _fj("ed_visits", "triage", "triage", "exact", "exact", "H-U2"),
-            _fj("ed_visits", "visit_id", "visit_id", "pseudonym", "pseudonym", "H-U7 join"),
-            _fj("lab_results", "lab_id", "lab_id", "pseudonym", "pseudonym", "record key"),
-            _fj("lab_results", "test_code", "test_code", "exact", "exact", "H-U7"),
-            _fj("lab_results", "unit", "unit", "exact", "exact", "H-U7"),
-            _fj("lab_results", "value", "value", "rounded", "exact", "H-U7"),
-            _fj("lab_results", "visit_id", "visit_id", "pseudonym", "pseudonym", "H-U7 join"),
+            _fj("ed_visits", "readmit_30d", "readmit_30d", "keep", "keep", "H-U6"),
+            _fj("ed_visits", "sex", "sex", "keep", "keep", "quasi-identifier; search keeps it"),
+            _fj("ed_visits", "triage", "triage", "keep", "keep", "H-U2"),
+            _fj("ed_visits", "visit_id", "visit_id", "id.pseudonym", "id.pseudonym", "H-U7 join"),
+            _fj("lab_results", "lab_id", "lab_id", "id.pseudonym", "id.pseudonym", "record key"),
+            _fj("lab_results", "test_code", "test_code", "keep", "keep", "H-U7"),
+            _fj("lab_results", "unit", "unit", "keep", "keep", "H-U7"),
+            _fj("lab_results", "value", "value", "num.round", "num.exact", "H-U7"),
+            _fj("lab_results", "visit_id", "visit_id", "id.pseudonym", "id.pseudonym", "H-U7 join"),
         ],
         "contract": con,
         "exportAssertions": {name: False for name in EVIDENCE},
@@ -290,6 +301,10 @@ def manifest(files: dict[str, bytes]) -> dict:
                 {"baseline": "B2-k", "metric": "worst_reid", "value": 0.1},
             ]},
             "redaction": not_measured("no free text released"),
+            "kSets": {"status": "measured", "source": "fixture", "k": 5, "sets": [
+                {"set": name, "status": "measured", "qi": contract()["qi"],
+                 "beforeSuppression": _k_summary(), "released": _k_summary()}
+                for name in ("scenario", "keptCatalogued")], "withheld": []},
         },
         "sacrifices": [],
         "residualRisks": [
