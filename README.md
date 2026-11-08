@@ -7,6 +7,14 @@ Team project for the **TrustED PETs Transformer** challenge at Since AI Hackatho
 
 `pets-release` is an offline, deterministic command-line tool. Give it a sharing scenario and the source data. It builds a protected release, runs a fail-closed gate over it, and writes a signed privacy manifest. Anyone holding the release can re-run the release-derivable checks. Terms follow [GLOSSARY.md](GLOSSARY.md).
 
+Final HEALTH-S1 proof: **c52424c**, merged to main as **cc66ac2**. The gate ran
+**42 checks: 42 pass, 0 not applicable**; release, limited verification and full
+verification all exited 0. Kit privacy is 0.1716 → 1.0; mean utility over five
+tasks is 1.0 → 0.9188. These are scoped measurements, not anonymity guarantees:
+with diagnosis additionally known, 73.6% of persons are below k=5. See the
+[final numbers and limitations](docs/story/06-numbers-to-fill.md) and
+[recorded proof sources](docs/story/PRE-FILL-SOURCES.md).
+
 ## Quick start (Windows, PowerShell)
 
 Requirements: Python 3.10 or newer on `PATH` as `python` (the project uses 3.14), and the challenge kit. The kit is never committed: it lives in `Briefs/` (gitignored) or wherever you unpacked it.
@@ -35,6 +43,8 @@ Settings come from the environment. Nothing is read from a file, and nothing is 
 <!-- docs-test: skip reason=sets-secret-placeholder-only -->
 ```powershell
 $env:PYTHONUTF8 = "1"
+$env:TZ = "UTC"
+$env:PYTHONPYCACHEPREFIX = "$env:LOCALAPPDATA\sinceai-pycache"
 $env:PETS_KIT = "<path to the kit root>"
 $env:PETS_HMAC_KEY = "<at least 32 characters, from your own secret store>"
 $env:SOURCE_DATE_EPOCH = "1793000000"
@@ -307,6 +317,9 @@ The seven sections cover purpose, legal basis/DPIA, methods, measured risk, util
 verbatim residual risks and reproducibility. Missing measurements stay **not measured**;
 legal basis and DPIA are **To be supplied by the data controller**. This is technical
 evidence, not a permit or a DPIA. It never reads tables and does not replace `verify`.
+The exporter is shipped (#147); an existing real-kit pack is linked in the
+[source ledger](docs/story/PRE-FILL-SOURCES.md). That earlier feature artefact is
+not a new export from the c52424c proof run.
 The example needs the signed measured release built above; its ledger skip is not a pass.
 
 <!-- docs-test: skip reason=evidence-pack-needs-signed-measured-release-and-controller-key -->
@@ -341,14 +354,14 @@ Human-run submission wizards (Git Bash on Windows): [Saturday private handoff](s
 ## Reproducibility
 
 - Same input, key, `--created` (or `SOURCE_DATE_EPOCH`) and tool versions give a byte-identical release. Rows and lists are sorted; the only time value is the creation time.
-- Run Python with `PYTHONUTF8=1`, `PYTHONDONTWRITEBYTECODE=1` and `TZ=UTC`.
+- Run Python with `PYTHONUTF8=1` and `TZ=UTC`; keep bytecode outside the tree with `PYTHONPYCACHEPREFIX=%LOCALAPPDATA%\sinceai-pycache` (D30). Do not disable bytecode on the top-level test command.
 - The tool blocks network sockets at start-up, and subprocesses inherit the block.
 - Every CSV is read with `dtype=str`. Never let pandas infer types.
-- Running the tests:
+- Implementers run only affected tests: `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/overnight/affected-tests.ps1 -Worktree <your worktree> -Run` (D27; process-only policy override, no persistent setting change). Full-suite integration check, for the merger only:
 
 <!-- docs-test: skip reason=runs-the-whole-test-suite-recursively -->
 ```powershell
-$env:PYTHONUTF8 = "1"; $env:PYTHONDONTWRITEBYTECODE = "1"; $env:TZ = "UTC"
+$env:PYTHONUTF8 = "1"; $env:TZ = "UTC"; $env:PYTHONPYCACHEPREFIX = "$env:LOCALAPPDATA\sinceai-pycache"
 .\.venv\Scripts\python.exe -m pytest -n auto --import-mode=importlib tests
 ```
 

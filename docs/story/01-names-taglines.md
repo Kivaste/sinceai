@@ -1,8 +1,8 @@
-# Name, tagline and built-with draft
+# Name, tagline and built-with
 
-**PRE-FILL at df79ec20538e8f02b3256911fb01d549e5af0ebb** (#103, D61).
-Not final submission text. Refresh the numbers from the post-freeze manifest;
-final readiness still requires review and fresh proof on that exact revision.
+**FINAL at c52424c (merged to main cc66ac2)**.
+Measurements refer to the final integration release, not this later docs commit.
+Submission packaging and independent review remain separate from measurement.
 See `06-numbers-to-fill.md` and `PRE-FILL-SOURCES.md`.
 
 Recommended name (limit 80 characters):
@@ -15,8 +15,8 @@ Recommended tagline (limit 140 characters):
 
 Recommended first five built-with chips: Python, pandas, NumPy, jsonschema, Jinja2.
 Evaluation uses pets-eval and scikit-learn; HMAC-SHA256 uses the standard library.
-Optional request-only policy drafting is not the release engine. Do not list a
-model provider as a shipped dependency without its own integration proof.
+The optional Mistral front end drafts validated policies for human review; it is
+not the release engine. Feeding those drafts into the search remains future work.
 
 ## Product positioning (D57)
 
