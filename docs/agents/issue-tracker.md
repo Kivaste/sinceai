@@ -1,6 +1,6 @@
 # Issue tracker: GitHub
 
-Issues and specs for this repo live as GitHub issues in **[Kivaste/sinceai](https://github.com/Kivaste/sinceai)** (private). Use the `gh` CLI for all operations.
+Issues and specs for this repo live as GitHub issues in **[Kivaste/sinceai](https://github.com/Suhtetark-Kool/sinceai)** (private). Use the `gh` CLI for all operations.
 
 ## Conventions
 

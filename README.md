@@ -101,7 +101,7 @@ jobs:
 
 The example is **verified locally with the same commands** on the real kit;
 exit codes, elapsed times and revision-bound artefacts are recorded in issue
-[#145](https://github.com/Kivaste/sinceai/issues/145). The named skip keeps this
+[#145](https://github.com/Suhtetark-Kool/sinceai/issues/145). The named skip keeps this
 long, secret-dependent run out of the synthetic README command tests.
 
 The `run` exit-code contract is **0 = released**, **1 = refused or a check failed**,
